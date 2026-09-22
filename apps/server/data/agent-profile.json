@@ -1,0 +1,26 @@
+{
+  "_comment": "Our UCP agent profile. Shopify fetches this on every catalog call to see what our agent supports. Two rules learned the hard way: payment_handlers must be present even when empty ('Missing payment handlers' otherwise), and the response must be cacheable - a VS Code dev tunnel injects no-store, which fails with 'Invalid cache control', which is why this is published to the Shopify CDN rather than served through the tunnel. See scripts/publishAgentProfile.mjs.",
+  "ucp": {
+    "version": "2026-08-25",
+    "services": {
+      "dev.ucp.shopping": [
+        {
+          "version": "2026-08-25",
+          "spec": "https://ucp.dev/2026-08-25/specification/overview",
+          "transport": "mcp",
+          "schema": "https://ucp.dev/2026-08-25/services/shopping/mcp.openrpc.json"
+        }
+      ]
+    },
+    "capabilities": {
+      "dev.ucp.shopping.catalog.search": [{ "version": "2026-08-25" }],
+      "dev.ucp.shopping.catalog.lookup": [{ "version": "2026-08-25" }],
+      "dev.ucp.shopping.cart": [{ "version": "2026-08-25" }]
+    },
+    "payment_handlers": {}
+  },
+  "agent": {
+    "name": "Druids Personal Caddie",
+    "description": "Shopping assistant for the Druids store: size, pack and outfit recommendations."
+  }
+}

@@ -9,7 +9,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "sync:assistant": "tsx scripts/syncAssistant.ts"
+    "sync:assistant": "tsx scripts/syncAssistant.ts",
+    "publish:profile": "node scripts/publishAgentProfile.mjs"
   },
   "dependencies": {
     "@caddie/shared": "*",

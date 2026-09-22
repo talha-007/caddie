@@ -93,3 +93,31 @@ assuming something is broken.
 `read_locations`, `write_publications` or `read_markets`, so setting real
 inventory quantities, publishing over GraphQL and configuring Markets all have
 to happen in the admin UI.
+
+## The UCP agent profile
+
+Shopify fetches our agent profile on **every** catalog call, and it is fussy
+about it. Two rejections we hit, and what they mean:
+
+| Error | Cause |
+| --- | --- |
+| `profile_unreachable` | The URL is not publicly reachable. localhost never works. |
+| `profile_malformed: Invalid cache control` | The response was not cacheable. A **VS Code dev tunnel injects `Cache-Control: no-cache, no-store`** on the way out, which fails even though our own server sets a valid header. |
+| `profile_malformed: Missing payment handlers` | `payment_handlers` was absent. It has to be present even when empty. |
+
+The profile is static - it says nothing about where our server lives - so in
+dev we publish it to the Shopify CDN, which serves it with a year-long
+max-age, and skip the tunnel entirely:
+
+```bash
+npm run publish:profile --workspace=@caddie/server
+```
+
+That prints a `UCP_AGENT_PROFILE_URL=` line for `.env`. Re-run it after editing
+`data/agent-profile.json`.
+
+In production, leave `UCP_AGENT_PROFILE_URL` empty and let `CADDIE_PUBLIC_URL`
+point at the deployed server's `/ucp/agent-profile.json`, which sets its own
+cache headers.
+
+`GET /health` reports which profile is in use and whether it is ours.
