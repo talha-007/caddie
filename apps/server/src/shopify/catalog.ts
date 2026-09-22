@@ -1,5 +1,6 @@
 import type { Cart, CartLine, Product, ProductOption, ProductVariant } from '@caddie/shared';
 import { env } from '../env.js';
+import { cached, CATALOG_TTL_MS, clearCatalogCache } from './cache.js';
 import { addMoney, readMoney, storeCurrency, toMinorUnits } from './money.js';
 import { buyerContext, callUcpTool } from './ucpClient.js';
 
@@ -144,7 +145,7 @@ export async function searchProducts(opts: SearchOptions): Promise<Product[]> {
   };
 
   const wanted = opts.limit ?? 10;
-  const payload = await callUcpTool<SearchPayload>('search_catalog', {
+  const request = {
     catalog: {
       query: opts.query,
       context: buyerContext(),
@@ -152,7 +153,14 @@ export async function searchProducts(opts: SearchOptions): Promise<Product[]> {
       // Over-fetch so the brand filter does not leave us short.
       pagination: { limit: env.shopify.brandTag ? Math.min(wanted * 3, 50) : wanted },
     },
-  });
+  };
+
+  // Identical searches inside a minute are served from memory. An outfit fires
+  // one per slot and "cheaper" runs them all again; Shopify's rate limit is
+  // measured in hours, so this is what keeps us under it.
+  const payload = await cached(`search:${JSON.stringify(request)}`, CATALOG_TTL_MS, () =>
+    callUcpTool<SearchPayload>('search_catalog', request),
+  );
 
   const products = (payload.products ?? []).map(toProduct).filter((product) => product.id);
   return products.filter(isBrandProduct).slice(0, wanted);
@@ -162,7 +170,7 @@ export async function getProductDetails(
   productId: string,
   selected?: Record<string, string>,
 ): Promise<Product | null> {
-  const payload = await callUcpTool<Record<string, unknown>>('get_product', {
+  const request = {
     catalog: {
       id: productId,
       context: buyerContext(),
@@ -170,7 +178,11 @@ export async function getProductDetails(
         ? { selected: Object.entries(selected).map(([name, label]) => ({ name, label })) }
         : {}),
     },
-  });
+  };
+
+  const payload = await cached(`product:${JSON.stringify(request)}`, CATALOG_TTL_MS, () =>
+    callUcpTool<Record<string, unknown>>('get_product', request),
+  );
 
   const raw = (payload.product ?? payload) as Record<string, unknown>;
   if (!raw?.id) return null;
@@ -180,9 +192,10 @@ export async function getProductDetails(
 /** Resolves several product or variant ids in one call. */
 export async function lookupProducts(ids: string[]): Promise<Product[]> {
   if (ids.length === 0) return [];
-  const payload = await callUcpTool<SearchPayload>('lookup_catalog', {
-    catalog: { ids: ids.slice(0, 10), context: buyerContext() },
-  });
+  const request = { catalog: { ids: ids.slice(0, 10), context: buyerContext() } };
+  const payload = await cached(`lookup:${JSON.stringify(request)}`, CATALOG_TTL_MS, () =>
+    callUcpTool<SearchPayload>('lookup_catalog', request),
+  );
   return (payload.products ?? []).map(toProduct).filter((product) => product.id);
 }
 
@@ -274,6 +287,8 @@ export async function createCart(lines: CartLineInput[]): Promise<Cart> {
  * calling this directly. Quantity 0 removes a line.
  */
 async function replaceCartLines(cartId: string, lines: CartLineInput[]): Promise<Cart> {
+  // Buying something can take the last one, so cached availability is stale.
+  clearCatalogCache();
   const payload = await callUcpTool<UcpCart>('update_cart', {
     id: cartId,
     cart: {

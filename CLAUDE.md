@@ -90,6 +90,24 @@ Druids products and 25 generic demo items. Details, and the deliberate
 out-of-stock variant that exists so the unhappy path can be tested, are in
 [docs/STORE.md](docs/STORE.md).
 
+## Shopify's rate limit
+
+The UCP catalogue endpoint is throttled hard, and tripping it is expensive:
+the reply is `Too many requests, please retry after 3253 seconds` - the best
+part of an hour with no catalogue at all. A retry does not help.
+
+Reads are what burn the quota. One outfit fires a search per slot, and a
+customer saying "cheaper" runs them all again, so `src/shopify/cache.ts` serves
+identical catalogue reads from memory for 60 seconds. Carts are never cached;
+a basket has to be live, and a cart change clears the catalogue cache because
+buying the last one moves stock.
+
+Once refused, `ucpClient.ts` stops asking until the window passes and says so
+plainly rather than failing eight times in a row.
+
+**Heavy testing will hit this.** If the Caddie suddenly cannot find anything,
+check the log for `shopify.ucp.locked_out` before assuming the code broke.
+
 ## Cost
 
 About $3.20-$3.90 per thousand conversations on `gpt-4.1-mini`, plus $0.003 a

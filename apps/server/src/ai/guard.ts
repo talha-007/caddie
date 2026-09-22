@@ -27,6 +27,18 @@ const DECLINE = 'I only help with Druids kit, I am afraid. Can I help you find s
 const MAX_LENGTH = 600;
 
 /**
+ * Shopping vocabulary. A message containing any of it is a customer talking
+ * about kit, and skips the classifier entirely - free, and no latency added
+ * to the common case.
+ *
+ * Length was tried as the signal first and is a bad one: "write me an essay"
+ * is seventeen characters. What someone is talking about separates them, not
+ * how much they type.
+ */
+const SHOP_WORDS =
+  /\b(polo|shirt|tee|hoodie|midlayer|mid-layer|gilet|jacket|short|trouser|jogger|chino|sock|beanie|cap|hat|belt|bag|kit|outfit|pack|bundle|wear|fit|fits|size|sizes|sizing|small|medium|large|xl|chest|waist|hip|height|weight|colou?r|navy|black|white|grey|gray|green|blue|red|sage|pink|price|cost|cheap|cheaper|budget|spend|£|\$|stock|available|basket|cart|checkout|buy|order|deliver|return|refund|golf|course|round|tee time|druids|mens?|womens?|ladies)\b/i;
+
+/**
  * Obvious cases, settled without a model call.
  *
  * Short replies are the reason this list exists: "cheaper", "yes", "the navy
@@ -74,12 +86,17 @@ export async function screen(text: string, hasHistory: boolean): Promise<Verdict
     return { allow: true };
   }
 
+  // Talking about kit: a customer, and free to let through.
+  if (SHOP_WORDS.test(trimmed)) return { allow: true };
+
   /*
-   * Mid-conversation, a customer has already proved they are one, and the
-   * things they say get shorter and more elliptical - exactly what a
-   * classifier reads badly. Only the local rules above apply from here.
+   * Mid-conversation, with no shopping word in it. Short means an elliptical
+   * follow-up - "that one", "go on" - which a classifier reads badly, so it
+   * gets the benefit of the doubt. Anything longer is a fresh request and
+   * worth the fraction of a penny to check, because otherwise "hi" followed
+   * by an essay request is the obvious way round this gate.
    */
-  if (hasHistory) return { allow: true };
+  if (hasHistory && trimmed.length <= 25) return { allow: true };
 
   if (!env.openai.apiKey) return { allow: true };
 

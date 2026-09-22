@@ -80,7 +80,10 @@ const CASES = [
     id: 'add-needs-size',
     why: 'Must not pick a size for the customer',
     turns: ['show me the tour short in navy', 'add it to my basket'],
-    check: (text) => /(which|what size|size would|waist)/i.test(text) || /basket/i.test(text),
+    // Any way of asking for the size counts; only picking one for them fails.
+    check: (text) =>
+      /(which|what size|size would|your size|tell me your|measurement|waist)/i.test(text) ||
+      /(added|in your basket)/i.test(text),
   },
 ];
 
