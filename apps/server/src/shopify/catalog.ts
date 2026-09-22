@@ -1,77 +1,102 @@
-import type { Cart, CartLine, Money, Product, ProductVariant } from '@caddie/shared';
-import { callShopifyTool } from './mcpClient.js';
+import type { Cart, CartLine, Product, ProductOption, ProductVariant } from '@caddie/shared';
+import { addMoney, readMoney, storeCurrency, toMinorUnits } from './money.js';
+import { buyerContext, callUcpTool } from './ucpClient.js';
 
 /**
- * Normalisers between the MCP payloads and our own types.
+ * Normalisers between the UCP payloads and our own types.
  *
- * The MCP payload shape shifts a little between stores and versions, so we
- * read defensively and drop anything we cannot verify rather than invent it.
+ * Shapes are read defensively: anything we cannot verify is dropped rather
+ * than guessed at.
  */
 
-const DEFAULT_CURRENCY = 'GBP';
+const DEFAULT_CURRENCY = storeCurrency();
 
-function toMoney(raw: unknown, fallbackCurrency = DEFAULT_CURRENCY): Money {
-  if (raw && typeof raw === 'object') {
-    const obj = raw as Record<string, unknown>;
-    const nested = obj.min_variant_price ?? obj.minVariantPrice ?? null;
-    if (nested) return toMoney(nested, fallbackCurrency);
-    const amount = Number(obj.amount ?? obj.price ?? 0);
-    const currency = String(obj.currency_code ?? obj.currencyCode ?? obj.currency ?? fallbackCurrency);
-    return { amount: Number.isFinite(amount) ? amount : 0, currency };
-  }
-  const amount = Number(raw ?? 0);
-  return { amount: Number.isFinite(amount) ? amount : 0, currency: fallbackCurrency };
+interface UcpText {
+  html?: string;
 }
 
-function firstString(...values: unknown[]): string | null {
-  for (const v of values) {
-    if (typeof v === 'string' && v.trim()) return v;
-  }
-  return null;
+interface UcpMedia {
+  type?: string;
+  url?: string;
 }
 
-function toVariant(raw: Record<string, unknown>): ProductVariant {
+function stripHtml(value: unknown): string | null {
+  const html = (value as UcpText | undefined)?.html ?? (typeof value === 'string' ? value : null);
+  if (!html) return null;
+  const text = html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text || null;
+}
+
+function firstImage(media: unknown): string | null {
+  if (!Array.isArray(media)) return null;
+  const image = (media as UcpMedia[]).find((item) => item.type === 'image' && item.url);
+  return image?.url ?? null;
+}
+
+function toVariant(raw: Record<string, unknown>, fallbackCurrency: string): ProductVariant {
   const options: Record<string, string> = {};
-  const rawOptions = raw.options ?? raw.selected_options ?? raw.selectedOptions;
-
-  if (Array.isArray(rawOptions)) {
-    for (const entry of rawOptions as Array<Record<string, unknown>>) {
-      const key = firstString(entry.name, entry.key);
-      const value = firstString(entry.value);
-      if (key && value) options[key] = value;
-    }
-  } else if (rawOptions && typeof rawOptions === 'object') {
-    for (const [key, value] of Object.entries(rawOptions as Record<string, unknown>)) {
-      if (typeof value === 'string') options[key] = value;
+  if (Array.isArray(raw.options)) {
+    for (const option of raw.options as Array<Record<string, unknown>>) {
+      const name = typeof option.name === 'string' ? option.name : null;
+      const label = typeof option.label === 'string' ? option.label : null;
+      if (name && label) options[name] = label;
     }
   }
+
+  const availability = raw.availability as { available?: boolean } | undefined;
 
   return {
-    id: String(raw.variant_id ?? raw.id ?? ''),
-    title: firstString(raw.title, raw.name) ?? '',
-    available: Boolean(raw.available ?? raw.availableForSale ?? raw.available_for_sale ?? true),
-    price: toMoney(raw.price ?? raw.priceV2),
+    id: String(raw.id ?? ''),
+    title: typeof raw.title === 'string' ? raw.title : '',
+    available: availability?.available ?? false,
+    price: readMoney(raw.price, fallbackCurrency),
     options,
   };
 }
 
 export function toProduct(raw: Record<string, unknown>): Product {
-  const variants = Array.isArray(raw.variants)
-    ? (raw.variants as Array<Record<string, unknown>>).map(toVariant)
+  const priceRange = raw.price_range as { min?: { amount?: number; currency?: string } } | undefined;
+  const currency = priceRange?.min?.currency ?? DEFAULT_CURRENCY;
+
+  const rawVariants = Array.isArray(raw.variants) ? (raw.variants as Array<Record<string, unknown>>) : [];
+  const variants = rawVariants.map((variant) => toVariant(variant, currency));
+
+  // Products carry their own media; variants carry theirs. Fall back to the
+  // first variant so a card is never imageless when an image does exist.
+  const image = firstImage(raw.media) ?? firstImage(rawVariants[0]?.media);
+
+  // UCP has no product_type; the first collection is the closest thing.
+  const collections = Array.isArray(raw.collections) ? (raw.collections as Array<Record<string, unknown>>) : [];
+  const collectionTitle = typeof collections[0]?.title === 'string' ? (collections[0].title as string) : null;
+
+  const options: ProductOption[] = Array.isArray(raw.options)
+    ? (raw.options as Array<Record<string, unknown>>)
+        .map((option) => ({
+          name: typeof option.name === 'string' ? option.name : '',
+          values: Array.isArray(option.values)
+            ? (option.values as Array<Record<string, unknown>>)
+                .map((value) => (typeof value.label === 'string' ? value.label : ''))
+                .filter(Boolean)
+            : [],
+        }))
+        .filter((option) => option.name && option.values.length)
     : [];
-  const image = raw.image && typeof raw.image === 'object' ? (raw.image as Record<string, unknown>) : null;
 
   return {
-    id: String(raw.product_id ?? raw.id ?? ''),
-    title: firstString(raw.title, raw.name) ?? 'Untitled product',
-    url: firstString(raw.url, raw.online_store_url, raw.onlineStoreUrl) ?? '',
-    imageUrl: firstString(raw.image_url, raw.imageUrl, image?.url),
-    vendor: firstString(raw.vendor),
-    productType: firstString(raw.product_type, raw.productType),
+    id: String(raw.id ?? ''),
+    title: typeof raw.title === 'string' ? raw.title : 'Untitled product',
+    url: typeof raw.url === 'string' ? raw.url : '',
+    imageUrl: image,
+    vendor: typeof raw.vendor === 'string' ? raw.vendor : null,
+    productType: collectionTitle,
     tags: Array.isArray(raw.tags) ? (raw.tags as unknown[]).map(String) : [],
-    price: toMoney(raw.price ?? raw.price_range ?? raw.priceRange ?? variants[0]?.price),
+    price: readMoney(priceRange?.min, currency),
+    options,
     variants,
-    description: firstString(raw.description, raw.body_html),
+    description: stripHtml(raw.description),
   };
 }
 
@@ -79,107 +104,197 @@ export function toProduct(raw: Record<string, unknown>): Product {
 
 export interface SearchOptions {
   query: string;
-  /** Why we are searching. The MCP server uses it to bias results. */
-  context?: string;
   limit?: number;
-  minPrice?: number;
+  /** Major units, as a customer would say it. Converted here. */
   maxPrice?: number;
+  minPrice?: number;
+  currency?: string;
+  /** Default true - only things that can actually be bought. */
+  available?: boolean;
+}
+
+interface SearchPayload {
+  products?: Array<Record<string, unknown>>;
+  pagination?: { has_next_page?: boolean; cursor?: string };
 }
 
 export async function searchProducts(opts: SearchOptions): Promise<Product[]> {
-  const payload = await callShopifyTool<Record<string, unknown>>('search_shop_catalog', {
-    query: opts.query,
-    context: opts.context ?? 'Druids Personal Caddie helping a customer choose kit',
-    limit: opts.limit ?? 10,
-    ...(opts.minPrice !== undefined ? { min_price: opts.minPrice } : {}),
-    ...(opts.maxPrice !== undefined ? { max_price: opts.maxPrice } : {}),
+  const currency = opts.currency ?? DEFAULT_CURRENCY;
+  const price: Record<string, number> = {};
+  if (opts.minPrice !== undefined) price.min = toMinorUnits({ amount: opts.minPrice, currency });
+  if (opts.maxPrice !== undefined) price.max = toMinorUnits({ amount: opts.maxPrice, currency });
+
+  const filters = {
+    available: opts.available ?? true,
+    ...(Object.keys(price).length ? { price } : {}),
+  };
+
+  const payload = await callUcpTool<SearchPayload>('search_catalog', {
+    catalog: {
+      query: opts.query,
+      context: buyerContext(),
+      filters,
+      pagination: { limit: opts.limit ?? 10 },
+    },
   });
 
-  const list = payload.products ?? payload.results ?? payload.items ?? [];
-  if (!Array.isArray(list)) return [];
-  return list.map((p) => toProduct(p as Record<string, unknown>)).filter((p) => p.id);
+  return (payload.products ?? []).map(toProduct).filter((product) => product.id);
 }
 
 export async function getProductDetails(
   productId: string,
-  options?: Record<string, string>,
+  selected?: Record<string, string>,
 ): Promise<Product | null> {
-  const payload = await callShopifyTool<Record<string, unknown>>('get_product_details', {
-    product_id: productId,
-    ...(options && Object.keys(options).length ? { options } : {}),
+  const payload = await callUcpTool<Record<string, unknown>>('get_product', {
+    catalog: {
+      id: productId,
+      context: buyerContext(),
+      ...(selected && Object.keys(selected).length
+        ? { selected: Object.entries(selected).map(([name, label]) => ({ name, label })) }
+        : {}),
+    },
   });
 
   const raw = (payload.product ?? payload) as Record<string, unknown>;
-  if (!raw || (!raw.id && !raw.product_id)) return null;
+  if (!raw?.id) return null;
   return toProduct(raw);
+}
+
+/** Resolves several product or variant ids in one call. */
+export async function lookupProducts(ids: string[]): Promise<Product[]> {
+  if (ids.length === 0) return [];
+  const payload = await callUcpTool<SearchPayload>('lookup_catalog', {
+    catalog: { ids: ids.slice(0, 10), context: buyerContext() },
+  });
+  return (payload.products ?? []).map(toProduct).filter((product) => product.id);
 }
 
 /* ---------------- Cart ---------------- */
 
-function toCartLine(raw: Record<string, unknown>): CartLine {
-  const unitPrice = toMoney(raw.price ?? raw.unit_price);
+interface UcpTotal {
+  type?: string;
+  amount?: number;
+}
+
+interface UcpCart {
+  id?: string;
+  currency?: string;
+  line_items?: Array<Record<string, unknown>>;
+  totals?: UcpTotal[];
+  continue_url?: string;
+}
+
+function toCartLine(raw: Record<string, unknown>, currency: string): CartLine {
+  const item = (raw.item ?? {}) as Record<string, unknown>;
   const quantity = Number(raw.quantity ?? 1);
+  const unitPrice = readMoney(item.price, currency);
+  const lineTotal = (raw.totals as UcpTotal[] | undefined)?.find((total) => total.type === 'total');
+
   return {
-    lineId: String(raw.id ?? raw.line_id ?? ''),
-    productId: String(raw.product_id ?? raw.productId ?? ''),
-    variantId: String(raw.variant_id ?? raw.variantId ?? ''),
-    title: firstString(raw.title, raw.name) ?? '',
-    variantTitle: firstString(raw.variant_title, raw.variantTitle) ?? '',
-    imageUrl: firstString(raw.image_url, raw.imageUrl),
+    lineId: String(raw.id ?? ''),
+    // UCP identifies a line by its variant; the product id is not carried here.
+    productId: '',
+    variantId: String(item.id ?? ''),
+    title: typeof item.title === 'string' ? item.title : '',
+    variantTitle: '',
+    imageUrl: typeof item.image_url === 'string' ? item.image_url : null,
     quantity,
     unitPrice,
-    lineTotal: { amount: unitPrice.amount * quantity, currency: unitPrice.currency },
+    lineTotal:
+      lineTotal?.amount !== undefined
+        ? readMoney(lineTotal.amount, currency)
+        : addMoney(Array.from({ length: quantity }, () => unitPrice), currency),
   };
 }
 
-function toCart(raw: Record<string, unknown>): Cart {
-  const rawLines = raw.lines ?? raw.items ?? [];
-  const lines = Array.isArray(rawLines)
-    ? (rawLines as Array<Record<string, unknown>>).map(toCartLine)
-    : [];
-  const subtotal = raw.subtotal ?? raw.cost ?? raw.total ?? null;
+function toCart(raw: UcpCart): Cart {
+  const currency = raw.currency ?? DEFAULT_CURRENCY;
+  const lines = (raw.line_items ?? []).map((line) => toCartLine(line, currency));
+  const subtotal =
+    raw.totals?.find((total) => total.type === 'subtotal') ?? raw.totals?.find((total) => total.type === 'total');
 
   return {
-    id: String(raw.cart_id ?? raw.id ?? ''),
-    checkoutUrl: firstString(raw.checkout_url, raw.checkoutUrl),
+    id: String(raw.id ?? ''),
+    // UCP calls it continue_url: where the buyer picks the cart up in Shopify.
+    checkoutUrl: raw.continue_url ?? null,
     lines,
-    subtotal: subtotal
-      ? toMoney(subtotal)
-      : {
-          amount: lines.reduce((sum, line) => sum + line.lineTotal.amount, 0),
-          currency: lines[0]?.unitPrice.currency ?? DEFAULT_CURRENCY,
-        },
+    subtotal:
+      subtotal?.amount !== undefined
+        ? readMoney(subtotal.amount, currency)
+        : addMoney(
+            lines.map((line) => line.lineTotal),
+            currency,
+          ),
     totalQuantity: lines.reduce((sum, line) => sum + line.quantity, 0),
   };
 }
 
+export interface CartLineInput {
+  variantId: string;
+  quantity: number;
+}
+
 export async function getCart(cartId: string): Promise<Cart> {
-  const payload = await callShopifyTool<Record<string, unknown>>('get_cart', { cart_id: cartId });
-  return toCart((payload.cart ?? payload) as Record<string, unknown>);
+  const payload = await callUcpTool<UcpCart>('get_cart', { id: cartId });
+  return toCart(payload);
 }
 
-export interface CartUpdate {
-  cartId?: string;
-  addItems?: Array<{ variantId: string; quantity: number }>;
-  updateItems?: Array<{ lineId: string; quantity: number }>;
-  removeLineIds?: string[];
-}
-
-export async function updateCart(update: CartUpdate): Promise<Cart> {
-  const payload = await callShopifyTool<Record<string, unknown>>('update_cart', {
-    ...(update.cartId ? { cart_id: update.cartId } : {}),
-    ...(update.addItems?.length
-      ? {
-          add_items: update.addItems.map((item) => ({
-            product_variant_id: item.variantId,
-            quantity: item.quantity,
-          })),
-        }
-      : {}),
-    ...(update.updateItems?.length
-      ? { update_items: update.updateItems.map((item) => ({ id: item.lineId, quantity: item.quantity })) }
-      : {}),
-    ...(update.removeLineIds?.length ? { remove_line_ids: update.removeLineIds } : {}),
+export async function createCart(lines: CartLineInput[]): Promise<Cart> {
+  const payload = await callUcpTool<UcpCart>('create_cart', {
+    cart: {
+      line_items: lines.map((line) => ({ item: { id: line.variantId }, quantity: line.quantity })),
+      context: buyerContext(),
+    },
   });
-  return toCart((payload.cart ?? payload) as Record<string, unknown>);
+  return toCart(payload);
+}
+
+/**
+ * Replaces the cart's lines with exactly what is passed.
+ *
+ * This is how UCP behaves - sending one line drops the rest - which is why
+ * every caller here goes through addToCart / setLineQuantity rather than
+ * calling this directly. Quantity 0 removes a line.
+ */
+async function replaceCartLines(cartId: string, lines: CartLineInput[]): Promise<Cart> {
+  const payload = await callUcpTool<UcpCart>('update_cart', {
+    id: cartId,
+    cart: {
+      line_items: lines.map((line) => ({ item: { id: line.variantId }, quantity: line.quantity })),
+      context: buyerContext(),
+    },
+  });
+  return toCart(payload);
+}
+
+function linesOf(cart: Cart): CartLineInput[] {
+  return cart.lines.map((line) => ({ variantId: line.variantId, quantity: line.quantity }));
+}
+
+/** Adds to an existing cart, or starts one. Read, merge, write. */
+export async function addToCart(
+  cartId: string | undefined,
+  variantId: string,
+  quantity = 1,
+): Promise<Cart> {
+  if (!cartId) return createCart([{ variantId, quantity }]);
+
+  const current = await getCart(cartId);
+  const lines = linesOf(current);
+  const existing = lines.find((line) => line.variantId === variantId);
+
+  if (existing) existing.quantity += quantity;
+  else lines.push({ variantId, quantity });
+
+  return replaceCartLines(cartId, lines);
+}
+
+/** Sets a line to an exact quantity. 0 removes it. */
+export async function setLineQuantity(cartId: string, lineId: string, quantity: number): Promise<Cart> {
+  const current = await getCart(cartId);
+  const lines = current.lines.map((line) => ({
+    variantId: line.variantId,
+    quantity: line.lineId === lineId ? quantity : line.quantity,
+  }));
+  return replaceCartLines(cartId, lines);
 }

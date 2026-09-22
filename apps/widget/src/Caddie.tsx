@@ -21,12 +21,21 @@ export function Caddie() {
    */
   const addProducts = useCallback(
     async (products: Product[]) => {
-      const variants = products
-        .map((product) => product.variants.find((variant) => variant.available)?.id)
-        .filter((id): id is string => Boolean(id));
+      /*
+       * Only add outright when there is genuinely nothing to choose - every
+       * option has a single value - and the variant is in stock. Shopify hands
+       * back a default variant even when no size was picked, so counting
+       * variants would silently add whatever size came first. Anything else
+       * goes through the Caddie, which asks.
+       */
+      const settled = products.every(
+        (product) =>
+          product.options.every((option) => option.values.length <= 1) &&
+          product.variants[0]?.available,
+      );
+      const variants = settled ? products.map((product) => product.variants[0]!.id) : [];
 
       if (variants.length === 0) {
-        // A search result has no variants yet - ask the Caddie so it can pick one.
         await caddie.send(`Add ${products.map((p) => p.title).join(' and ')} to my basket`);
         return;
       }

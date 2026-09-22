@@ -4,7 +4,7 @@ Voice and chat shopping assistant for the Druids store. Two week sprint, two bui
 
 | | |
 | --- | --- |
-| **Talha** | AI, Vapi, Shopify MCP, backend, recommendation logic, cart, release |
+| **Talha** | AI, Vapi, Shopify catalog, backend, recommendation logic, cart, release |
 | **Amir** | UI, product cards, basket, mobile and device testing |
 
 Day by day plan: [docs/ROADMAP.md](docs/ROADMAP.md). The rules that keep us honest: [docs/RULES.md](docs/RULES.md).
@@ -32,7 +32,7 @@ curl http://localhost:8787/health/shopify
 ## Layout
 
 ```
-apps/server     Node + TypeScript. Vapi webhook, Shopify MCP client, recommendations.  (Talha)
+apps/server     Node + TypeScript. Vapi webhook, Shopify UCP client, recommendations. (Talha)
 apps/widget     React + Vite. The Caddie widget, embeddable in the Shopify theme.      (Amir)
 packages/shared TypeScript types both sides import. The contract between us.
 ```
@@ -47,7 +47,7 @@ there first and tell the other person.
 Customer speaks   ──> Vapi ──> POST /api/vapi/webhook ──> tool runs
 Customer types    ──> POST /api/chat                  ──> tool runs
                                                             │
-                                     Shopify MCP  <─────────┤ products, prices, cart
+                                     Shopify UCP  <─────────┤ products, prices, cart
                                      our own code <─────────┘ size, pack, outfit logic
                                                             │
                         widget <── SSE /api/events/:id ─────┘ cards on screen
@@ -56,17 +56,51 @@ Customer types    ──> POST /api/chat                  ──> tool runs
 The model gets a short spoken line. The widget gets the structured payload. The
 model never has to repeat a price, so it never gets one wrong.
 
+## Shopify: UCP, not the old Storefront MCP
+
+Shopify has moved the storefront catalog onto UCP (Universal Commerce Protocol).
+The old `/api/mcp` catalog tools (`search_shop_catalog`, `get_product_details`)
+are gone from our store — `/api/mcp` there now answers only policy and FAQ
+questions. We talk to `https://<store>/api/ucp/mcp` instead. Four things follow
+from that, and each one has already bitten once:
+
+**Every call carries an agent profile.** Shopify fetches
+`meta["ucp-agent"].profile` on each request to see what our agent supports, so
+it has to be a publicly reachable URL. We serve ours at
+`/ucp/agent-profile.json` — set `CADDIE_PUBLIC_URL` (ngrok in dev) and the
+server uses it. Until you do it falls back to Shopify's published example
+profile, which works but describes someone else's agent. `GET /health` tells
+you which one is in use.
+
+**Prices are integers in minor units.** `{ amount: 2400, currency: "PKR" }` is
+PKR 24.00. [money.ts](apps/server/src/shopify/money.ts) converts at the
+boundary and nothing downstream deals in minor units. A missed conversion is
+the Caddie saying a price 100x wrong, out loud, to a customer.
+
+**Cart updates replace, they do not merge.** `update_cart` sets the cart's lines
+to exactly what you send, so sending one line deletes everything else. Use
+`addToCart` and `setLineQuantity` in
+[catalog.ts](apps/server/src/shopify/catalog.ts), which read-modify-write around
+that, rather than calling `update_cart` yourself.
+
+**Options are not variants.** A product's `options` are every size on offer; a
+`variant` is one combination with its own id and stock. Ask which size, then
+call `get_product_details` again with it to get the variant to add. Shopify
+returns a default variant even when nothing was chosen, so "one variant came
+back" never means "the customer picked".
+
 ## Useful endpoints
 
 | Endpoint | What it is for |
 | --- | --- |
 | `GET /health` | Is the server up, is Vapi configured |
-| `GET /health/shopify` | Is the store's MCP server reachable, what tools it exposes |
+| `GET /health/shopify` | Is the store reachable, which UCP tools it exposes, plus a real sample search |
 | `GET /api/tools` | Tool definitions, including the exact JSON to give Vapi |
 | `POST /api/tools/:name` | Run one tool directly, no AI. Build and debug UI with this |
 | `POST /api/chat` | Text chat |
 | `GET /api/events/:sessionId` | SSE stream of cards and speech for a session |
 | `POST /api/vapi/webhook` | Where Vapi sends tool calls |
+| `GET /ucp/agent-profile.json` | Our UCP agent profile, which Shopify fetches on every catalog call |
 
 Try a tool without the AI:
 
@@ -121,5 +155,7 @@ npm run build
 Things deliberately left as placeholders, each marked `TODO` in the code:
 
 - `apps/server/data/size-chart.json` is placeholder sizing. Replace with the real Druids size guide (Day 4).
+- `CADDIE_PUBLIC_URL` is unset, so catalog calls go out under Shopify's example agent profile rather than ours. Set it once the server has a public URL.
+- The store is the `qqfeqi-xb` dummy store, priced in PKR. Swap `SHOPIFY_STORE_DOMAIN`, `SHOPIFY_BUYER_CURRENCY` and `SHOPIFY_BUYER_COUNTRY` when the real Druids store is ready.
 - Sessions are in memory, so a server restart forgets every conversation. Fine for the sprint, swap for Redis before real traffic.
 - `--caddie-accent` in `apps/widget/src/styles.css` is a stand-in for the Druids brand colour.

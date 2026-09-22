@@ -26,7 +26,7 @@ person has seen it work, and no placeholder data is left in that flow.
 
 ### Day 2 - Live products
 **Talha**
-- [ ] Shopify MCP connected - `GET /health/shopify` returns the tool list
+- [x] Shopify catalog connected over UCP - `GET /health/shopify` returns the tool list and real products
 - [ ] Product search returning real Druids products
 - [ ] Product details and variants verified (option names, stock flags)
 
@@ -37,6 +37,12 @@ person has seen it work, and no placeholder data is left in that flow.
 
 > Day 2 is the day the normalisers in `src/shopify/catalog.ts` get checked
 > against what this store actually returns. Log one raw payload and read it.
+>
+> Already verified against `qqfeqi-xb.myshopify.com` (44 live Druids products):
+> search, product detail, and add / merge / remove on the cart. Four UCP
+> behaviours that cost time if you do not know them — agent profile must be
+> publicly reachable, prices are in minor units, cart updates replace rather
+> than merge, and options are not variants — are written up in the README.
 
 ### Day 3 - Search via AI
 **Talha**
