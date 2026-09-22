@@ -159,6 +159,16 @@ let lastSyncedAt = 0;
 let lastDeltaAt = 0;
 let syncing: Promise<void> | null = null;
 
+/**
+ * Bumped on every change. The search index watches this so it rebuilds when
+ * the catalogue moves and not on every query.
+ */
+let version = 0;
+
+export function catalogueVersion(): number {
+  return version;
+}
+
 /** Rebuilt whenever the mirror changes; a few hundred products makes it cheap. */
 function rebuildInventoryIndex(): void {
   byInventoryItem = new Map();
@@ -255,6 +265,7 @@ export function applyChanges(changed: Product[]): number {
 
   rebuildInventoryIndex();
   lastSyncedAt = Date.now();
+  version += 1;
   log.info('catalogue.patched', { products: changed.length });
   return changed.length;
 }
@@ -266,6 +277,7 @@ export function removeProduct(productId: string): boolean {
   products.splice(index, 1);
   byId.delete(productId);
   rebuildInventoryIndex();
+  version += 1;
   log.info('catalogue.removed', { productId });
   return true;
 }
@@ -296,6 +308,7 @@ export async function syncCatalogue(): Promise<CatalogueState> {
         rebuildInventoryIndex();
         lastSyncedAt = Date.now();
         lastDeltaAt = Date.now();
+        version += 1;
       } else {
         log.warn('catalogue.empty', { kept: products.length });
       }
@@ -336,8 +349,8 @@ export function startCatalogueSync(
   deltaMs = env.shopify.catalogueDeltaMs,
   reconcileMs = env.shopify.catalogueReconcileMs,
 ): void {
-  syncCatalogue().catch((err) => log.error('catalogue.sync_failed', { err: String(err) }));
-
+  // The first pull is done by the caller before taking traffic; these are the
+  // safety nets behind the webhooks.
   deltaTimer = setInterval(() => {
     syncDelta().catch((err) => log.warn('catalogue.delta_failed', { err: String(err) }));
   }, deltaMs);
@@ -360,5 +373,7 @@ export function stopCatalogueSync(): void {
 export function setCatalogueForTests(items: Product[]): void {
   products = items;
   byId = new Map(items.map((product) => [product.id, product]));
+  rebuildInventoryIndex();
   lastSyncedAt = Date.now();
+  version += 1;
 }

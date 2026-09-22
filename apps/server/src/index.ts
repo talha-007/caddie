@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { startCatalogueSync } from './catalog/sync.js';
+import { startCatalogueSync, syncCatalogue } from './catalog/sync.js';
 import { env } from './env.js';
 import { CaddieError } from './lib/errors.js';
 import { log } from './lib/logger.js';
@@ -66,15 +66,34 @@ export function createApp() {
 const isEntrypoint = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
 
 if (isEntrypoint) {
-  // Pull the catalogue now and keep it warm. Everything customer-facing reads
-  // the mirror, so Shopify's throttled endpoint is never in the hot path.
-  startCatalogueSync();
+  /*
+   * Pull the catalogue before taking traffic.
+   *
+   * The full range is about 2,400 products and takes twenty-odd seconds. Until
+   * it lands, searches fall back to Shopify's throttled endpoint - and a
+   * restart under load would send every waiting customer at the one thing we
+   * built the mirror to avoid. Better to start a few seconds later.
+   */
+  const boot = async () => {
+    try {
+      const state = await syncCatalogue();
+      log.info('catalogue.ready', { products: state.count });
+    } catch (err) {
+      // Start anyway: the delta and reconcile timers will keep trying, and a
+      // Caddie that cannot search is still better than no server at all.
+      log.error('catalogue.boot_failed', { err: String(err) });
+    }
 
-  createApp().listen(env.port, () => {
-    log.info('caddie.server.listening', {
-      port: env.port,
-      env: env.nodeEnv,
-      chat: env.openai.apiKey ? `openai:${env.openai.model}` : env.vapi.privateKey ? 'vapi' : 'dev-router',
+    startCatalogueSync();
+
+    createApp().listen(env.port, () => {
+      log.info('caddie.server.listening', {
+        port: env.port,
+        env: env.nodeEnv,
+        chat: env.openai.apiKey ? `openai:${env.openai.model}` : env.vapi.privateKey ? 'vapi' : 'dev-router',
+      });
     });
-  });
+  };
+
+  void boot();
 }

@@ -134,6 +134,29 @@ Storefront traffic does not touch any of this. Shoppers browsing the store
 consume the Storefront API's quota, not the Admin API's, so how busy the shop
 is has no bearing on the sync.
 
+### At the real catalogue size
+
+The live store is about 2,400 active products and 4,000 overall, which is a
+hundred times the test store. Measured at that size:
+
+| | |
+| --- | --- |
+| Memory held by the mirror | 3 MB |
+| Search | 0.3-3.5ms |
+| An outfit (8 searches) | ~28ms |
+| Full reconcile | 49 pages, 3,528 cost points, ~20s |
+| Averaged Admin API load | 2 points/sec against a 200/sec budget - 1% |
+
+Search is indexed, not scanned. Scanning every product per query was 25ms and
+an outfit was 204ms, and Node runs one thread, so that is 200ms of blocking
+every other customer behind it. The index is built once per catalogue change
+and a query only looks at products containing one of the words.
+
+**The server does not take traffic until the first pull lands.** Until the
+mirror is ready, searches fall back to the throttled endpoint, and a restart
+under load would send every waiting customer at exactly the thing the mirror
+exists to avoid. Twenty seconds of slower boot is the better trade.
+
 **The mirror is the reason search is fast.** A search is a few milliseconds of
 scoring in memory rather than a network round trip, and `src/catalog/search.ts`
 ranks on the words a customer actually uses. When nothing matches, nothing
