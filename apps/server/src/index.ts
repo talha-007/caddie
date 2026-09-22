@@ -18,7 +18,15 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use(
     cors({
-      origin: env.corsOrigins.includes('*') ? true : env.corsOrigins,
+      /*
+       * Any origin in development, the allow-list in production.
+       *
+       * Device testing serves the widget from whatever tunnel the tester has
+       * open, so its origin is not knowable in advance. Pinning the list in
+       * dev just means someone loses an afternoon to a CORS error on a phone.
+       * CORS_ORIGINS still applies in production, where it matters.
+       */
+      origin: env.isProd ? (env.corsOrigins.includes('*') ? true : env.corsOrigins) : true,
       credentials: false,
     }),
   );
