@@ -18,10 +18,20 @@ npm run dev:server      # http://localhost:8787
 npm run dev:widget      # http://localhost:5173
 ```
 
-You do **not** need Vapi keys to start. Without them the server falls back to a
-keyword router (`src/ai/devRouter.ts`) that calls the real tools against the
-real Shopify store, so the UI can be built on day 1. Add `VAPI_PRIVATE_KEY` and
-`VAPI_ASSISTANT_ID` and the same endpoints go through the AI instead.
+### Which brain is answering
+
+Text chat picks the best available of three, in this order:
+
+| | When | What it is |
+| --- | --- | --- |
+| **OpenAI** | `OPENAI_API_KEY` set | A real tool-calling loop in our own process. This is the text path that ships. |
+| **Vapi chat** | Vapi keys set, no OpenAI key | The same assistant that handles voice, answering text. |
+| **Keyword router** | no keys at all | `src/ai/devRouter.ts`. No AI, but it calls the real tools against the real store, so the UI can be built with no keys whatsoever. |
+
+Voice always goes through Vapi, which calls the same tools over the webhook.
+One system prompt, one tool registry, so the two paths cannot drift apart.
+
+`GET /health` tells you which mode is live.
 
 Check the store connection before anything else:
 

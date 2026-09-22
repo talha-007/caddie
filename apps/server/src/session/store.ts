@@ -16,10 +16,16 @@ export interface CaddieSession {
   cartId?: string;
   /** Everything we have learned about fit. */
   sizeProfile: SizeInput;
-  /** Last thing we showed, so "that one" and "cheaper" resolve. */
+  /**
+   * Last thing we showed, so "that one" and "cheaper" resolve.
+   *
+   * Titles are kept alongside the ids on purpose: the model is told what is on
+   * screen, and a bare list of ids leaves it guessing which one the customer
+   * means by "the shorts".
+   */
   lastShown?: {
     kind: 'products' | 'pack' | 'outfit';
-    productIds: string[];
+    items: Array<{ id: string; title: string }>;
     query?: string;
     budgetAmount?: number;
     colour?: string;

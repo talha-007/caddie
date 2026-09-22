@@ -11,6 +11,12 @@ healthRouter.get('/', (_req, res) => {
     ok: true,
     env: env.nodeEnv,
     envFile,
+    // Which brain answers text chat. See the README.
+    chatMode: env.openai.apiKey
+      ? `openai:${env.openai.model}`
+      : env.vapi.privateKey && env.vapi.assistantId
+        ? 'vapi'
+        : 'dev-keyword-router',
     vapi: {
       chatConfigured: Boolean(env.vapi.privateKey && env.vapi.assistantId),
       webhookSecured: Boolean(env.vapi.webhookSecret),

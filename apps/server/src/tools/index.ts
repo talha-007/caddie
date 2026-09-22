@@ -1,3 +1,4 @@
+import type { Product } from '@caddie/shared';
 import { z } from 'zod';
 import { recommendOutfit } from '../recommend/outfit.js';
 import { recommendPack } from '../recommend/pack.js';
@@ -22,6 +23,13 @@ const money = (amount: number, currency: string) => {
   const symbol = SYMBOLS[currency];
   return symbol ? `${symbol}${amount.toFixed(2)}` : `${currency} ${amount.toFixed(2)}`;
 };
+
+/** One line per product, so the model knows exactly what is on screen. */
+function listFacts(products: Product[]): string {
+  return products
+    .map((product) => `- ${product.title} - ${money(product.price.amount, product.price.currency)} [${product.id}]`)
+    .join('\n');
+}
 
 /* ---------------- search_products ---------------- */
 
@@ -53,14 +61,30 @@ const searchTool = defineTool({
     });
 
     await sessions.patch(ctx.session.id, {
-      lastShown: { kind: 'products', productIds: products.map((p) => p.id), query: args.query },
+      lastShown: {
+        kind: 'products',
+        items: products.map((p) => ({ id: p.id, title: p.title })),
+        query: args.query,
+      },
     });
 
     if (products.length === 0) {
       return { speech: `I could not find anything for "${args.query}" in the store right now.` };
     }
+
+    /*
+     * Worded as "closest" on purpose. The catalogue search is semantic and
+     * always returns its best guesses, so a request for something we do not
+     * stock still comes back full. Saying "I found 4 options" invites the
+     * model to present them as the thing that was asked for.
+     */
     return {
-      speech: `I found ${products.length} ${products.length === 1 ? 'option' : 'options'}. They are on screen now.`,
+      speech:
+        products.length === 1
+          ? 'Here is the closest match in the store. It is on screen now.'
+          : `Here are the ${products.length} closest matches in the store. They are on screen now.`,
+      facts: `Results for "${args.query}", best match first:
+${listFacts(products)}`,
       attachment: { kind: 'products', products },
     };
   },
@@ -214,7 +238,7 @@ const packTool = defineTool({
     await sessions.patch(ctx.session.id, {
       lastShown: {
         kind: 'pack',
-        productIds: recommendation.items.map((p) => p.id),
+        items: recommendation.items.map((p) => ({ id: p.id, title: p.title })),
         query: args.query,
         budgetAmount,
         colour: args.colour,
@@ -228,6 +252,8 @@ const packTool = defineTool({
         recommendation.total.amount,
         recommendation.total.currency,
       )}.`,
+      facts: `Pack contents:
+${listFacts(recommendation.items)}`,
       attachment: { kind: 'pack', recommendation },
     };
   },
@@ -273,7 +299,7 @@ const outfitTool = defineTool({
     await sessions.patch(ctx.session.id, {
       lastShown: {
         kind: 'outfit',
-        productIds: recommendation.pieces.map((piece) => piece.product.id),
+        items: recommendation.pieces.map((piece) => ({ id: piece.product.id, title: piece.product.title })),
         query: args.seed,
         budgetAmount,
         colour: args.colour,
@@ -283,6 +309,9 @@ const outfitTool = defineTool({
 
     if (recommendation.pieces.length === 0) return { speech: recommendation.reason };
     return {
+      facts: `Outfit pieces:\n${recommendation.pieces
+        .map((piece) => `- ${piece.slot}: ${piece.product.title} [${piece.product.id}]`)
+        .join('\n')}`,
       speech: `${recommendation.reason} The full look is ${money(
         recommendation.total.amount,
         recommendation.total.currency,
@@ -294,26 +323,75 @@ const outfitTool = defineTool({
 
 /* ---------------- cart tools ---------------- */
 
+/**
+ * Takes a product and the chosen options, never a variant id.
+ *
+ * Models invent variant ids. Asked to "add the shorts in large" it will
+ * confidently pass a plausible-looking id it has never seen, and Shopify
+ * rejects it - or worse, it matches something real and the customer gets the
+ * wrong item. Resolving the variant here makes that impossible: an id that was
+ * never on screen fails a lookup instead.
+ */
 const addToCartSchema = z.object({
-  variantId: z.string().min(1).describe('A variant id from get_product_details, never invented'),
+  productId: z.string().min(1).describe('A product id from a search, recommendation or details call'),
+  options: z
+    .record(z.string())
+    .optional()
+    .describe('The size and colour the customer chose, e.g. { "Size": "L" }'),
   quantity: z.number().int().min(1).max(10).optional(),
 });
 
 const addToCartTool = defineTool({
   name: 'add_to_cart',
   description:
-    'Add a product variant to the customer basket. The variant id must come from get_product_details in this conversation.',
+    'Add a product to the customer basket. Pass the product id and the options they chose, such as size. Never guess the size for them: if you do not know it, ask first. The product id must be one you have seen in this conversation.',
   schema: addToCartSchema,
   parameters: {
     type: 'object',
     properties: {
-      variantId: { type: 'string' },
+      productId: { type: 'string', description: 'A product id seen in this conversation' },
+      options: {
+        type: 'object',
+        additionalProperties: { type: 'string' },
+        description: 'Chosen options, e.g. { "Size": "L" }',
+      },
       quantity: { type: 'integer', minimum: 1, maximum: 10 },
     },
-    required: ['variantId'],
+    required: ['productId'],
   },
   async run(args, ctx): Promise<ToolResult> {
-    const cart = await addToCart(ctx.session.cartId, args.variantId, args.quantity ?? 1);
+    const product = await getProductDetails(args.productId, args.options);
+    if (!product) {
+      return { speech: 'I could not find that product. Let me search again rather than guess.' };
+    }
+
+    // More than one value still open on any option means nothing was chosen.
+    const undecided = product.options.filter((option) => option.values.length > 1);
+    const chosenCount = Object.keys(args.options ?? {}).length;
+    if (undecided.length > 0 && chosenCount === 0) {
+      return {
+        speech: `Which ${undecided.map((option) => option.name.toLowerCase()).join(' and ')} would you like for the ${product.title}?`,
+        facts: `${product.title} needs a choice:\n${undecided
+          .map((option) => `- ${option.name}: ${option.values.join(', ')}`)
+          .join('\n')}`,
+      };
+    }
+
+    const variant = product.variants[0];
+    if (!variant) {
+      return { speech: `I could not find that combination for the ${product.title}.` };
+    }
+    if (!variant.available) {
+      const choice = Object.values(variant.options).join(', ');
+      return {
+        speech: `The ${product.title} in ${choice} is out of stock. Shall I check another size?`,
+        facts: `Unavailable variant: ${product.title} ${choice}. Other options: ${product.options
+          .map((option) => `${option.name}: ${option.values.join(', ')}`)
+          .join('; ')}`,
+      };
+    }
+
+    const cart = await addToCart(ctx.session.cartId, variant.id, args.quantity ?? 1);
     await sessions.patch(ctx.session.id, { cartId: cart.id });
     return {
       speech: `Added. Your basket is ${money(cart.subtotal.amount, cart.subtotal.currency)} for ${

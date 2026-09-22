@@ -50,7 +50,7 @@ if (isEntrypoint) {
     log.info('caddie.server.listening', {
       port: env.port,
       env: env.nodeEnv,
-      mode: env.vapi.privateKey ? 'vapi' : 'dev-router',
+      chat: env.openai.apiKey ? `openai:${env.openai.model}` : env.vapi.privateKey ? 'vapi' : 'dev-router',
     });
   });
 }

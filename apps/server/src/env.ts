@@ -105,6 +105,11 @@ export const env = {
       return resolveAgentProfile();
     },
   },
+  openai: {
+    apiKey: optional('OPENAI_API_KEY'),
+    /** Used for text chat. Voice runs on whatever model Vapi is configured with. */
+    model: optional('OPENAI_MODEL', 'gpt-4.1'),
+  },
   vapi: {
     privateKey: optional('VAPI_PRIVATE_KEY'),
     assistantId: optional('VAPI_ASSISTANT_ID'),

@@ -8,17 +8,22 @@ import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
 import { runTool } from '../tools/index.js';
 import { route } from '../ai/devRouter.js';
+import { converse, openaiEnabled } from '../ai/openai.js';
 
 /**
  * Text chat for the widget.
  *
- * Two modes:
- *  - Vapi mode (default once VAPI_PRIVATE_KEY and VAPI_ASSISTANT_ID are set):
- *    the message goes to the Vapi Chat API, which calls our tools through the
- *    webhook. This is what ships.
- *  - Dev mode (no Vapi keys): a keyword router picks a tool directly, so the
- *    widget can be built and tested against REAL Shopify data without Vapi.
- *    The language understanding is dumb; the product data is real.
+ * Three modes, in order of preference:
+ *  1. OpenAI (OPENAI_API_KEY set) - a real tool-calling loop in our own
+ *     process. This is the text path that ships: lower latency than proxying
+ *     through Vapi, and it shares the prompt and tool registry with voice.
+ *  2. Vapi chat (VAPI_PRIVATE_KEY + VAPI_ASSISTANT_ID) - the same assistant
+ *     that handles voice, answering text.
+ *  3. Dev keyword router - no AI at all, so the UI can be built against real
+ *     Shopify data with no keys whatsoever.
+ *
+ * Voice always goes through Vapi, which calls the same tools over the webhook.
+ * One prompt, one tool registry, so the two cannot drift apart.
  */
 
 export const chatRouter: Router = Router();
@@ -51,9 +56,11 @@ chatRouter.post('/', async (req, res, next) => {
   const userMessage = message('user', parsed.data.text);
 
   try {
-    const reply = vapiEnabled()
-      ? await viaVapi(sessionId, parsed.data.text)
-      : await viaDevRouter(sessionId, parsed.data.text);
+    const reply = openaiEnabled()
+      ? await viaOpenai(sessionId, parsed.data.text)
+      : vapiEnabled()
+        ? await viaVapi(sessionId, parsed.data.text)
+        : await viaDevRouter(sessionId, parsed.data.text);
 
     session.messages.push(userMessage, reply);
     await sessions.save(session);
@@ -67,6 +74,13 @@ chatRouter.post('/', async (req, res, next) => {
     return next(err);
   }
 });
+
+/* ---------------- OpenAI ---------------- */
+
+async function viaOpenai(sessionId: string, text: string): Promise<CaddieMessage> {
+  const reply = await converse(sessionId, text);
+  return message('assistant', reply.text, reply.attachment);
+}
 
 /* ---------------- Vapi Chat API ---------------- */
 
