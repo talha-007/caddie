@@ -28,12 +28,6 @@ export interface Product {
   productType: string | null;
   tags: string[];
   price: Money;
-  /**
-   * The RRP when the product is on sale ("RRP £39.00, save £15.00"). Optional
-   * until the server normaliser reads it from MCP - the widget only shows a
-   * saving when this is present, it never works one out on its own.
-   */
-  compareAtPrice?: Money | null;
   /** Populated by getProductDetails, empty from a plain search. */
   variants: ProductVariant[];
   description: string | null;

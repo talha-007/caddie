@@ -1,4 +1,3 @@
-import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -13,8 +12,6 @@ import { defineConfig } from 'vite';
  */
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
-  // VITE_* vars live in the same caddie/.env the server uses, not in apps/widget.
-  envDir: fileURLToPath(new URL('../..', import.meta.url)),
   base: process.env.VITE_CADDIE_ASSET_BASE ?? '/',
   server: { port: 5173 },
   build: {

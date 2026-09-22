@@ -1,14 +1,4 @@
-import { config } from 'dotenv';
-
-/**
- * One .env for the whole repo, at the caddie/ root.
- *
- * npm runs a workspace script from inside apps/server, so plain
- * `dotenv/config` would look for apps/server/.env and find nothing. We point it
- * at the root file, then let a local .env (if someone keeps one) override it.
- */
-config({ path: new URL('../../../.env', import.meta.url) });
-config();
+import 'dotenv/config';
 
 function required(name: string): string {
   const value = process.env[name];

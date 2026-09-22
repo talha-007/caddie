@@ -1,65 +1,47 @@
 import type { VoiceState } from '../lib/useVapi.js';
-import { MicIcon, StopIcon } from './icons.js';
 
 const LABELS: Record<VoiceState['status'], string> = {
-  idle: 'Talk to your Caddie',
-  connecting: 'Connecting…',
-  listening: 'Listening…',
+  idle: 'Talk to the Caddie',
+  connecting: 'Connecting...',
+  listening: 'Listening',
   speaking: 'Caddie is talking',
   error: 'Tap to try again',
 };
 
-/**
- * The mic. Hidden entirely when voice is not configured - a customer should
- * never see a setup message - and the dev console says why instead.
- */
-export function VoiceButton({ voice, large }: { voice: VoiceState; large?: boolean }) {
-  if (!voice.supported) return null;
+export function VoiceButton({ voice }: { voice: VoiceState }) {
+  if (!voice.supported) {
+    return (
+      <p className="caddie-muted caddie-voice__disabled">
+        Voice is off - add VITE_VAPI_PUBLIC_KEY and VITE_VAPI_ASSISTANT_ID to .env
+      </p>
+    );
+  }
 
-  const live = voice.status === 'listening' || voice.status === 'speaking';
-
-  return (
-    <button
-      type="button"
-      className={`caddie-mic caddie-mic--${voice.status}${large ? ' caddie-mic--large' : ''}`}
-      onClick={() => (voice.active ? voice.stop() : voice.start())}
-      aria-pressed={voice.active}
-      aria-label={voice.active ? 'End voice chat' : LABELS[voice.status]}
-    >
-      <span
-        className="caddie-mic__pulse"
-        // The ring tracks mic level so the customer can see they are being heard.
-        style={{ transform: `scale(${1 + (live ? Math.min(voice.volume, 1) * 0.6 : 0)})` }}
-        aria-hidden="true"
-      />
-      {voice.active && !large ? <StopIcon size={20} /> : <MicIcon size={large ? 30 : 22} />}
-    </button>
-  );
-}
-
-/** The listening strip above the composer while a call is live. */
-export function VoiceBar({ voice }: { voice: VoiceState }) {
-  if (!voice.supported || (!voice.active && !voice.error)) return null;
+  const active = voice.status === 'listening' || voice.status === 'speaking';
 
   return (
-    <div className={`caddie-voicebar caddie-voicebar--${voice.status}`} role="status" aria-live="polite">
-      <Wave volume={voice.status === 'idle' || voice.status === 'error' ? 0 : voice.volume} />
-      <div className="caddie-voicebar__text">
-        <span className="caddie-voicebar__label">{voice.error ?? LABELS[voice.status]}</span>
-        {voice.partial ? <span className="caddie-voicebar__partial">“{voice.partial}”</span> : null}
-      </div>
+    <div className="caddie-voice">
+      <button
+        type="button"
+        className={`caddie-mic caddie-mic--${voice.status}`}
+        onClick={() => (active ? voice.stop() : voice.start())}
+        aria-pressed={active}
+        aria-label={LABELS[voice.status]}
+      >
+        <span
+          className="caddie-mic__pulse"
+          // The ring tracks mic level so the customer can see they are being heard.
+          style={{ transform: `scale(${1 + Math.min(voice.volume, 1) * 0.6})` }}
+        />
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12Z"
+          />
+        </svg>
+      </button>
+      <span className="caddie-voice__label">{LABELS[voice.status]}</span>
+      {voice.error ? <span className="caddie-error">{voice.error}</span> : null}
     </div>
-  );
-}
-
-/** Five bars that follow the voice level; still when nobody is talking. */
-export function Wave({ volume }: { volume: number }) {
-  const level = Math.min(Math.max(volume, 0), 1);
-  return (
-    <span className="caddie-wave" aria-hidden="true">
-      {[0.5, 0.8, 1, 0.8, 0.5].map((weight, index) => (
-        <span key={index} style={{ transform: `scaleY(${0.25 + level * weight * 0.75})` }} />
-      ))}
-    </span>
   );
 }
