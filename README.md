@@ -8,7 +8,8 @@ Voice and chat shopping assistant for the Druids store. Two week sprint, two bui
 | **Amir** | UI, product cards, basket, mobile and device testing |
 
 Day by day plan: [docs/ROADMAP.md](docs/ROADMAP.md). The rules that keep us honest: [docs/RULES.md](docs/RULES.md).
-Building the widget: [docs/API.md](docs/API.md) is everything the UI needs from the backend.
+Building the widget: [docs/API.md](docs/API.md) is everything the UI needs from the backend,
+and [docs/widget-kickoff-prompt.md](docs/widget-kickoff-prompt.md) briefs a coding agent on it.
 
 ## Getting started
 
