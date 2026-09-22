@@ -1,5 +1,6 @@
 import type { Money, OutfitInput, OutfitPiece, OutfitRecommendation, Product } from '@caddie/shared';
 import { searchProducts } from '../shopify/catalog.js';
+import { storeCurrency } from '../shopify/money.js';
 
 /**
  * Day 6 - Outfit builder.
@@ -56,9 +57,10 @@ export async function recommendOutfit(
     const query = [input.seed, input.colour, slot.terms].filter(Boolean).join(' ');
     const results = await searchProducts({
       query,
-      context: `Choosing the ${slot.slot} of an outfit for "${input.seed}"`,
       limit: 8,
-      ...(remaining !== null ? { maxPrice: remaining } : {}),
+      ...(remaining !== null
+        ? { maxPrice: remaining, currency: input.budget?.currency ?? storeCurrency() }
+        : {}),
     });
 
     const usable = withinBudget(
@@ -78,7 +80,7 @@ export async function recommendOutfit(
 
   const total: Money = {
     amount: Number(pieces.reduce((sum, piece) => sum + piece.product.price.amount, 0).toFixed(2)),
-    currency: pieces[0]?.product.price.currency ?? input.budget?.currency ?? 'GBP',
+    currency: pieces[0]?.product.price.currency ?? input.budget?.currency ?? storeCurrency(),
   };
 
   return { pieces, total, reason: buildReason(pieces, input) };

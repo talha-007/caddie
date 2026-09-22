@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { recommendOutfit } from '../recommend/outfit.js';
 import { recommendPack } from '../recommend/pack.js';
 import { recommendSize } from '../recommend/size.js';
-import { getCart, getProductDetails, searchProducts, updateCart } from '../shopify/catalog.js';
+import { addToCart, getCart, getProductDetails, searchProducts, setLineQuantity } from '../shopify/catalog.js';
+import { storeCurrency } from '../shopify/money.js';
 import { sessions } from '../session/store.js';
 import { defineTool, type CaddieTool, type ToolContext, type ToolResult } from './types.js';
 
@@ -15,8 +16,12 @@ import { defineTool, type CaddieTool, type ToolContext, type ToolResult } from '
  * from memory.
  */
 
-const money = (amount: number, currency: string) =>
-  `${currency === 'GBP' ? '£' : `${currency} `}${amount.toFixed(2)}`;
+const SYMBOLS: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
+
+const money = (amount: number, currency: string) => {
+  const symbol = SYMBOLS[currency];
+  return symbol ? `${symbol}${amount.toFixed(2)}` : `${currency} ${amount.toFixed(2)}`;
+};
 
 /* ---------------- search_products ---------------- */
 
@@ -84,8 +89,31 @@ const detailsTool = defineTool({
   async run(args): Promise<ToolResult> {
     const product = await getProductDetails(args.productId, args.options);
     if (!product) return { speech: 'I could not load that product.' };
+
+    const price = money(product.price.amount, product.price.currency);
+
+    /*
+     * Shopify returns a default variant even when nothing was selected, so the
+     * variant count says nothing about whether the customer has chosen. What
+     * counts is whether WE passed a selection - or whether there was anything
+     * to choose in the first place.
+     */
+    const nothingToChoose = product.options.every((option) => option.values.length <= 1);
+    const hasSelection = Boolean(args.options && Object.keys(args.options).length > 0);
+    const chosen = hasSelection || nothingToChoose ? product.variants[0] : null;
+
+    if (chosen) {
+      return {
+        speech: chosen.available
+          ? `${product.title} in ${Object.values(chosen.options).join(', ')} is ${price} and in stock.`
+          : `${product.title} in ${Object.values(chosen.options).join(', ')} is out of stock.`,
+        attachment: { kind: 'products', products: [product] },
+      };
+    }
+
+    const choices = product.options.map((option) => `${option.name}: ${option.values.join(', ')}`).join('. ');
     return {
-      speech: `${product.title} is ${money(product.price.amount, product.price.currency)}.`,
+      speech: `${product.title} is ${price}.${choices ? ` ${choices}.` : ''}`,
       attachment: { kind: 'products', products: [product] },
     };
   },
@@ -164,7 +192,7 @@ const packTool = defineTool({
     properties: {
       query: { type: 'string' },
       budgetAmount: { type: 'number' },
-      currency: { type: 'string', description: 'ISO code, defaults to GBP' },
+      currency: { type: 'string', description: "ISO code. Leave it out unless the customer names a currency - it defaults to the store's own." },
       colour: { type: 'string' },
       size: { type: 'string' },
       itemCount: { type: 'integer', minimum: 2, maximum: 6 },
@@ -172,7 +200,7 @@ const packTool = defineTool({
     required: ['query'],
   },
   async run(args, ctx): Promise<ToolResult> {
-    const currency = args.currency ?? ctx.session.preferences.currency ?? 'GBP';
+    const currency = args.currency ?? ctx.session.preferences.currency ?? storeCurrency();
     const budgetAmount = args.budgetAmount ?? ctx.session.preferences.budgetAmount;
 
     const recommendation = await recommendPack({
@@ -232,7 +260,7 @@ const outfitTool = defineTool({
     required: ['seed'],
   },
   async run(args, ctx): Promise<ToolResult> {
-    const currency = args.currency ?? ctx.session.preferences.currency ?? 'GBP';
+    const currency = args.currency ?? ctx.session.preferences.currency ?? storeCurrency();
     const budgetAmount = args.budgetAmount ?? ctx.session.preferences.budgetAmount;
 
     const recommendation = await recommendOutfit({
@@ -285,10 +313,7 @@ const addToCartTool = defineTool({
     required: ['variantId'],
   },
   async run(args, ctx): Promise<ToolResult> {
-    const cart = await updateCart({
-      cartId: ctx.session.cartId,
-      addItems: [{ variantId: args.variantId, quantity: args.quantity ?? 1 }],
-    });
+    const cart = await addToCart(ctx.session.cartId, args.variantId, args.quantity ?? 1);
     await sessions.patch(ctx.session.id, { cartId: cart.id });
     return {
       speech: `Added. Your basket is ${money(cart.subtotal.amount, cart.subtotal.currency)} for ${
@@ -318,13 +343,8 @@ const updateCartTool = defineTool({
   },
   async run(args, ctx): Promise<ToolResult> {
     if (!ctx.session.cartId) return { speech: 'There is nothing in your basket yet.' };
-    const cart =
-      args.quantity === 0
-        ? await updateCart({ cartId: ctx.session.cartId, removeLineIds: [args.lineId] })
-        : await updateCart({
-            cartId: ctx.session.cartId,
-            updateItems: [{ lineId: args.lineId, quantity: args.quantity }],
-          });
+    // Quantity 0 removes the line - setLineQuantity handles both cases.
+    const cart = await setLineQuantity(ctx.session.cartId, args.lineId, args.quantity);
     return {
       speech: `Basket updated - ${money(cart.subtotal.amount, cart.subtotal.currency)}.`,
       attachment: { kind: 'cart', cart },

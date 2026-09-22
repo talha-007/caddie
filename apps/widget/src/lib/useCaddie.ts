@@ -6,6 +6,7 @@ import type {
   Journey,
   PageContext,
   Product,
+  ProductVariant,
   SizeInput,
   SizeRecommendation,
 } from '@caddie/shared';
@@ -53,8 +54,13 @@ export interface CaddieState {
   startJourney: (journey: Journey) => void;
   submitSize: (formId: string, input: SizeInput, summary: string) => Promise<void>;
   submitJourney: (formId: string, text: string) => Promise<void>;
-  /** Full product with variants. Quiet: never adds a card to the thread. */
+  /** Full product with its options. Quiet: never adds a card to the thread. */
   loadProduct: (product: Product) => Promise<Product | null>;
+  /**
+   * The variant for one exact set of chosen options. The server returns only
+   * the matching variant, so this is the only way to know its id and stock.
+   */
+  resolveVariant: (productId: string, selection: Record<string, string>) => Promise<ProductVariant | null>;
   details: Record<string, Product>;
   addToBasket: (items: BasketItem[]) => Promise<boolean>;
   changeQuantity: (lineId: string, quantity: number) => Promise<void>;
@@ -318,6 +324,27 @@ export function useCaddie(page: PageContext): CaddieState {
     [details, remember, sessionId],
   );
 
+  const resolveVariant = useCallback(
+    async (productId: string, selection: Record<string, string>): Promise<ProductVariant | null> => {
+      silentProducts.current.add(productId);
+      try {
+        const result = await runTool(sessionId, 'get_product_details', { productId, options: selection });
+        const loaded = result.attachment?.kind === 'products' ? result.attachment.products[0] : undefined;
+        const variant = loaded?.variants[0];
+        if (!loaded || !variant) return null;
+        // It is only the customer's variant if it really carries what they chose.
+        const matches = Object.entries(selection).every(([name, value]) => variant.options[name] === value);
+        return matches ? variant : null;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not check that size.');
+        return null;
+      } finally {
+        setTimeout(() => silentProducts.current.delete(productId), DUPLICATE_WINDOW_MS);
+      }
+    },
+    [sessionId],
+  );
+
   /**
    * Adding goes through the same tools the AI uses, so the basket is always the
    * real Shopify cart - never a local copy that can drift out of sync. Every
@@ -403,6 +430,7 @@ export function useCaddie(page: PageContext): CaddieState {
     submitSize,
     submitJourney,
     loadProduct,
+    resolveVariant,
     details,
     addToBasket,
     changeQuantity,

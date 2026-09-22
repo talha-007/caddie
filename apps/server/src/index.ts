@@ -8,6 +8,7 @@ import { chatRouter } from './routes/chat.js';
 import { eventsRouter } from './routes/events.js';
 import { healthRouter } from './routes/health.js';
 import { toolsRouter } from './routes/tools.js';
+import { ucpRouter } from './routes/ucp.js';
 import { vapiRouter } from './routes/vapi.js';
 
 export function createApp() {
@@ -26,6 +27,7 @@ export function createApp() {
   app.use('/api/events', eventsRouter);
   app.use('/api/tools', toolsRouter);
   app.use('/api/vapi', vapiRouter);
+  app.use('/ucp', ucpRouter);
 
   app.use((_req, res) => res.status(404).json({ error: 'not_found' }));
 

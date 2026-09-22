@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Money, Product, ProductVariant } from '@caddie/shared';
 import { formatMoney, saving } from '../lib/format.js';
 import { ShirtIcon, SwapIcon } from './icons.js';
-import { chosenColour, ProductOptions, useProductChoice } from './ProductOptions.js';
+import { chosenColour, ProductOptions, useProductChoice, type ProductChoice } from './ProductOptions.js';
 import { useShop } from './ShopContext.js';
 
 /**
@@ -64,17 +64,20 @@ interface CardProps {
   onChoice?: ChoiceListener;
 }
 
-function AddButton({ product, variant, label = 'Add' }: { product: Product; variant: ProductVariant | null; label?: string }) {
+function AddButton({ product, choice, label = 'Add' }: { product: Product; choice: ProductChoice; label?: string }) {
   const shop = useShop();
+  const { variant, resolving, soldOut } = choice;
+  const text = resolving ? 'Checking…' : soldOut ? 'Sold out' : label;
+
   return (
     <button
       type="button"
       className="caddie-btn caddie-btn--primary caddie-btn--small"
-      disabled={!variant || shop.busy}
+      disabled={!variant || shop.busy || resolving}
       onClick={() => variant && shop.addToBasket([{ variantId: variant.id, title: product.title }])}
       aria-label={variant ? `Add ${product.title} to basket` : `Choose options for ${product.title} first`}
     >
-      {label}
+      {text}
     </button>
   );
 }
@@ -113,7 +116,7 @@ export function ProductTile({ product, slot, addable, swappable, onChoice }: Car
         {colour ? <p className="caddie-tile__meta">{colour}</p> : null}
         <Price price={price} compareAt={product.compareAtPrice} />
         <ProductOptions product={product} choice={choice} compact />
-        {addable ? <AddButton product={product} variant={choice.variant} /> : null}
+        {addable ? <AddButton product={product} choice={choice} /> : null}
       </div>
     </article>
   );
@@ -140,7 +143,7 @@ export function ProductRow({ product, slot, addable = true, swappable, onChoice 
           <ProductOptions product={product} choice={choice} />
           <div className="caddie-row__actions">
             {swappable ? <SwapButton product={product} /> : null}
-            {addable ? <AddButton product={product} variant={choice.variant} /> : null}
+            {addable ? <AddButton product={product} choice={choice} /> : null}
           </div>
         </div>
       </div>

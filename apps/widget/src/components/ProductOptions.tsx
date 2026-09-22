@@ -4,6 +4,7 @@ import {
   initialSelection,
   isValueAvailable,
   matchVariant,
+  nothingToChoose,
   productOptions,
   sameId,
   swatchColour,
@@ -20,8 +21,13 @@ import { useShop } from './ShopContext.js';
 export interface ProductChoice {
   full: Product | null;
   selection: Selection;
+  /** The customer's variant: only ever one that matches every choice. */
   variant: ProductVariant | null;
   loading: boolean;
+  /** Checking that combination with the store. */
+  resolving: boolean;
+  /** Every option chosen, but that combination is not in stock. */
+  soldOut: boolean;
   choose: (name: string, value: string) => void;
   load: () => Promise<void>;
 }
@@ -55,9 +61,49 @@ export function useProductChoice(product: Product): ProductChoice {
     setSelection((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  const variant = full ? matchVariant(full, selection) : null;
+  /*
+   * The server sends every option but only the variant matching what has been
+   * chosen, so once the customer has picked everything we ask it for that exact
+   * combination. A variant we already hold that matches is used as it is.
+   */
+  const options = full ? productOptions(full) : [];
+  const complete = Boolean(full) && options.length > 0 && options.every((option) => selection[option.name]);
+  const local = full ? matchVariant(full, selection) : null;
+  const key = `${full?.id ?? ''}|${JSON.stringify(selection)}`;
+  const [resolved, setResolved] = useState<{ key: string; variant: ProductVariant | null } | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const { resolveVariant } = shop;
 
-  return { full, selection, variant: variant?.available ? variant : null, loading, choose, load };
+  useEffect(() => {
+    if (!full || !complete || local) return;
+    let cancelled = false;
+    setResolving(true);
+    void resolveVariant(full.id, selection)
+      .then((variant) => {
+        if (!cancelled) setResolved({ key, variant });
+      })
+      .finally(() => {
+        if (!cancelled) setResolving(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // The selection, folded into `key`, is what drives this.
+  }, [complete, full, key, local, resolveVariant]);
+
+  const settled = local ?? (resolved?.key === key ? resolved.variant : null);
+  const variant = full && (complete || nothingToChoose(full)) ? settled : null;
+
+  return {
+    full,
+    selection,
+    variant: variant?.available ? variant : null,
+    loading,
+    resolving,
+    soldOut: Boolean(variant && !variant.available),
+    choose,
+    load,
+  };
 }
 
 interface ProductOptionsProps {

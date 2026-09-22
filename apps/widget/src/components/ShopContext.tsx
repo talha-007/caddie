@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect } from 'react';
-import type { Cart, Journey, PageContext, Product, SizeRecommendation } from '@caddie/shared';
+import type { Cart, Journey, PageContext, Product, ProductVariant, SizeRecommendation } from '@caddie/shared';
 import type { BasketItem } from '../lib/useCaddie.js';
 import { sameId } from '../lib/variants.js';
 
@@ -11,6 +11,7 @@ export interface Shop {
   page: PageContext;
   details: Record<string, Product>;
   loadProduct: (product: Product) => Promise<Product | null>;
+  resolveVariant: (productId: string, selection: Record<string, string>) => Promise<ProductVariant | null>;
   size: SizeRecommendation | null;
   busy: boolean;
   addToBasket: (items: BasketItem[]) => Promise<boolean>;
@@ -55,6 +56,7 @@ export function usePageProduct(): Product | null {
       productType: null,
       tags: [],
       price: { amount: 0, currency: 'GBP' },
+      options: [],
       variants: [],
       description: null,
     });

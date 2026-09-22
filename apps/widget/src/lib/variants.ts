@@ -10,7 +10,8 @@ import type { Product, ProductVariant } from '@caddie/shared';
 
 export type Selection = Record<string, string>;
 
-export interface ProductOption {
+/** One row of the picker. `kind` only decides how it is drawn. */
+export interface PickerOption {
   name: string;
   values: string[];
   kind: 'colour' | 'size' | 'other';
@@ -19,13 +20,26 @@ export interface ProductOption {
 const COLOUR = /colou?r/i;
 const SIZE = /size|waist|leg|length|fit/i;
 
-export function productOptions(product: Product): ProductOption[] {
+/**
+ * The choices to show.
+ *
+ * `product.options` is the truth: a detail lookup returns every option but only
+ * the variant matching what has been chosen, so building the picker from
+ * variants alone would show a single size. Variants are the fallback for
+ * anything cached before the server sent options.
+ */
+export function productOptions(product: Product): PickerOption[] {
   const byName = new Map<string, string[]>();
-  for (const variant of product.variants) {
-    for (const [name, value] of Object.entries(variant.options)) {
-      const values = byName.get(name) ?? [];
-      if (!values.includes(value)) values.push(value);
-      byName.set(name, values);
+  for (const option of product.options ?? []) {
+    if (option.values.length > 0) byName.set(option.name, [...option.values]);
+  }
+  if (byName.size === 0) {
+    for (const variant of product.variants) {
+      for (const [name, value] of Object.entries(variant.options)) {
+        const values = byName.get(name) ?? [];
+        if (!values.includes(value)) values.push(value);
+        byName.set(name, values);
+      }
     }
   }
   return [...byName.entries()].map(([name, values]) => ({
@@ -35,10 +49,21 @@ export function productOptions(product: Product): ProductOption[] {
   }));
 }
 
-/** The variant matching every chosen option, or null while anything is unchosen. */
+/** True when the product offers no real choice - one colour, one size, or none at all. */
+export function nothingToChoose(product: Product): boolean {
+  return productOptions(product).every((option) => option.values.length <= 1);
+}
+
+/**
+ * The variant that matches every chosen option.
+ *
+ * Shopify hands back a default variant even when nothing has been chosen, so a
+ * lone variant is never proof of a choice - it has to match the selection
+ * option for option (RULE 4).
+ */
 export function matchVariant(product: Product, selection: Selection): ProductVariant | null {
-  if (product.variants.length === 1) return product.variants[0] ?? null;
   const options = productOptions(product);
+  if (nothingToChoose(product)) return product.variants[0] ?? null;
   if (options.some((option) => !selection[option.name])) return null;
   return (
     product.variants.find((variant) =>
@@ -47,8 +72,20 @@ export function matchVariant(product: Product, selection: Selection): ProductVar
   );
 }
 
-/** Is this value possible given what else is already chosen? Used to grey out sold-out sizes. */
+/** Do we hold every combination, or just the one the server matched? */
+function hasEveryVariant(product: Product): boolean {
+  const combinations = productOptions(product).reduce((total, option) => total * Math.max(option.values.length, 1), 1);
+  return product.variants.length >= combinations;
+}
+
+/**
+ * Is this value possible given what else is already chosen? Used to grey out
+ * sold-out sizes - but only when we actually hold every variant. With just the
+ * matched one, stock is unknown until the variant is resolved, and greying
+ * everything out would be a lie.
+ */
 export function isValueAvailable(product: Product, selection: Selection, name: string, value: string): boolean {
+  if (!hasEveryVariant(product)) return true;
   return product.variants.some(
     (variant) =>
       variant.available &&

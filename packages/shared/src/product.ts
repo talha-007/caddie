@@ -19,6 +19,20 @@ export interface ProductVariant {
   options: Record<string, string>;
 }
 
+/**
+ * The choices a customer picks from, e.g. { name: 'Size', values: ['S','M'] }.
+ *
+ * Options and variants are not the same thing: options are every choice the
+ * product offers, variants are the concrete combinations. A product detail
+ * lookup returns all the options but only the variant matching what has been
+ * chosen so far, so the size picker is built from `options` and the thing you
+ * add to the basket comes from `variants`.
+ */
+export interface ProductOption {
+  name: string;
+  values: string[];
+}
+
 export interface Product {
   id: string;
   title: string;
@@ -34,7 +48,13 @@ export interface Product {
    * saving when this is present, it never works one out on its own.
    */
   compareAtPrice?: Money | null;
-  /** Populated by getProductDetails, empty from a plain search. */
+  /** Every choice on offer. Build the picker from this. */
+  options: ProductOption[];
+  /**
+   * The variants matching what has been chosen. A detail lookup with a chosen
+   * size returns exactly one; with nothing chosen it may return a default.
+   * Only add to the basket when you have the one the customer actually picked.
+   */
   variants: ProductVariant[];
   description: string | null;
 }

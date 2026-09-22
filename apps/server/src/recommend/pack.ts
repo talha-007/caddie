@@ -1,5 +1,6 @@
 import type { Money, PackInput, PackRecommendation, Product } from '@caddie/shared';
 import { searchProducts } from '../shopify/catalog.js';
+import { storeCurrency } from '../shopify/money.js';
 
 /**
  * Day 5 - Ambassador Pack.
@@ -37,7 +38,7 @@ function hasSize(product: Product, size?: string): boolean {
 function sum(products: Product[]): Money {
   return {
     amount: Number(products.reduce((total, p) => total + p.price.amount, 0).toFixed(2)),
-    currency: products[0]?.price.currency ?? 'GBP',
+    currency: products[0]?.price.currency ?? storeCurrency(),
   };
 }
 
@@ -81,11 +82,9 @@ export async function recommendPack(input: PackInput): Promise<PackRecommendatio
 
   const results = await searchProducts({
     query,
-    context: `Building a ${itemCount} item pack for a Druids customer${
-      input.budget ? ` with a budget of ${input.budget.amount} ${input.budget.currency}` : ''
-    }`,
     limit: Math.max(itemCount * 4, 12),
-    ...(input.budget ? { maxPrice: input.budget.amount } : {}),
+    // Nothing in the pack can cost more than the whole budget.
+    ...(input.budget ? { maxPrice: input.budget.amount, currency: input.budget.currency } : {}),
   });
 
   const available = results.filter((p) => p.price.amount > 0);
