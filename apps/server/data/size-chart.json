@@ -1,0 +1,41 @@
+{
+  "_note": "PLACEHOLDER DATA - Day 4 task. Replace every range below with the real Druids size guide before any customer testing. The shape is final; only the numbers change.",
+  "_source": "TODO: paste the URL of the Druids size guide here once confirmed",
+  "defaultCategory": "mens-top",
+  "categories": {
+    "mens-top": {
+      "label": "Mens tops, jerseys and hoodies",
+      "sizes": [
+        { "size": "XS", "chestCm": [86, 91], "heightCm": [163, 170], "weightKg": [55, 63] },
+        { "size": "S", "chestCm": [92, 97], "heightCm": [168, 175], "weightKg": [62, 72] },
+        { "size": "M", "chestCm": [98, 103], "heightCm": [173, 180], "weightKg": [71, 82] },
+        { "size": "L", "chestCm": [104, 111], "heightCm": [178, 186], "weightKg": [81, 94] },
+        { "size": "XL", "chestCm": [112, 119], "heightCm": [183, 191], "weightKg": [93, 107] },
+        { "size": "2XL", "chestCm": [120, 129], "heightCm": [186, 196], "weightKg": [106, 122] },
+        { "size": "3XL", "chestCm": [130, 140], "heightCm": [188, 200], "weightKg": [121, 140] }
+      ]
+    },
+    "mens-bottom": {
+      "label": "Mens shorts and trousers",
+      "sizes": [
+        { "size": "XS", "waistCm": [71, 76], "heightCm": [163, 170], "weightKg": [55, 63] },
+        { "size": "S", "waistCm": [77, 82], "heightCm": [168, 175], "weightKg": [62, 72] },
+        { "size": "M", "waistCm": [83, 88], "heightCm": [173, 180], "weightKg": [71, 82] },
+        { "size": "L", "waistCm": [89, 96], "heightCm": [178, 186], "weightKg": [81, 94] },
+        { "size": "XL", "waistCm": [97, 104], "heightCm": [183, 191], "weightKg": [93, 107] },
+        { "size": "2XL", "waistCm": [105, 114], "heightCm": [186, 196], "weightKg": [106, 122] }
+      ]
+    },
+    "womens-top": {
+      "label": "Womens tops and jerseys",
+      "sizes": [
+        { "size": "6", "chestCm": [76, 80], "heightCm": [155, 163], "weightKg": [45, 51] },
+        { "size": "8", "chestCm": [81, 85], "heightCm": [157, 166], "weightKg": [50, 57] },
+        { "size": "10", "chestCm": [86, 90], "heightCm": [160, 170], "weightKg": [56, 64] },
+        { "size": "12", "chestCm": [91, 96], "heightCm": [163, 173], "weightKg": [63, 72] },
+        { "size": "14", "chestCm": [97, 102], "heightCm": [165, 175], "weightKg": [71, 81] },
+        { "size": "16", "chestCm": [103, 109], "heightCm": [166, 177], "weightKg": [80, 91] }
+      ]
+    }
+  }
+}

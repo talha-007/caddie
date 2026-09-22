@@ -1,0 +1,21 @@
+{
+  "name": "personal-caddie",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Druids Personal Caddie - voice + chat shopping assistant",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@caddie/server & npm run dev --workspace=@caddie/widget",
+    "dev:server": "npm run dev --workspace=@caddie/server",
+    "dev:widget": "npm run dev --workspace=@caddie/widget",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
