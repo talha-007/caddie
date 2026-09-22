@@ -1571,12 +1571,23 @@
   pointer-events: none;
 }
 
-.caddie-mic--connecting {
+.caddie-mic--starting,
+.caddie-mic--sending {
   opacity: 0.75;
 }
 
-.caddie-mic--connecting .caddie-mic__pulse {
+.caddie-mic--starting .caddie-mic__pulse,
+.caddie-mic--sending .caddie-mic__pulse {
   animation: caddie-breathe 1s ease-in-out infinite;
+}
+
+/* Recording: the button becomes the send action, and says so. */
+.caddie-mic--recording {
+  background: var(--caddie-warning-text);
+}
+
+.caddie-mic--recording .caddie-mic__pulse {
+  background: var(--caddie-warning-text);
 }
 
 .caddie-mic--error {
@@ -1613,11 +1624,29 @@
   color: inherit;
 }
 
-.caddie-voicebar__partial {
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.caddie-voicebar__time {
+  font-size: 13px;
+  color: var(--caddie-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.caddie-voicebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* A red dot while recording, so the state is obvious at a glance. */
+.caddie-voicebar__label::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--caddie-warning-text);
+  animation: caddie-breathe 1.2s ease-in-out infinite;
 }
 
 .caddie-wave {

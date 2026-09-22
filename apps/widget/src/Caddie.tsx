@@ -12,7 +12,7 @@ import { VoiceBar } from './components/VoiceButton.js';
 import type { WidgetContext } from './lib/context.js';
 import { onOpenRequest } from './lib/events.js';
 import { useCaddie } from './lib/useCaddie.js';
-import { useVapi } from './lib/useVapi.js';
+import { useVoice } from './lib/useVoice.js';
 
 type Screen = 'chat' | 'basket';
 
@@ -28,14 +28,14 @@ function garmentFor(title: string | undefined): string {
 
 export function Caddie({ context }: { context: WidgetContext }) {
   const caddie = useCaddie(context.page);
-  const voice = useVapi(caddie.sessionId, caddie.addTranscript);
+  const voice = useVoice(caddie.sendClip);
   const [open, setOpen] = useState(false);
   const [screen, setScreen] = useState<Screen>('chat');
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
 
   const { startJourney, refreshCart } = caddie;
-  const { stop: stopVoice, active: voiceActive } = voice;
+  const { cancel: cancelVoice, active: voiceActive } = voice;
 
   const show = useCallback(() => {
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -43,7 +43,8 @@ export function Caddie({ context }: { context: WidgetContext }) {
   }, []);
 
   const close = useCallback(() => {
-    if (voiceActive) stopVoice();
+    // Closing mid-recording throws the clip away rather than sending it.
+    if (voiceActive) cancelVoice();
     setOpen(false);
     setScreen('chat');
     // The launcher is re-rendered on close, so it may not be the same node we left.
@@ -51,7 +52,7 @@ export function Caddie({ context }: { context: WidgetContext }) {
       const target = returnFocus.current?.isConnected ? returnFocus.current : document.querySelector('.caddie-launcher');
       if (target instanceof HTMLElement) target.focus();
     });
-  }, [stopVoice, voiceActive]);
+  }, [cancelVoice, voiceActive]);
   const closeRef = useRef(close);
   closeRef.current = close;
 

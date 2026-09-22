@@ -8,17 +8,21 @@ export class ApiError extends Error {
   }
 }
 
+async function unwrap<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new ApiError(detail?.detail ?? `Request failed (${res.status})`, res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new ApiError(detail?.detail ?? `Request failed (${res.status})`, res.status);
-  }
-  return res.json() as Promise<T>;
+  return unwrap<T>(res);
 }
 
 export function sendMessage(sessionId: string, text: string, context?: PageContext) {
@@ -38,6 +42,29 @@ export function runTool(sessionId: string, name: string, args: Record<string, un
     sessionId,
     args,
   });
+}
+
+export interface VoiceResponse {
+  sessionId: string;
+  /** What the customer actually said, as the server heard it. */
+  transcript: string;
+  message: CaddieMessage;
+}
+
+/**
+ * Sends one recorded clip. The body is the audio itself - no form wrapper -
+ * and the server transcribes it and answers in the same round trip.
+ */
+export function sendVoice(sessionId: string, clip: Blob) {
+  // Browsers report types like "audio/webm;codecs=opus"; the server wants the
+  // plain type it can map to a file extension for transcription.
+  const contentType = (clip.type || 'audio/webm').split(';')[0] as string;
+
+  return fetch(`${BASE}/api/voice?sessionId=${encodeURIComponent(sessionId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': contentType },
+    body: clip,
+  }).then((res) => unwrap<VoiceResponse>(res));
 }
 
 export interface CaddieEvent {

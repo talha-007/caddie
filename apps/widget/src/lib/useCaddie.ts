@@ -10,7 +10,7 @@ import type {
   SizeInput,
   SizeRecommendation,
 } from '@caddie/shared';
-import { openEventStream, runTool, sendMessage } from './api.js';
+import { openEventStream, runTool, sendMessage, sendVoice } from './api.js';
 import { announceCart } from './events.js';
 import { sameId } from './variants.js';
 
@@ -65,7 +65,8 @@ export interface CaddieState {
   addToBasket: (items: BasketItem[]) => Promise<boolean>;
   changeQuantity: (lineId: string, quantity: number) => Promise<void>;
   refreshCart: () => Promise<void>;
-  addTranscript: (role: 'user' | 'assistant', text: string) => void;
+  /** Posts a recorded clip; the transcript comes back as the customer's own message. */
+  sendClip: (clip: Blob) => Promise<void>;
   clearError: () => void;
 }
 
@@ -151,8 +152,6 @@ export function useCaddie(page: PageContext): CaddieState {
   const silentProducts = useRef(new Set<string>());
   /** While > 0, cart cards only update the basket, they do not post to the thread. */
   const quietCart = useRef(0);
-  /** Once Vapi gives us the assistant's real words, the server's speech lines are redundant. */
-  const heardAssistant = useRef(false);
 
   useEffect(() => {
     writeStorage(THREAD_KEY, { messages: messages.slice(-MAX_STORED), cart, size } satisfies StoredThread);
@@ -192,6 +191,13 @@ export function useCaddie(page: PageContext): CaddieState {
       }
       if (!text && !attachment) return;
 
+      // A spoken line can arrive both in the reply and down SSE; say it once.
+      if (text && !attachment) {
+        const spoken = recent.current.find((entry) => entry.signature === `speech:${text}`);
+        if (spoken) return;
+        recent.current.push({ signature: `speech:${text}`, at: now, id: '' });
+      }
+
       const next: ThreadMessage = base ? { ...base } : message('assistant', text, attachment ? { attachment } : {});
       if (signature) recent.current.push({ signature, at: now, id: next.id });
       setMessages((prev) => [...prev, next]);
@@ -219,7 +225,7 @@ export function useCaddie(page: PageContext): CaddieState {
         }
         deliver('', attachment);
       }
-      if (event.type === 'speech' && event.text && !heardAssistant.current) {
+      if (event.type === 'speech' && event.text) {
         deliver(event.text);
       }
     });
@@ -412,10 +418,17 @@ export function useCaddie(page: PageContext): CaddieState {
 
   const refreshCart = useCallback(() => quietCartCall('view_cart', {}), [quietCartCall]);
 
-  const addTranscript = useCallback((role: 'user' | 'assistant', text: string) => {
-    if (role === 'assistant') heardAssistant.current = true;
-    setMessages((prev) => [...prev, message(role, text)]);
-  }, []);
+  const sendClip = useCallback(
+    async (clip: Blob) => {
+      await withBusy(null, async () => {
+        const reply = await sendVoice(sessionId, clip);
+        // Show what the Caddie heard, so a misheard word is obvious on screen.
+        if (reply.transcript) setMessages((prev) => [...prev, message('user', reply.transcript)]);
+        deliver(reply.message.text, reply.message.attachment, reply.message);
+      });
+    },
+    [deliver, sessionId, withBusy],
+  );
 
   return {
     sessionId,
@@ -435,7 +448,7 @@ export function useCaddie(page: PageContext): CaddieState {
     addToBasket,
     changeQuantity,
     refreshCart,
-    addTranscript,
+    sendClip,
     clearError: useCallback(() => setError(null), []),
   };
 }

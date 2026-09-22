@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { Journey } from '@caddie/shared';
-import type { VoiceState } from '../lib/useVapi.js';
+import type { VoiceState } from '../lib/useVoice.js';
 import { HangerIcon, RulerIcon, ShirtIcon, SparkleIcon, TagIcon } from './icons.js';
 import { SuggestionChips } from './SuggestionChips.js';
 import { VoiceButton, Wave } from './VoiceButton.js';
@@ -31,8 +31,10 @@ export function Home({ productTitle, voice, busy, onJourney, onAsk }: HomeProps)
         {voice.supported ? (
           <>
             <VoiceButton voice={voice} large />
-            <Wave volume={voice.active ? voice.volume : 0} />
-            <p className="caddie-home__voice-label">{voice.active ? 'Listening…' : 'Tap to talk to your Caddie'}</p>
+            <Wave level={voice.status === 'recording' ? voice.level : 0} />
+            <p className="caddie-home__voice-label">
+              {voice.status === 'recording' ? 'Listening… tap to send' : voice.status === 'sending' ? 'Transcribing…' : 'Hold to talk to your Caddie'}
+            </p>
           </>
         ) : (
           <span className="caddie-orb caddie-orb--hero" aria-hidden="true">

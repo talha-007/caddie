@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { VoiceState } from '../lib/useVapi.js';
+import type { VoiceState } from '../lib/useVoice.js';
 import { SendIcon } from './icons.js';
 import { VoiceButton } from './VoiceButton.js';
 
@@ -30,7 +30,7 @@ export function Composer({ disabled, voice, onSend }: ComposerProps) {
           className="caddie-input caddie-composer__input"
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          placeholder={voice.active ? 'Or type here…' : 'Type a message…'}
+          placeholder={voice.active ? 'Or type instead…' : 'Type a message…'}
           aria-label="Message the Caddie"
           autoComplete="off"
           enterKeyHint="send"

@@ -3,9 +3,8 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
 
 /**
- * The storefront build is an ES module bundle: `caddie.js` plus lazily loaded
- * chunks. The Vapi SDK is one of those chunks, so a customer who never taps the
- * mic never downloads the WebRTC stack.
+ * The storefront build is an ES module bundle: `caddie.js` plus any lazily
+ * loaded chunks.
  *
  * Because the chunks are fetched relative to the bundle, set
  * VITE_CADDIE_ASSET_BASE to wherever the files are hosted (the Shopify CDN
@@ -26,6 +25,12 @@ function rootEnv(mode: string): Record<string, string> {
   const env = loadEnv(mode, envDir, 'VITE_');
   if (before === undefined) delete process.env.VITE_USER_NODE_ENV;
   else process.env.VITE_USER_NODE_ENV = before;
+
+  // A VITE_* set on the command line beats the file, as it would with Vite's
+  // own env handling: `VITE_CADDIE_API_URL=https://... npm run dev`.
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith('VITE_') && key !== 'VITE_USER_NODE_ENV' && value) env[key] = value;
+  }
   return env;
 }
 
