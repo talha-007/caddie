@@ -40,9 +40,15 @@ interface Choice {
   finish_reason: string;
 }
 
+interface Usage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+}
+
 export const openaiEnabled = (): boolean => Boolean(env.openai.apiKey);
 
-async function complete(messages: ChatMessage[]): Promise<Choice> {
+async function complete(messages: ChatMessage[]): Promise<{ choice: Choice; usage?: Usage }> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -62,10 +68,10 @@ async function complete(messages: ChatMessage[]): Promise<Choice> {
     throw new UpstreamError(`OpenAI responded ${res.status}`, detail.slice(0, 500));
   }
 
-  const body = (await res.json()) as { choices?: Choice[] };
+  const body = (await res.json()) as { choices?: Choice[]; usage?: Usage };
   const choice = body.choices?.[0];
   if (!choice) throw new UpstreamError('OpenAI returned no choices');
-  return choice;
+  return { choice, usage: body.usage };
 }
 
 /**
@@ -113,13 +119,30 @@ export async function converse(sessionId: string, userText: string): Promise<Rep
 
   let attachment: CaddieAttachment | undefined;
 
+  // Tracked so cost per conversation is a measurement rather than a guess.
+  let promptTokens = 0;
+  let cachedTokens = 0;
+  let completionTokens = 0;
+
   for (let step = 0; step < MAX_STEPS; step += 1) {
     const startedAt = Date.now();
-    const choice = await complete(messages);
+    const { choice, usage } = await complete(messages);
+
+    promptTokens += usage?.prompt_tokens ?? 0;
+    cachedTokens += usage?.prompt_tokens_details?.cached_tokens ?? 0;
+    completionTokens += usage?.completion_tokens ?? 0;
+
     log.debug('openai.step', { step, ms: Date.now() - startedAt, finish: choice.finish_reason });
 
     const calls = choice.message.tool_calls ?? [];
     if (calls.length === 0) {
+      log.info('openai.turn', {
+        model: env.openai.model,
+        steps: step + 1,
+        promptTokens,
+        cachedTokens,
+        completionTokens,
+      });
       return { text: choice.message.content?.trim() || 'Sorry, I did not catch that.', attachment };
     }
 
