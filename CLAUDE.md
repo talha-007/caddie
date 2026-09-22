@@ -90,23 +90,38 @@ Druids products and 25 generic demo items. Details, and the deliberate
 out-of-stock variant that exists so the unhappy path can be tested, are in
 [docs/STORE.md](docs/STORE.md).
 
-## Shopify's rate limit
+## How we talk to Shopify, and why
 
-The UCP catalogue endpoint is throttled hard, and tripping it is expensive:
-the reply is `Too many requests, please retry after 3253 seconds` - the best
-part of an hour with no catalogue at all. A retry does not help.
+The UCP catalogue endpoint (`/api/ucp/mcp`) is throttled hard. Trip it and the
+reply is `Too many requests, please retry after 3253 seconds` - the best part
+of an hour with no catalogue at all, and no way to lift it. A day of testing
+was enough to trip it. At a thousand active customers it is hopeless: one
+outfit alone fires up to eight searches.
 
-Reads are what burn the quota. One outfit fires a search per slot, and a
-customer saying "cheaper" runs them all again, so `src/shopify/cache.ts` serves
-identical catalogue reads from memory for 60 seconds. Carts are never cached;
-a basket has to be live, and a cart change clears the catalogue cache because
-buying the last one moves stock.
+So nothing customer-facing calls it.
 
-Once refused, `ucpClient.ts` stops asking until the window passes and says so
-plainly rather than failing eight times in a row.
+| What | Where | Why |
+| --- | --- | --- |
+| Search, product detail | **local mirror**, `src/catalog/` | Unlimited and instant. Shopify sees one pull every 5 minutes however many customers there are. |
+| The catalogue pull | Admin API | A background job, not buyer traffic. Its own generous quota. |
+| The basket | **Storefront API**, `src/shopify/storefrontCart.ts` | Cannot be mirrored - it is live and per customer. Shopify does not rate-limit buyer traffic here. |
+| UCP | fallback only | Still wired up, still throttled. Not a path to rely on. |
 
-**Heavy testing will hit this.** If the Caddie suddenly cannot find anything,
-check the log for `shopify.ucp.locked_out` before assuming the code broke.
+`GET /health` reports the catalogue size and age, and which cart path is live.
+
+**The mirror is the reason search is fast.** A search is a few milliseconds of
+scoring in memory rather than a network round trip, and `src/catalog/search.ts`
+ranks on the words a customer actually uses. When nothing matches, nothing
+comes back - which is the honest answer, and better than the semantic search it
+replaced, which always returned something whether we stocked it or not.
+
+The trade is freshness: stock can be up to one refresh interval stale. Adding
+to the basket still checks the variant live, so the worst case is offering
+something that sold out in the last few minutes.
+
+**Without `SHOPIFY_STOREFRONT_TOKEN` the basket falls back to UCP** and will
+not survive real traffic. If the Caddie suddenly cannot find anything, check
+the log for `shopify.ucp.locked_out` before assuming the code broke.
 
 ## Cost
 

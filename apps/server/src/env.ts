@@ -99,6 +99,20 @@ export const env = {
      * cargo pants as golf kit. Leave empty on a store that sells only Druids.
      */
     brandTag: optional('SHOPIFY_BRAND_TAG'),
+    /** Admin API token, used to mirror the catalogue. Not per-customer traffic. */
+    adminToken: optional('DUMMY_STORE_ACCESS_TOKEN') || optional('SHOPIFY_ADMIN_TOKEN'),
+    /**
+     * Storefront API token, for the basket. Shopify does not rate-limit buyer
+     * traffic there, unlike the UCP endpoint. Without it the cart falls back
+     * to UCP, which is throttled and will not survive real traffic.
+     */
+    storefrontToken: optional('SHOPIFY_STOREFRONT_TOKEN'),
+    /**
+     * How often the local catalogue mirror refreshes. Shopify sees this many
+     * calls regardless of how many customers are shopping, so it can be short
+     * - the trade is only how stale stock can get between pulls.
+     */
+    catalogueRefreshMs: Number(optional('SHOPIFY_CATALOGUE_REFRESH_MS', String(5 * 60 * 1000))),
   },
   ucp: {
     get agentProfile() {

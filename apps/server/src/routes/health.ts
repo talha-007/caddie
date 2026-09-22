@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { catalogueState } from '../catalog/sync.js';
+import { storefrontCartEnabled } from '../shopify/storefrontCart.js';
 import { env, envFile } from '../env.js';
 import { searchProducts } from '../shopify/catalog.js';
 import { listUcpTools } from '../shopify/ucpClient.js';
@@ -18,6 +20,10 @@ healthRouter.get('/', (_req, res) => {
         ? 'vapi'
         : 'dev-keyword-router',
     voice: env.openai.apiKey ? `transcribe:${env.openai.transcribeModel}` : 'unavailable',
+    // Everything customer-facing searches this rather than Shopify.
+    catalogue: catalogueState(),
+    // UCP is throttled; the Storefront API is not rate-limited for buyers.
+    cart: storefrontCartEnabled() ? 'storefront-api' : 'ucp (throttled - set SHOPIFY_STOREFRONT_TOKEN)',
     vapi: {
       chatConfigured: Boolean(env.vapi.privateKey && env.vapi.assistantId),
       webhookSecured: Boolean(env.vapi.webhookSecret),

@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import { startCatalogueSync } from './catalog/sync.js';
 import { env } from './env.js';
 import { CaddieError } from './lib/errors.js';
 import { log } from './lib/logger.js';
@@ -56,6 +57,10 @@ export function createApp() {
 const isEntrypoint = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
 
 if (isEntrypoint) {
+  // Pull the catalogue now and keep it warm. Everything customer-facing reads
+  // the mirror, so Shopify's throttled endpoint is never in the hot path.
+  startCatalogueSync();
+
   createApp().listen(env.port, () => {
     log.info('caddie.server.listening', {
       port: env.port,
