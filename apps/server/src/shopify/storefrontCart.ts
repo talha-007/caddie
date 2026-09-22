@@ -1,6 +1,7 @@
 import type { Cart, CartLine, Money } from '@caddie/shared';
 import { env } from '../env.js';
 import { UpstreamError } from '../lib/errors.js';
+import { fetchWithTimeout } from '../lib/http.js';
 import { log } from '../lib/logger.js';
 
 /**
@@ -69,8 +70,10 @@ const CART_FIELDS = `
   }`;
 
 async function storefront<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`https://${env.shopify.storeDomain}/api/${API_VERSION}/graphql.json`, {
+  const res = await fetchWithTimeout(`https://${env.shopify.storeDomain}/api/${API_VERSION}/graphql.json`, {
     method: 'POST',
+    timeoutMs: 15_000,
+    label: 'Shopify Storefront API',
     headers: {
       'X-Shopify-Storefront-Access-Token': env.shopify.storefrontToken,
       'Content-Type': 'application/json',

@@ -191,6 +191,28 @@ expensive loop, on the cheapest model available, and obvious cases are caught
 by local rules for nothing at all. `src/lib/rateLimit.ts` caps what one session
 or address can spend.
 
+## Running under load
+
+The things that only bite at scale, and what handles them.
+
+| | |
+| --- | --- |
+| **Session memory** | History keeps the words, never the attachment. A session holding ten replies with their payloads was 153KB; without them it is 2KB. At a thousand live sessions that is 149MB against 3MB, for data nothing reads back. |
+| **Upstream timeouts** | Node's `fetch` has none, so a hung dependency holds a customer's request until the socket gives up. Everything outbound goes through `fetchWithTimeout` in `src/lib/http.ts`. |
+| **Model concurrency** | Capped by a semaphore (`OPENAI_MAX_CONCURRENT`, default 25). Past that they queue here rather than becoming a wall of 429s at the provider. `GET /health` shows `inFlight` and `queued`. |
+| **Provider 429s** | One short retry, honouring `retry-after`. OpenAI's limit clears in seconds, unlike Shopify's. |
+| **Webhook bursts** | A bulk edit fires one webhook per product. They are collected for 1.5s; past fifteen it does a single delta pull rather than 2,442 separate reads. |
+| **Overlapping syncs** | One delta at a time. On a large catalogue a pull can outlast its own interval, and two would race to write the mirror. |
+| **One bad request** | `unhandledRejection` is logged and survived - a malformed webhook took the whole process down once. An `uncaughtException` still exits, because the process state is then unknown. |
+| **Deploys** | SIGTERM finishes what is in flight, with a 15s cap for SSE streams. |
+| **Readiness** | `/health` returns 503 until the catalogue has landed, so a load balancer holds traffic off an instance that cannot search. |
+
+**Still single-instance.** Sessions, rate limits and the mirror all live in this
+process's memory. A second instance would have its own copy of each: sessions
+would be lost on whichever node a request landed on, and rate limits would be
+per-node. Horizontal scaling needs sessions and limits in Redis first - the
+mirror is fine to duplicate.
+
 ## Checks
 
 ```bash

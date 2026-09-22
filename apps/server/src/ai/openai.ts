@@ -1,6 +1,7 @@
 import type { CaddieAttachment } from '@caddie/shared';
 import { env } from '../env.js';
 import { UpstreamError } from '../lib/errors.js';
+import { fetchWithTimeout, Semaphore } from '../lib/http.js';
 import { log } from '../lib/logger.js';
 import { publish } from '../session/bus.js';
 import { sessions, type CaddieSession } from '../session/store.js';
@@ -54,9 +55,27 @@ interface Usage {
 
 export const openaiEnabled = (): boolean => Boolean(env.openai.apiKey);
 
-async function complete(messages: ChatMessage[]): Promise<{ choice: Choice; usage?: Usage }> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+/**
+ * How many model calls may be in flight at once.
+ *
+ * Unbounded, a rush of customers becomes a rush of simultaneous calls, OpenAI
+ * starts refusing them, and every one of those customers waits on a retry -
+ * the queue has just moved somewhere we cannot see it. Holding the line here
+ * keeps the failure mode a slightly longer wait instead of an error.
+ */
+const inFlight = new Semaphore(env.openai.maxConcurrent);
+
+export function modelLoad(): { inFlight: number; queued: number } {
+  return { inFlight: inFlight.inFlight, queued: inFlight.queued };
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function callOnce(messages: ChatMessage[]): Promise<Response> {
+  return fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
+    timeoutMs: env.openai.timeoutMs,
+    label: 'OpenAI',
     headers: {
       Authorization: `Bearer ${env.openai.apiKey}`,
       'Content-Type': 'application/json',
@@ -68,16 +87,36 @@ async function complete(messages: ChatMessage[]): Promise<{ choice: Choice; usag
       tool_choice: 'auto',
     }),
   });
+}
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new UpstreamError(`OpenAI responded ${res.status}`, detail.slice(0, 500));
-  }
+async function complete(messages: ChatMessage[]): Promise<{ choice: Choice; usage?: Usage }> {
+  return inFlight.run(async () => {
+    let res = await callOnce(messages);
 
-  const body = (await res.json()) as { choices?: Choice[]; usage?: Usage };
-  const choice = body.choices?.[0];
-  if (!choice) throw new UpstreamError('OpenAI returned no choices');
-  return { choice, usage: body.usage };
+    /*
+     * A 429 here is OpenAI's own rate limit, not ours, and it is usually over
+     * in a second or two - unlike Shopify's. One short retry turns a failed
+     * conversation into a slightly slow one. A 5xx gets the same treatment,
+     * since those are typically transient.
+     */
+    if (res.status === 429 || res.status >= 500) {
+      const after = Number(res.headers.get('retry-after'));
+      const waitMs = Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 5000) : 1200;
+      log.warn('openai.retrying', { status: res.status, waitMs });
+      await sleep(waitMs);
+      res = await callOnce(messages);
+    }
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new UpstreamError(`OpenAI responded ${res.status}`, detail.slice(0, 500));
+    }
+
+    const body = (await res.json()) as { choices?: Choice[]; usage?: Usage };
+    const choice = body.choices?.[0];
+    if (!choice) throw new UpstreamError('OpenAI returned no choices');
+    return { choice, usage: body.usage };
+  });
 }
 
 /**

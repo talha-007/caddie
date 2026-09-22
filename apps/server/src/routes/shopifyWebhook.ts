@@ -81,6 +81,42 @@ shopifyWebhookRouter.post(
   },
 );
 
+/**
+ * Products waiting to be re-read, and the timer that will do it.
+ *
+ * A bulk edit in the Shopify admin - a sale going on, a price list imported -
+ * fires a webhook per product. Two and a half thousand of those, each firing
+ * its own Admin API read, would throttle us out of the API we depend on. So
+ * they are collected for a moment and fetched as one delta instead.
+ */
+const pending = new Set<string>();
+let flushTimer: NodeJS.Timeout | null = null;
+
+const BURST_WINDOW_MS = 1500;
+/** Past this many at once it is a bulk edit, and a delta pull is cheaper. */
+const BURST_IS_BULK = 15;
+
+function schedule(productId: string): void {
+  pending.add(productId);
+  if (flushTimer) return;
+
+  flushTimer = setTimeout(() => {
+    const ids = [...pending];
+    pending.clear();
+    flushTimer = null;
+
+    const work =
+      ids.length >= BURST_IS_BULK
+        ? // One query for everything that changed beats one per product.
+          syncDelta().then((count) => log.info('shopify.webhook.bulk', { products: ids.length, refreshed: count }))
+        : Promise.all(ids.map((id) => refreshProduct(id))).then(() => undefined);
+
+    work.catch((err) => log.error('shopify.webhook.flush_failed', { err: String(err) }));
+  }, BURST_WINDOW_MS);
+
+  flushTimer.unref?.();
+}
+
 async function handle(topic: string, payload: Record<string, unknown>): Promise<void> {
   const gid = (id: unknown, kind: string) =>
     typeof id === 'number' || typeof id === 'string' ? `gid://shopify/${kind}/${id}` : null;
@@ -90,8 +126,8 @@ async function handle(topic: string, payload: Record<string, unknown>): Promise<
     case 'products/update': {
       const productId = gid(payload.id, 'Product');
       if (!productId) return;
-      await refreshProduct(productId);
-      log.info('shopify.webhook.product', { topic, productId });
+      schedule(productId);
+      log.debug('shopify.webhook.product', { topic, productId });
       return;
     }
 
@@ -114,8 +150,8 @@ async function handle(topic: string, payload: Record<string, unknown>): Promise<
       const productId = productForInventoryItem(inventoryItemId);
       if (!productId) return;
 
-      await refreshProduct(productId);
-      log.info('shopify.webhook.stock', { productId });
+      schedule(productId);
+      log.debug('shopify.webhook.stock', { productId });
       return;
     }
 

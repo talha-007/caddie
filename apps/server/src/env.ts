@@ -145,6 +145,16 @@ export const env = {
      * an off-topic question reach the full loop.
      */
     guardModel: optional('OPENAI_GUARD_MODEL', 'gpt-4.1-nano'),
+    /**
+     * A hung call holds a customer's request open with nothing to show for it.
+     * Long enough for a slow answer, short enough to fail and let them retry.
+     */
+    timeoutMs: Number(optional('OPENAI_TIMEOUT_MS', '45000')),
+    /**
+     * Model calls allowed at once. Past this they queue here rather than
+     * turning into a wall of 429s at the provider.
+     */
+    maxConcurrent: Number(optional('OPENAI_MAX_CONCURRENT', '25')),
   },
   vapi: {
     privateKey: optional('VAPI_PRIVATE_KEY'),

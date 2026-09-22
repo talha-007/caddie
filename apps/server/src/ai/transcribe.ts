@@ -1,5 +1,6 @@
 import { env } from '../env.js';
 import { CaddieError, UpstreamError } from '../lib/errors.js';
+import { fetchWithTimeout } from '../lib/http.js';
 import { log } from '../lib/logger.js';
 
 /**
@@ -61,8 +62,11 @@ export async function transcribe(audio: Buffer, mimeType: string): Promise<strin
   );
 
   const startedAt = Date.now();
-  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+  const res = await fetchWithTimeout('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST',
+    // Uploading a recording, so more room than a text call.
+    timeoutMs: 45_000,
+    label: 'transcription',
     headers: { Authorization: `Bearer ${env.openai.apiKey}` },
     body: form,
   });

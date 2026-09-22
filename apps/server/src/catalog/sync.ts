@@ -1,6 +1,7 @@
 import type { Product, ProductOption, ProductVariant } from '@caddie/shared';
 import { env } from '../env.js';
 import { UpstreamError } from '../lib/errors.js';
+import { fetchWithTimeout } from '../lib/http.js';
 import { log } from '../lib/logger.js';
 
 /**
@@ -126,8 +127,10 @@ function toProduct(raw: AdminProduct): Product {
 }
 
 async function admin<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`https://${env.shopify.storeDomain}/admin/api/2025-07/graphql.json`, {
+  const res = await fetchWithTimeout(`https://${env.shopify.storeDomain}/admin/api/2025-07/graphql.json`, {
     method: 'POST',
+    timeoutMs: 30_000,
+    label: 'Shopify Admin API',
     headers: {
       'X-Shopify-Access-Token': env.shopify.adminToken,
       'Content-Type': 'application/json',
@@ -324,8 +327,24 @@ export async function syncCatalogue(): Promise<CatalogueState> {
 let deltaTimer: NodeJS.Timeout | null = null;
 let reconcileTimer: NodeJS.Timeout | null = null;
 
-/** Catches up on anything missed since the last delta, or while we were down. */
+let deltaInFlight: Promise<number> | null = null;
+
+/**
+ * Catches up on anything missed since the last delta, or while we were down.
+ *
+ * Only one runs at a time: on a large catalogue a delta can outlast its own
+ * interval, and two overlapping pulls would race to write the mirror.
+ */
 export async function syncDelta(): Promise<number> {
+  if (deltaInFlight) return deltaInFlight;
+
+  deltaInFlight = runDelta().finally(() => {
+    deltaInFlight = null;
+  });
+  return deltaInFlight;
+}
+
+async function runDelta(): Promise<number> {
   if (!lastDeltaAt) {
     await syncCatalogue();
     return products.length;

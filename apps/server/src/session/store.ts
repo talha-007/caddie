@@ -51,6 +51,24 @@ const TTL_MS = 1000 * 60 * 60 * 2; // 2 hours of idle, then the session is gone.
 const MAX_MESSAGES = 40;
 
 /**
+ * History keeps the words, never the payload.
+ *
+ * An attachment carries whole products - images, variants, tags, the lot - and
+ * a session holding ten of them is 153KB against 2KB without. At a thousand
+ * live sessions that is 149MB versus 2MB, for data nothing ever reads back:
+ * the model is only ever shown `text`, and `lastShown` carries the ids and
+ * titles needed to resolve "that one".
+ *
+ * Copied rather than deleted in place, because the caller is still holding
+ * the same message object and is about to send the attachment to the browser.
+ */
+function stripAttachment(message: CaddieMessage): CaddieMessage {
+  if (!message.attachment) return message;
+  const { attachment: _dropped, ...rest } = message;
+  return rest;
+}
+
+/**
  * Drops undefined values so a patch can never unset something the customer
  * told us earlier. "Show me a cheaper one" must not forget the colour.
  */
@@ -96,6 +114,7 @@ export class MemorySessionStore implements SessionStore {
     if (session.messages.length > MAX_MESSAGES) {
       session.messages = session.messages.slice(-MAX_MESSAGES);
     }
+    session.messages = session.messages.map(stripAttachment);
     this.sessions.set(session.id, session);
     this.sweep();
   }

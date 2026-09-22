@@ -1,4 +1,5 @@
 import { env } from '../env.js';
+import { fetchWithTimeout } from '../lib/http.js';
 import { log } from '../lib/logger.js';
 
 /**
@@ -101,8 +102,12 @@ export async function screen(text: string, hasHistory: boolean): Promise<Verdict
   if (!env.openai.apiKey) return { allow: true };
 
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
+      // One word in, one word out: if it is slow, let the customer through
+      // rather than make them wait on a screening call.
+      timeoutMs: 4000,
+      label: 'guard',
       headers: {
         Authorization: `Bearer ${env.openai.apiKey}`,
         'Content-Type': 'application/json',
