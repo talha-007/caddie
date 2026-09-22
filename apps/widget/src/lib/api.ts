@@ -1,4 +1,4 @@
-import type { CaddieAttachment, CaddieMessage } from '@caddie/shared';
+import type { CaddieAttachment, CaddieMessage, ChatRequest, PageContext } from '@caddie/shared';
 
 const BASE = (import.meta.env.VITE_CADDIE_API_URL ?? 'http://localhost:8787').replace(/\/$/, '');
 
@@ -21,13 +21,20 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function sendMessage(sessionId: string, text: string) {
-  return post<{ sessionId: string; message: CaddieMessage }>('/api/chat', { sessionId, text });
+export function sendMessage(sessionId: string, text: string, context?: PageContext) {
+  const body: ChatRequest = { sessionId, text, ...(context ? { context } : {}) };
+  return post<{ sessionId: string; message: CaddieMessage }>('/api/chat', body);
 }
 
 /** Runs a tool directly. Useful while building UI before the AI understands the phrasing. */
+export interface ToolResponse {
+  sessionId: string;
+  speech: string;
+  attachment?: CaddieAttachment;
+}
+
 export function runTool(sessionId: string, name: string, args: Record<string, unknown>) {
-  return post<{ sessionId: string; speech: string; attachment?: CaddieAttachment }>(`/api/tools/${name}`, {
+  return post<ToolResponse>(`/api/tools/${name}`, {
     sessionId,
     args,
   });

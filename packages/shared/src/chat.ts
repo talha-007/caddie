@@ -22,9 +22,26 @@ export type CaddieAttachment =
   | { kind: 'outfit'; recommendation: OutfitRecommendation }
   | { kind: 'cart'; cart: Cart };
 
+/**
+ * Where the customer is on the storefront when they talk to the Caddie. The
+ * theme provides it (see apps/widget/src/lib/context.ts), so the Caddie can
+ * answer "what size in this?" without asking which product.
+ */
+export interface PageContext {
+  pageType: 'product' | 'collection' | 'cart' | 'other';
+  /** Shopify product GID, the same id MCP uses, e.g. gid://shopify/Product/123. */
+  productId?: string;
+  productHandle?: string;
+  productTitle?: string;
+  /** The variant currently selected on the product page, as a GID. */
+  variantId?: string;
+}
+
 export interface ChatRequest {
   sessionId: string;
   text: string;
+  /** Optional. The server ignores it until the prompt makes use of it. */
+  context?: PageContext;
 }
 
 export interface ChatResponse {

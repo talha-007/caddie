@@ -108,6 +108,27 @@ relative to it.
 
 Remember to add the storefront origin to `CORS_ORIGINS` on the server.
 
+### Theme hooks
+
+On product templates, give the mount node the product so the Caddie knows what
+the customer is looking at (full list in `apps/widget/src/lib/context.ts`):
+
+```liquid
+<div id="druids-caddie"
+     data-page-type="product"
+     data-product-id="{{ product.id }}"
+     data-product-title="{{ product.title | escape }}"
+     data-product-image="{{ product.featured_image | image_url: width: 200 }}"
+     data-variant-id="{{ product.selected_or_first_available_variant.id }}"></div>
+```
+
+- **Open buttons anywhere in the theme:** `<button data-caddie-open="size">Find My Size with Caddie</button>`
+  (`size`, `pack`, `outfit`, or empty for the home screen), or `window.DruidsCaddie.open('size')`.
+- **Hide the floating launcher** when the theme has its own buttons: `data-launcher="false"` on the mount node.
+- **Raise the launcher** above a sticky add-to-cart bar: `#druids-caddie .caddie-root { --caddie-launcher-offset: 88px; }`
+- **Events out:** `caddie:size-recommended` (`detail.size`) so the product form can preselect the size, and
+  `caddie:cart-updated` (`detail.totalQuantity`) for the header cart count.
+
 ## Checks
 
 ```bash
@@ -122,4 +143,5 @@ Things deliberately left as placeholders, each marked `TODO` in the code:
 
 - `apps/server/data/size-chart.json` is placeholder sizing. Replace with the real Druids size guide (Day 4).
 - Sessions are in memory, so a server restart forgets every conversation. Fine for the sprint, swap for Redis before real traffic.
-- `--caddie-accent` in `apps/widget/src/styles.css` is a stand-in for the Druids brand colour.
+- `compareAtPrice` (RRP) is in the shared `Product` type but the server normaliser does not read it yet, so pack savings and RRP strike-throughs stay hidden until it does.
+- `PageContext` is sent with every chat message, but the prompt does not use it yet.

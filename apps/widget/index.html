@@ -6,12 +6,31 @@
     <title>Druids Personal Caddie - dev harness</title>
   </head>
   <body>
-    <!-- Stands in for a Druids product page while we build. -->
+    <!--
+      Stands in for a Druids product page while we build. The mount node carries
+      the same data attributes the theme's product template will print (see
+      src/lib/context.ts). To test "add in my size" against the real store, put
+      a real product id in data-product-id - get one from
+      POST /api/tools/search_products.
+    -->
     <main class="host-page">
-      <h1>Druids</h1>
-      <p>Dev harness. The Caddie mounts bottom right, exactly as it will on the storefront.</p>
+      <p class="host-page__crumb">Dev harness · product page</p>
+      <h1>Orient Polo - Navy</h1>
+      <p>This is not the storefront. The Caddie mounts bottom right, exactly as it will on the theme.</p>
+      <p>
+        <button type="button" class="host-page__btn" data-caddie-open="size">Find My Size with Caddie</button>
+        <button type="button" class="host-page__btn" data-caddie-open="pack">Ambassador Pack</button>
+        <button type="button" class="host-page__btn" data-caddie-open="outfit">Build an outfit</button>
+      </p>
     </main>
-    <div id="druids-caddie"></div>
+    <div
+      id="druids-caddie"
+      data-page-type="product"
+      data-product-id=""
+      data-product-title="Orient Polo - Navy"
+      data-product-image=""
+      data-variant-id=""
+    ></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
