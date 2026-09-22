@@ -8,7 +8,10 @@ import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
 import { runTool } from '../tools/index.js';
 import { route } from '../ai/devRouter.js';
+import { screen } from '../ai/guard.js';
 import { converse, openaiEnabled } from '../ai/openai.js';
+import { consume, LIMITS } from '../lib/rateLimit.js';
+import { clientKey } from '../lib/request.js';
 
 /**
  * Text chat for the widget.
@@ -29,7 +32,7 @@ import { converse, openaiEnabled } from '../ai/openai.js';
 export const chatRouter: Router = Router();
 
 const bodySchema = z.object({
-  sessionId: z.string().min(1).optional(),
+  sessionId: z.string().min(1).max(100).optional(),
   text: z.string().min(1).max(2000),
 });
 
@@ -52,10 +55,37 @@ chatRouter.post('/', async (req, res, next) => {
   }
 
   const sessionId = parsed.data.sessionId ?? randomUUID();
+
+  // Public, unauthenticated, and every call spends money.
+  const bySession = consume(`chat:${sessionId}`, LIMITS.perSession);
+  const byAddress = consume(`ip:${clientKey(req)}`, LIMITS.perAddress);
+  const limited = !bySession.ok ? bySession : !byAddress.ok ? byAddress : null;
+  if (limited) {
+    log.warn('chat.rate_limited', { sessionId });
+    return res.status(429).json({
+      error: 'rate_limited',
+      detail: 'That is a lot of questions at once. Give me a minute and try again.',
+      retryAfter: limited.retryAfter,
+    });
+  }
+
   const session = await sessions.getOrCreate(sessionId);
   const userMessage = message('user', parsed.data.text);
 
   try {
+    /*
+     * Screen before the expensive loop. The full call carries ~2,400 tokens of
+     * prompt and tool schemas before it reads a word, so an essay request that
+     * gets this far has already cost us.
+     */
+    const verdict = await screen(parsed.data.text, session.messages.length > 0);
+    if (!verdict.allow) {
+      log.info('chat.declined', { sessionId, reason: verdict.reason });
+      const reply = message('assistant', verdict.reply);
+      // Not remembered: a declined message should not shape what follows.
+      return res.json({ sessionId, message: reply });
+    }
+
     const reply = openaiEnabled()
       ? await viaOpenai(sessionId, parsed.data.text)
       : vapiEnabled()

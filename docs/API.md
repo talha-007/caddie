@@ -278,8 +278,17 @@ a bug.
 { "error": "upstream_error", "detail": "Shopify UCP tool search_catalog failed" }
 ```
 
-`400` bad input · `413` audio too large · `501` feature not configured ·
+`400` bad input · `413` audio too large · `429 rate_limited` too many
+requests, `retryAfter` is in seconds · `501` feature not configured ·
 `502 upstream_error` Shopify or OpenAI failed · `500` our bug.
+
+A `429` is not a bug to work around. The endpoint is public and spends money
+on every call, so a session gets 40 messages an hour and voice 30. Show the
+`detail` text and let the customer try again.
+
+Messages that are clearly not about shopping - homework, code, attempts to
+change how the Caddie behaves - come back as a normal reply declining, not an
+error, so there is nothing special to render.
 
 A `502` is usually transient — offer a retry rather than a dead end.
 

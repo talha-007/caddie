@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import express, { Router } from 'express';
 import type { CaddieMessage } from '@caddie/shared';
+import { screen } from '../ai/guard.js';
 import { converse, openaiEnabled } from '../ai/openai.js';
 import { MAX_AUDIO_BYTES, transcribe, transcribeEnabled } from '../ai/transcribe.js';
+import { log } from '../lib/logger.js';
+import { consume, LIMITS } from '../lib/rateLimit.js';
+import { clientKey } from '../lib/request.js';
 import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
 
@@ -43,6 +47,20 @@ voiceRouter.post(
     const sessionId = (req.query.sessionId as string) || req.get('x-caddie-session') || randomUUID();
     const mimeType = req.get('content-type') ?? 'audio/webm';
 
+    // Transcription is billed per minute on top of the conversation, so voice
+    // gets a tighter budget than text.
+    const bySession = consume(`voice:${sessionId}`, LIMITS.voicePerSession);
+    const byAddress = consume(`ip:${clientKey(req)}`, LIMITS.perAddress);
+    const limited = !bySession.ok ? bySession : !byAddress.ok ? byAddress : null;
+    if (limited) {
+      log.warn('voice.rate_limited', { sessionId });
+      return res.status(429).json({
+        error: 'rate_limited',
+        detail: 'Let me catch up - try again in a minute.',
+        retryAfter: limited.retryAfter,
+      });
+    }
+
     try {
       const transcript = await transcribe(req.body as Buffer, mimeType);
 
@@ -56,6 +74,13 @@ voiceRouter.post(
       }
 
       const session = await sessions.getOrCreate(sessionId);
+
+      const verdict = await screen(transcript, session.messages.length > 0);
+      if (!verdict.allow) {
+        log.info('voice.declined', { sessionId, reason: verdict.reason });
+        return res.json({ sessionId, transcript, message: assistantMessage(verdict.reply) });
+      }
+
       const reply = await converse(sessionId, transcript);
 
       const heard: CaddieMessage = {

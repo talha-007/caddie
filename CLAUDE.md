@@ -90,6 +90,26 @@ Druids products and 25 generic demo items. Details, and the deliberate
 out-of-stock variant that exists so the unhappy path can be tested, are in
 [docs/STORE.md](docs/STORE.md).
 
+## Cost
+
+About $3.20-$3.90 per thousand conversations on `gpt-4.1-mini`, plus $0.003 a
+minute for voice transcription. `openai.turn` logs the tokens for every turn,
+so this is measured rather than guessed.
+
+**Do not shorten the system prompt to save money.** It was tried and measured:
+trimming 2,900 tokens made things ~40% *more* expensive. The prompt and tool
+schemas are identical on every call, so they cache at a quarter of the input
+price; a longer stable prefix caches better than a shorter one. Cache hit rate
+fell from ~85% to ~55% and cost rose from $2.92 to $4.11 per thousand.
+
+What actually costs money is anything that **varies** per call - conversation
+history, FACTS blocks, the on-screen context. Trim there.
+
+Abuse and off-topic messages are screened by `src/ai/guard.ts` before the
+expensive loop, on the cheapest model available, and obvious cases are caught
+by local rules for nothing at all. `src/lib/rateLimit.ts` caps what one session
+or address can spend.
+
 ## Checks
 
 ```bash

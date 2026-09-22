@@ -20,7 +20,13 @@ import { SYSTEM_PROMPT } from './prompt.js';
  */
 
 const MAX_STEPS = 4;
-const HISTORY_TURNS = 12;
+/*
+ * Every turn kept here is resent on every call in the loop, so this is the
+ * cheapest dial in the file. Eight covers "cheaper" and "the navy one"
+ * comfortably; the session holds the durable facts - size, budget, colour,
+ * what is on screen - so history is not carrying them.
+ */
+const HISTORY_TURNS = 8;
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -148,46 +154,65 @@ export async function converse(sessionId: string, userText: string): Promise<Rep
 
     messages.push({ role: 'assistant', content: choice.message.content, tool_calls: calls });
 
-    for (const call of calls) {
-      let args: unknown = {};
-      try {
-        args = JSON.parse(call.function.arguments || '{}');
-      } catch {
-        args = {};
-      }
-
-      try {
-        // Re-read: an earlier tool in this batch may have changed the session.
-        const current = await sessions.getOrCreate(sessionId);
-        const result = await runTool(call.function.name, args, { session: current });
-
-        if (result.attachment) {
-          attachment = result.attachment;
-          publish({ type: 'attachment', sessionId, attachment: result.attachment });
+    /*
+     * Run the batch together rather than one after another.
+     *
+     * Each tool is a round trip to Shopify, so three in sequence is three
+     * times the wait for no reason - an outfit asking for a top, a bottom and
+     * a layer was paying that every time. They are independent: each reads the
+     * session and any session writes are merged rather than replacing it.
+     */
+    const results = await Promise.all(
+      calls.map(async (call) => {
+        let args: unknown = {};
+        try {
+          args = JSON.parse(call.function.arguments || '{}');
+        } catch {
+          args = {};
         }
 
+        try {
+          const current = await sessions.getOrCreate(sessionId);
+          const result = await runTool(call.function.name, args, { session: current });
+          log.info('openai.tool', { tool: call.function.name, sessionId });
+          return { call, result };
+        } catch (err) {
+          // Log the arguments and the upstream detail: "create_cart failed" on
+          // its own tells you nothing about which variant the model invented.
+          log.error('openai.tool.failed', {
+            tool: call.function.name,
+            args,
+            err: String(err),
+            detail: err instanceof UpstreamError ? err.detail : undefined,
+          });
+          return { call, failed: true as const };
+        }
+      }),
+    );
+
+    // Appended in call order, so the transcript stays deterministic.
+    for (const entry of results) {
+      if ('failed' in entry) {
         messages.push({
           role: 'tool',
-          tool_call_id: call.id,
-          content: result.facts ? `${result.speech}\n\nFACTS (data, do not read aloud):\n${result.facts}` : result.speech,
-        });
-        log.info('openai.tool', { tool: call.function.name, sessionId });
-      } catch (err) {
-        // Log the arguments and the upstream detail: "create_cart failed" on
-        // its own tells you nothing about which variant the model invented.
-        log.error('openai.tool.failed', {
-          tool: call.function.name,
-          args,
-          err: String(err),
-          detail: err instanceof UpstreamError ? err.detail : undefined,
-        });
-        messages.push({
-          role: 'tool',
-          tool_call_id: call.id,
+          tool_call_id: entry.call.id,
           content:
             'That lookup failed. Tell the customer you hit a problem and offer to try again. Do not invent an answer.',
         });
+        continue;
       }
+
+      const { result } = entry;
+      if (result.attachment) {
+        attachment = result.attachment;
+        publish({ type: 'attachment', sessionId, attachment: result.attachment });
+      }
+
+      messages.push({
+        role: 'tool',
+        tool_call_id: entry.call.id,
+        content: result.facts ? `${result.speech}\n\nFACTS (data, do not read aloud):\n${result.facts}` : result.speech,
+      });
     }
   }
 

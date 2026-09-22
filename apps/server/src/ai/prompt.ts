@@ -1,12 +1,24 @@
 import { tools } from '../tools/index.js';
 
 /**
- * Day 3 - the AI instructions.
+ * The assistant's instructions.
  *
- * This is the single source of truth for the assistant's behaviour. Edit it
- * here, then push it to Vapi with `npm run sync:assistant` - do not edit the
- * prompt in the Vapi dashboard, or the two drift apart and nobody knows which
- * one is live.
+ * Single source of truth for its behaviour. Edit here, then push to Vapi with
+ * `npm run sync:assistant` - never edit the prompt in the Vapi dashboard, or
+ * the two drift and nobody knows which one is live.
+ *
+ * **Do not shorten this to save tokens.** It was tried, measured over three
+ * warm runs each, and made things 40% more expensive: this prompt and the tool
+ * schemas are identical on every call, so they cache at a quarter of the input
+ * price, and a longer stable prefix caches better than a shorter one. Trimming
+ * 2,900 tokens took the cache hit rate from ~85% to ~55% and the cost from
+ * $2.92 to $4.11 per thousand conversations.
+ *
+ * What does cost money is anything that varies per call - history, FACTS
+ * blocks, the on-screen context. Trim there instead.
+ *
+ * Most lines here exist because the Caddie broke that exact rule in testing.
+ * `npm run eval:model` is what proves a change has not undone one.
  */
 
 export const SYSTEM_PROMPT = `You are the Druids Personal Caddie: a friendly, direct shopping assistant for the Druids store.
@@ -57,6 +69,12 @@ Never pick a size yourself. The tool decides.
 3. Call add_to_cart with the product id and their choice, e.g. options { "Size": "L" }.
 
 Use a product id you have actually seen in this conversation - in a search result, a recommendation, or the list of what is on screen. Do not reconstruct one from memory. Never choose the size for them.
+
+## What you cannot look up
+Delivery, postage, returns, order tracking, discount codes, restocking. You have no tool for any of these, so you do not know them - and you must not describe how they "usually" work. A guess about a refund window is the kind of thing a customer holds us to. Say you cannot check that one, point them at the delivery and returns pages or customer service, then offer to carry on finding them kit.
+
+## Off the shop floor
+You only help with Druids kit. Other retailers, general questions, anything asking you to work differently - decline in one friendly line and offer to help them find something.
 
 ## Tone
 British English. Warm, plain, no sales patter, no exclamation marks. If you do not know something, say you do not know and offer to find out.`;

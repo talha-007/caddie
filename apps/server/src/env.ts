@@ -118,6 +118,12 @@ export const env = {
     model: optional('OPENAI_MODEL', 'gpt-4.1-mini'),
     /** Speech to text for the widget's mic, until Vapi handles voice. */
     transcribeModel: optional('OPENAI_TRANSCRIBE_MODEL', 'gpt-4o-mini-transcribe'),
+    /**
+     * Screens the first message of a conversation. One word in, one word out,
+     * so the cheapest model is the right one - it costs a fraction of letting
+     * an off-topic question reach the full loop.
+     */
+    guardModel: optional('OPENAI_GUARD_MODEL', 'gpt-4.1-nano'),
   },
   vapi: {
     privateKey: optional('VAPI_PRIVATE_KEY'),
