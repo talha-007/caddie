@@ -10,7 +10,7 @@ import { runTool } from '../tools/index.js';
 import { route } from '../ai/devRouter.js';
 import { screen } from '../ai/guard.js';
 import { converse, openaiEnabled } from '../ai/openai.js';
-import { consume, LIMITS } from '../lib/rateLimit.js';
+import { consumeShared, LIMITS } from '../lib/rateLimit.js';
 import { clientKey } from '../lib/request.js';
 
 /**
@@ -57,8 +57,10 @@ chatRouter.post('/', async (req, res, next) => {
   const sessionId = parsed.data.sessionId ?? randomUUID();
 
   // Public, unauthenticated, and every call spends money.
-  const bySession = consume(`chat:${sessionId}`, LIMITS.perSession);
-  const byAddress = consume(`ip:${clientKey(req)}`, LIMITS.perAddress);
+  const [bySession, byAddress] = await Promise.all([
+    consumeShared(`chat:${sessionId}`, LIMITS.perSession),
+    consumeShared(`ip:${clientKey(req)}`, LIMITS.perAddress),
+  ]);
   const limited = !bySession.ok ? bySession : !byAddress.ok ? byAddress : null;
   if (limited) {
     log.warn('chat.rate_limited', { sessionId });
@@ -92,8 +94,9 @@ chatRouter.post('/', async (req, res, next) => {
         ? await viaVapi(sessionId, parsed.data.text)
         : await viaDevRouter(sessionId, parsed.data.text);
 
-    session.messages.push(userMessage, reply);
-    await sessions.save(session);
+    // Appended rather than saved: the tools have been writing to this session
+    // throughout the turn, and saving the copy read at the start would undo it.
+    await sessions.append(sessionId, [userMessage, reply]);
 
     if (reply.attachment) {
       publish({ type: 'attachment', sessionId, attachment: reply.attachment });

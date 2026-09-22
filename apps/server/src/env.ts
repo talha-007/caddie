@@ -77,6 +77,12 @@ export const env = {
   nodeEnv: optional('NODE_ENV', 'development'),
   isProd: optional('NODE_ENV', 'development') === 'production',
   publicUrl: optional('CADDIE_PUBLIC_URL'),
+  /**
+   * Shared state, for running more than one instance. Sessions, rate limits,
+   * the event stream and catalogue changes all need it; without it everything
+   * falls back to this process's memory, which is correct for a single one.
+   */
+  redisUrl: optional('REDIS_URL'),
   corsOrigins: optional('CORS_ORIGINS', 'http://localhost:5173')
     .split(',')
     .map((origin) => origin.trim())

@@ -3,6 +3,7 @@ import { env } from '../env.js';
 import { UpstreamError } from '../lib/errors.js';
 import { fetchWithTimeout } from '../lib/http.js';
 import { log } from '../lib/logger.js';
+import { redis, redisSubscriber } from '../lib/redis.js';
 
 /**
  * A local mirror of the Druids catalogue.
@@ -285,12 +286,68 @@ export function removeProduct(productId: string): boolean {
   return true;
 }
 
+/**
+ * Tells the other instances that a product moved.
+ *
+ * Shopify posts a webhook to one instance only, whichever the load balancer
+ * picked. Without this the others carry on serving the old price until their
+ * own delta pull - so for up to a minute, two customers could be quoted
+ * different prices for the same thing depending on which instance answered.
+ */
+const CHANGE_CHANNEL = 'caddie:catalogue';
+
+let changeSubscribed = false;
+
+export function listenForCatalogueChanges(): void {
+  if (changeSubscribed) return;
+  const sub = redisSubscriber();
+  if (!sub) return;
+  changeSubscribed = true;
+
+  sub.subscribe(CHANGE_CHANNEL).catch((err) => log.error('catalogue.subscribe_failed', { err: String(err) }));
+
+  sub.on('message', (channel, payload) => {
+    if (channel !== CHANGE_CHANNEL) return;
+    try {
+      const { productId, deleted } = JSON.parse(payload) as { productId: string; deleted?: boolean };
+      if (deleted) {
+        removeProduct(productId);
+        return;
+      }
+      // Fetched here rather than sent over the wire: the payload stays small,
+      // and every instance ends up with the same shape from the same source.
+      void refreshProduct(productId, { announce: false });
+    } catch {
+      log.warn('catalogue.unreadable_change');
+    }
+  });
+}
+
+function announceChange(productId: string, deleted = false): void {
+  const client = redis();
+  if (!client) return;
+  client
+    .publish(CHANGE_CHANNEL, JSON.stringify({ productId, deleted }))
+    .catch((err) => log.warn('catalogue.announce_failed', { err: String(err) }));
+}
+
 /** Re-reads one product, after a webhook says it changed. */
-export async function refreshProduct(productId: string): Promise<boolean> {
+export async function refreshProduct(
+  productId: string,
+  opts: { announce?: boolean } = {},
+): Promise<boolean> {
   const data = await admin<CataloguePage>(QUERY, { cursor: null, query: `id:${productId.split('/').pop()}` });
   const fresh = data.products.nodes.map(toProduct);
-  if (fresh.length === 0) return removeProduct(productId);
+
+  if (fresh.length === 0) {
+    const removed = removeProduct(productId);
+    if (opts.announce !== false) announceChange(productId, true);
+    return removed;
+  }
+
   applyChanges(fresh);
+  // Not when this came from another instance, or they would announce in circles.
+  if (opts.announce !== false) announceChange(productId);
   return true;
 }
 
@@ -368,6 +425,9 @@ export function startCatalogueSync(
   deltaMs = env.shopify.catalogueDeltaMs,
   reconcileMs = env.shopify.catalogueReconcileMs,
 ): void {
+  // Changes raised on other instances land here too.
+  listenForCatalogueChanges();
+
   // The first pull is done by the caller before taking traffic; these are the
   // safety nets behind the webhooks.
   deltaTimer = setInterval(() => {

@@ -1,4 +1,6 @@
 import type { CaddieMessage, SizeInput } from '@caddie/shared';
+import { redisEnabled } from '../lib/redis.js';
+import { RedisSessionStore } from './redisStore.js';
 
 /**
  * Day 7 - Conversation memory.
@@ -45,6 +47,16 @@ export interface SessionStore {
   getOrCreate(id: string): Promise<CaddieSession>;
   save(session: CaddieSession): Promise<void>;
   patch(id: string, patch: Partial<Omit<CaddieSession, 'id'>>): Promise<CaddieSession>;
+  /**
+   * Adds to the conversation without writing back anything else.
+   *
+   * A route reads the session, runs the model - which has its own tools
+   * patching size, budget and what is on screen - and then wants to record
+   * what was said. Saving the snapshot it read at the start would undo all of
+   * that. In memory this happened to work, because both held the same object;
+   * over Redis they are copies and the last write won.
+   */
+  append(id: string, messages: CaddieMessage[]): Promise<void>;
 }
 
 const TTL_MS = 1000 * 60 * 60 * 2; // 2 hours of idle, then the session is gone.
@@ -134,6 +146,12 @@ export class MemorySessionStore implements SessionStore {
     return session;
   }
 
+  async append(id: string, messages: CaddieMessage[]): Promise<void> {
+    const session = await this.getOrCreate(id);
+    session.messages.push(...messages);
+    await this.save(session);
+  }
+
   private sweep(): void {
     const cutoff = Date.now() - TTL_MS;
     for (const [id, session] of this.sessions) {
@@ -142,4 +160,10 @@ export class MemorySessionStore implements SessionStore {
   }
 }
 
-export const sessions: SessionStore = new MemorySessionStore();
+/**
+ * In Redis when there is one, in memory otherwise.
+ *
+ * Chosen once at startup rather than per call, so a Redis blip does not
+ * silently move a conversation between two different stores.
+ */
+export const sessions: SessionStore = redisEnabled() ? new RedisSessionStore() : new MemorySessionStore();

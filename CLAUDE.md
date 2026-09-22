@@ -207,11 +207,34 @@ The things that only bite at scale, and what handles them.
 | **Deploys** | SIGTERM finishes what is in flight, with a 15s cap for SSE streams. |
 | **Readiness** | `/health` returns 503 until the catalogue has landed, so a load balancer holds traffic off an instance that cannot search. |
 
-**Still single-instance.** Sessions, rate limits and the mirror all live in this
-process's memory. A second instance would have its own copy of each: sessions
-would be lost on whichever node a request landed on, and rate limits would be
-per-node. Horizontal scaling needs sessions and limits in Redis first - the
-mirror is fine to duplicate.
+## Running more than one instance
+
+Set `REDIS_URL` and run as many as you like. Without it everything falls back
+to this process's memory, which is correct for one instance and for local work.
+
+Four things need sharing, and only the first is obvious:
+
+| | Why it breaks otherwise |
+| --- | --- |
+| **Sessions** | The next message can land on another instance. The customer loses their size, their budget and their basket mid-conversation. |
+| **Rate limits** | Per-instance counters mean the real limit is the limit times the size of the fleet. |
+| **The event stream** | An SSE connection lives on the instance that accepted it, but the message producing a card may be handled by another. The card is published into the wrong process and never reaches the screen - with nothing in the logs to say so. |
+| **Catalogue changes** | Shopify posts a webhook to one instance. The others serve the old price until their own delta pull, so two customers can be quoted differently for the same minute. |
+
+The mirror itself is fine duplicated: each instance holds its own copy and they
+are kept in step by the change channel above.
+
+**`append`, not `save`, for conversation history.** A route reads the session,
+the model's tools write to it during the turn, and saving the snapshot read at
+the start undoes every one of them. In memory this happened to work because
+both held the same object; over Redis they are copies and the last write won.
+That bug cost the opening turn of every conversation and is what
+`test/sessionStore.test.ts` pins down.
+
+Verified against two instances sharing one Redis: a conversation moving between
+them keeps its history and size profile, a card raised on one arrives on the
+other's stream, and 46 messages alternating between instances were cut off at
+the shared cap of 40.
 
 ## Checks
 

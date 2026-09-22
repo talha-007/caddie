@@ -1,11 +1,15 @@
+import { log } from './logger.js';
+import { redis } from './redis.js';
+
 /**
  * Rate limiting.
  *
  * The chat endpoint is public, unauthenticated, and spends money on every
  * call. Without this, one script can run up a bill all afternoon.
  *
- * In memory, so the limits reset on restart and do not hold across instances.
- * That is honest for a pilot; put it in Redis before real traffic.
+ * Counted in Redis when it is configured, so the limit is the limit however
+ * many instances there are - per-instance counters would quietly multiply it
+ * by the size of the fleet. In memory otherwise, which is correct for one.
  */
 
 interface Bucket {
@@ -36,7 +40,7 @@ function sweep(now: number): void {
   }
 }
 
-export function consume(key: string, limit: Limit): LimitResult {
+function consumeLocal(key: string, limit: Limit): LimitResult {
   const now = Date.now();
   const bucket = buckets.get(key);
 
@@ -54,7 +58,49 @@ export function consume(key: string, limit: Limit): LimitResult {
   return { ok: true, remaining: limit.max - bucket.count };
 }
 
-/** Test seam - also used to keep one test from leaking into the next. */
+/**
+ * Counts in Redis: increment, and set the window on the first one.
+ *
+ * A fixed window rather than a sliding one. It can let through up to twice the
+ * limit across a boundary, which for "stop a script emptying the OpenAI
+ * budget" is neither here nor there, and it costs one round trip instead of
+ * keeping a sorted set per key.
+ */
+export async function consumeShared(key: string, limit: Limit): Promise<LimitResult> {
+  const client = redis();
+  if (!client) return consumeLocal(key, limit);
+
+  const redisKey = `caddie:rate:${key}`;
+
+  try {
+    const replies = await client
+      .multi()
+      .incr(redisKey)
+      // NX so an active window is never extended by later requests.
+      .expire(redisKey, Math.ceil(limit.windowMs / 1000), 'NX')
+      .ttl(redisKey)
+      .exec();
+
+    const count = Number(replies?.[0]?.[1] ?? 0);
+    const ttl = Number(replies?.[2]?.[1] ?? 0);
+
+    if (count > limit.max) {
+      return { ok: false, retryAfter: ttl > 0 ? ttl : Math.ceil(limit.windowMs / 1000), remaining: 0 };
+    }
+    return { ok: true, remaining: Math.max(0, limit.max - count) };
+  } catch (err) {
+    // Never let the limiter become the reason a customer cannot shop.
+    log.warn('ratelimit.redis_failed', { err: String(err) });
+    return consumeLocal(key, limit);
+  }
+}
+
+/** Synchronous, in-process. Kept for tests and the single-instance path. */
+export function consume(key: string, limit: Limit): LimitResult {
+  return consumeLocal(key, limit);
+}
+
+/** Test seam - also keeps one test from leaking into the next. */
 export function resetLimits(): void {
   buckets.clear();
 }

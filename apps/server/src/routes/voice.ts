@@ -5,7 +5,7 @@ import { screen } from '../ai/guard.js';
 import { converse, openaiEnabled } from '../ai/openai.js';
 import { MAX_AUDIO_BYTES, transcribe, transcribeEnabled } from '../ai/transcribe.js';
 import { log } from '../lib/logger.js';
-import { consume, LIMITS } from '../lib/rateLimit.js';
+import { consumeShared, LIMITS } from '../lib/rateLimit.js';
 import { clientKey } from '../lib/request.js';
 import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
@@ -49,8 +49,10 @@ voiceRouter.post(
 
     // Transcription is billed per minute on top of the conversation, so voice
     // gets a tighter budget than text.
-    const bySession = consume(`voice:${sessionId}`, LIMITS.voicePerSession);
-    const byAddress = consume(`ip:${clientKey(req)}`, LIMITS.perAddress);
+    const [bySession, byAddress] = await Promise.all([
+      consumeShared(`voice:${sessionId}`, LIMITS.voicePerSession),
+      consumeShared(`ip:${clientKey(req)}`, LIMITS.perAddress),
+    ]);
     const limited = !bySession.ok ? bySession : !byAddress.ok ? byAddress : null;
     if (limited) {
       log.warn('voice.rate_limited', { sessionId });
@@ -91,8 +93,8 @@ voiceRouter.post(
       };
       const answer = assistantMessage(reply.text, reply.attachment);
 
-      session.messages.push(heard, answer);
-      await sessions.save(session);
+      // Appended, not saved: see the note in chat.ts.
+      await sessions.append(sessionId, [heard, answer]);
 
       if (answer.attachment) {
         publish({ type: 'attachment', sessionId, attachment: answer.attachment });
