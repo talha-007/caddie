@@ -9,6 +9,7 @@ import { eventsRouter } from './routes/events.js';
 import { healthRouter } from './routes/health.js';
 import { toolsRouter } from './routes/tools.js';
 import { ucpRouter } from './routes/ucp.js';
+import { voiceRouter } from './routes/voice.js';
 import { vapiRouter } from './routes/vapi.js';
 
 export function createApp() {
@@ -26,6 +27,7 @@ export function createApp() {
   app.use('/api/chat', chatRouter);
   app.use('/api/events', eventsRouter);
   app.use('/api/tools', toolsRouter);
+  app.use('/api/voice', voiceRouter);
   app.use('/api/vapi', vapiRouter);
   app.use('/ucp', ucpRouter);
 

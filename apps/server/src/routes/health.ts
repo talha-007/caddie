@@ -17,6 +17,7 @@ healthRouter.get('/', (_req, res) => {
       : env.vapi.privateKey && env.vapi.assistantId
         ? 'vapi'
         : 'dev-keyword-router',
+    voice: env.openai.apiKey ? `transcribe:${env.openai.transcribeModel}` : 'unavailable',
     vapi: {
       chatConfigured: Boolean(env.vapi.privateKey && env.vapi.assistantId),
       webhookSecured: Boolean(env.vapi.webhookSecret),

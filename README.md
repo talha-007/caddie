@@ -122,6 +122,7 @@ back" never means "the customer picked".
 | `GET /api/tools` | Tool definitions, including the exact JSON to give Vapi |
 | `POST /api/tools/:name` | Run one tool directly, no AI. Build and debug UI with this |
 | `POST /api/chat` | Text chat |
+| `POST /api/voice` | Voice in, chat out: post a recording, get the transcript and the reply |
 | `GET /api/events/:sessionId` | SSE stream of cards and speech for a session |
 | `POST /api/vapi/webhook` | Where Vapi sends tool calls |
 | `GET /ucp/agent-profile.json` | Our UCP agent profile, which Shopify fetches on every catalog call |

@@ -109,6 +109,8 @@ export const env = {
     apiKey: optional('OPENAI_API_KEY'),
     /** Used for text chat. Voice runs on whatever model Vapi is configured with. */
     model: optional('OPENAI_MODEL', 'gpt-4.1'),
+    /** Speech to text for the widget's mic, until Vapi handles voice. */
+    transcribeModel: optional('OPENAI_TRANSCRIBE_MODEL', 'gpt-4o-mini-transcribe'),
   },
   vapi: {
     privateKey: optional('VAPI_PRIVATE_KEY'),
