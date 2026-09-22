@@ -1,0 +1,91 @@
+# The test store
+
+`qqfeqi-xb.myshopify.com` — Talha's dummy Shopify store. We build and test the
+Caddie against this, and embed the widget in its theme, before anything touches
+a real Druids store.
+
+## What is in it
+
+49 products, and they are not all Druids:
+
+| | Count | Vendor | Tagged | Product types |
+| --- | --- | --- | --- | --- |
+| Real Druids kit | 24 | `Druids` | `druids-product` | POLOS, MIDLAYERS, GOLF HOODIES, GILETS, JACKETS, SHORTS, TROUSERS, HEADWEAR, SOCKS |
+| Generic demo stock | 25 | `Otaku Oasi` | — | Jeans, Dresses, Bags, Belts, Skirts, T-Shirts … |
+
+**The Caddie must only ever recommend the first group.** `SHOPIFY_BRAND_TAG`
+does this: the server filters search results down to products carrying
+`druids-product`. Without it, "show me some trousers" answers with High-Rise
+Wide Leg Jeans, which is exactly the kind of thing rule 2 in
+[RULES.md](RULES.md) exists to prevent.
+
+UCP search has no vendor filter and the payload carries no vendor field, which
+is why we match on the tag rather than the vendor.
+
+## What we added
+
+The store had no Druids bottoms or accessories, so an outfit could not be
+completed. These were created through the Admin API:
+
+| Product | Type | Price | Sizes |
+| --- | --- | --- | --- |
+| TOUR SHORT - NAVY | SHORTS | 42 | S–2XL (2XL deliberately out of stock) |
+| TOUR SHORT - KHAKI | SHORTS | 42 | S–2XL |
+| TECH TROUSER - BLACK | TROUSERS | 58 | S–2XL |
+| TOUR BEANIE - BLACK | HEADWEAR | 22 | One Size |
+| PERFORMANCE SOCKS - WHITE | SOCKS | 16 | S/M, L/XL |
+
+Two deliberate choices in there:
+
+- **TOUR SHORT - NAVY in 2XL is out of stock on purpose.** Day 8 requires that
+  we check variants before adding them, and that path needs something real to
+  fail against. Do not "fix" it.
+- **The images are borrowed from the demo products.** They depict the right
+  garment, but they are not Druids photography. Replace before the client sees
+  it.
+
+Everything else sells when out of stock, so a demo never dies on an inventory
+count.
+
+## Currency
+
+The store is in PKR, but the Druids products were imported with pound values in
+the price field — a £24 polo is sitting there as Rs 24. Budgets are therefore
+meaningless: a pack of three "costs" Rs 56 while a pair of demo jeans is
+Rs 25,790.
+
+The fix is to switch the store's base currency to GBP in **Settings → General →
+Store defaults → Currency display**. Shopify keeps the number and changes only
+the label, so every Druids price becomes correct in one step, and the five
+products above were priced with that in mind.
+
+This cannot be done over the Admin API — there is no mutation for base currency,
+and it is a deliberate, account-level change. It has to be done in the admin UI.
+
+After the switch, set `SHOPIFY_BUYER_CURRENCY=GBP` and `SHOPIFY_BUYER_COUNTRY=GB`
+in `.env`. The 25 demo products will then read as £6,690–£63,790, which is
+harmless — the brand tag keeps them out of the Caddie's mouth.
+
+## Gotchas
+
+**New products are not published by default.** `productSet` creates them
+unpublished, and publishing over GraphQL needs `write_publications`, which our
+token does not have. The REST endpoint accepts it under `write_products`:
+
+```
+PUT /admin/api/2025-07/products/{id}.json
+{"product":{"id":<id>,"published":true,"published_scope":"web"}}
+```
+
+**The catalog search index lags.** A newly published product is visible to
+`lookup_catalog` immediately but takes a while to appear in `search_catalog`.
+If a product you just created does not show up, check `lookup_catalog` before
+assuming something is broken.
+
+## Token scopes
+
+`DUMMY_STORE_ACCESS_TOKEN` has `write_products`, `write_inventory` and
+`read_products`, which covers catalogue work. It does **not** have
+`read_locations`, `write_publications` or `read_markets`, so setting real
+inventory quantities, publishing over GraphQL and configuring Markets all have
+to happen in the admin UI.

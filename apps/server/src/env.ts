@@ -93,6 +93,12 @@ export const env = {
      * store's currency or budgets are out by whatever the exchange rate is.
      */
     defaultCurrency: optional('SHOPIFY_BUYER_CURRENCY', 'GBP').toUpperCase(),
+    /**
+     * Only recommend products carrying this tag. The test store also holds a
+     * generic demo catalogue, and without this the Caddie offers dresses and
+     * cargo pants as golf kit. Leave empty on a store that sells only Druids.
+     */
+    brandTag: optional('SHOPIFY_BRAND_TAG'),
   },
   ucp: {
     get agentProfile() {

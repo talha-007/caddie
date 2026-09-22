@@ -17,11 +17,16 @@ export interface OutfitSlot {
   required: boolean;
 }
 
+/**
+ * Terms are matched against the Druids range as it is actually stocked:
+ * POLOS, MIDLAYERS, GOLF HOODIES, GILETS, JACKETS, SHORTS, TROUSERS,
+ * HEADWEAR, SOCKS. Re-check these when the real store replaces the test one.
+ */
 export const DEFAULT_SLOTS: OutfitSlot[] = [
-  { slot: 'top', terms: 'jersey shirt tee', required: true },
+  { slot: 'top', terms: 'polo shirt tee', required: true },
   { slot: 'bottom', terms: 'shorts trousers', required: true },
-  { slot: 'layer', terms: 'hoodie jacket midlayer', required: false },
-  { slot: 'accessory', terms: 'socks cap bag', required: false },
+  { slot: 'layer', terms: 'midlayer hoodie gilet jacket', required: false },
+  { slot: 'accessory', terms: 'socks beanie cap', required: false },
 ];
 
 function withinBudget(products: Product[], remaining: number | null): Product[] {

@@ -1,4 +1,5 @@
 import type { Cart, CartLine, Product, ProductOption, ProductVariant } from '@caddie/shared';
+import { env } from '../env.js';
 import { addMoney, readMoney, storeCurrency, toMinorUnits } from './money.js';
 import { buyerContext, callUcpTool } from './ucpClient.js';
 
@@ -118,6 +119,19 @@ interface SearchPayload {
   pagination?: { has_next_page?: boolean; cursor?: string };
 }
 
+/**
+ * Keeps the Caddie to the brand's own kit.
+ *
+ * UCP search has no vendor filter and its payload carries no vendor field, so
+ * we filter on the tag afterwards and over-fetch to compensate.
+ */
+export function isBrandProduct(product: Product): boolean {
+  const tag = env.shopify.brandTag;
+  if (!tag) return true;
+  const needle = tag.toLowerCase();
+  return product.tags.some((value) => value.toLowerCase() === needle);
+}
+
 export async function searchProducts(opts: SearchOptions): Promise<Product[]> {
   const currency = opts.currency ?? DEFAULT_CURRENCY;
   const price: Record<string, number> = {};
@@ -129,16 +143,19 @@ export async function searchProducts(opts: SearchOptions): Promise<Product[]> {
     ...(Object.keys(price).length ? { price } : {}),
   };
 
+  const wanted = opts.limit ?? 10;
   const payload = await callUcpTool<SearchPayload>('search_catalog', {
     catalog: {
       query: opts.query,
       context: buyerContext(),
       filters,
-      pagination: { limit: opts.limit ?? 10 },
+      // Over-fetch so the brand filter does not leave us short.
+      pagination: { limit: env.shopify.brandTag ? Math.min(wanted * 3, 50) : wanted },
     },
   });
 
-  return (payload.products ?? []).map(toProduct).filter((product) => product.id);
+  const products = (payload.products ?? []).map(toProduct).filter((product) => product.id);
+  return products.filter(isBrandProduct).slice(0, wanted);
 }
 
 export async function getProductDetails(
