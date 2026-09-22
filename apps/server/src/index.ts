@@ -9,12 +9,21 @@ import { chatRouter } from './routes/chat.js';
 import { eventsRouter } from './routes/events.js';
 import { healthRouter } from './routes/health.js';
 import { toolsRouter } from './routes/tools.js';
+import { shopifyWebhookRouter } from './routes/shopifyWebhook.js';
 import { ucpRouter } from './routes/ucp.js';
 import { voiceRouter } from './routes/voice.js';
 import { vapiRouter } from './routes/vapi.js';
 
 export function createApp() {
   const app = express();
+
+  /*
+   * Before the JSON parser, on purpose. Shopify signs the exact bytes it
+   * sent, and once express.json has turned the body into an object those
+   * bytes are gone - the HMAC cannot be checked, and every webhook is
+   * rejected or, worse, crashes on a body that is not a Buffer.
+   */
+  app.use('/api/shopify/webhook', shopifyWebhookRouter);
 
   app.use(express.json({ limit: '1mb' }));
   app.use(

@@ -102,12 +102,37 @@ So nothing customer-facing calls it.
 
 | What | Where | Why |
 | --- | --- | --- |
-| Search, product detail | **local mirror**, `src/catalog/` | Unlimited and instant. Shopify sees one pull every 5 minutes however many customers there are. |
+| Search, product detail | **local mirror**, `src/catalog/` | Unlimited and instant. Kept current by webhooks, not polling. |
 | The catalogue pull | Admin API | A background job, not buyer traffic. Its own generous quota. |
 | The basket | **Storefront API**, `src/shopify/storefrontCart.ts` | Cannot be mirrored - it is live and per customer. Shopify does not rate-limit buyer traffic here. |
 | UCP | fallback only | Still wired up, still throttled. Not a path to rely on. |
 
 `GET /health` reports the catalogue size and age, and which cart path is live.
+
+### Keeping the mirror current
+
+Three things, cheapest first:
+
+1. **Webhooks** do the real work. Shopify posts to `/api/shopify/webhook` the
+   moment a product or stock level moves, and we re-read that one product. The
+   mirror is current within seconds and it costs nothing - which matters on a
+   busy store, where stock moves constantly and any fixed interval is either
+   stale or wasteful. Register them with
+   `npm run webhooks --workspace=@caddie/server`, and **re-run it whenever
+   `CADDIE_PUBLIC_URL` changes** or Shopify posts into a dead tunnel forever.
+2. **A delta pull** every minute asks only for what changed - 9 cost points
+   against 72 for a full page - covering webhooks missed during a restart.
+3. **A full reconcile** every half hour, which also notices deletions.
+
+Webhook bodies must stay raw: the HMAC is over the exact bytes Shopify sent, so
+the route is mounted **before** `express.json`. Moving it below cost an
+afternoon once - the parser turns the body into an object, the signature can no
+longer be checked, and hashing an object throws inside an async handler, which
+takes the whole process down.
+
+Storefront traffic does not touch any of this. Shoppers browsing the store
+consume the Storefront API's quota, not the Admin API's, so how busy the shop
+is has no bearing on the sync.
 
 **The mirror is the reason search is fast.** A search is a few milliseconds of
 scoring in memory rather than a network round trip, and `src/catalog/search.ts`

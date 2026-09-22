@@ -108,11 +108,18 @@ export const env = {
      */
     storefrontToken: optional('SHOPIFY_STOREFRONT_TOKEN'),
     /**
-     * How often the local catalogue mirror refreshes. Shopify sees this many
-     * calls regardless of how many customers are shopping, so it can be short
-     * - the trade is only how stale stock can get between pulls.
+     * Signs Shopify's webhooks. It is the app's client secret, found beside
+     * the API key in the admin. Without it webhooks are rejected and the
+     * mirror falls back to polling.
      */
-    catalogueRefreshMs: Number(optional('SHOPIFY_CATALOGUE_REFRESH_MS', String(5 * 60 * 1000))),
+    webhookSecret: optional('SHOPIFY_WEBHOOK_SECRET') || optional('DUMMY_STORE_SECRET'),
+    /**
+     * Safety nets behind the webhooks. The delta pull asks only for what
+     * changed, so it is cheap enough to run often; the reconcile is a full
+     * re-read that also notices deletions.
+     */
+    catalogueDeltaMs: Number(optional('SHOPIFY_CATALOGUE_DELTA_MS', String(60 * 1000))),
+    catalogueReconcileMs: Number(optional('SHOPIFY_CATALOGUE_RECONCILE_MS', String(30 * 60 * 1000))),
   },
   ucp: {
     get agentProfile() {

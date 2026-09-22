@@ -17,6 +17,11 @@ export interface ProductVariant {
   price: Money;
   /** e.g. { Size: 'M', Colour: 'Navy' } */
   options: Record<string, string>;
+  /**
+   * Shopify's inventory item behind this variant. Server-side only: it is how
+   * an inventory webhook finds the product whose stock just moved.
+   */
+  inventoryItemId?: string;
 }
 
 /**

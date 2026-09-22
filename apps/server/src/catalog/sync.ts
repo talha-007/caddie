@@ -11,14 +11,27 @@ import { log } from '../lib/logger.js';
  * all. At a thousand active customers that is not a tuning problem: one outfit
  * alone fires up to eight searches, so a busy hour is thousands of calls.
  *
- * So the catalogue is pulled in full every few minutes and searched in memory.
- * Shopify sees a handful of calls an hour no matter how many customers there
- * are, searches cost nothing and return instantly, and the throttle stops
- * being something a customer can ever see.
+ * So the catalogue is held in memory and searched locally. Keeping it current
+ * is three things, cheapest first:
  *
- * The trade is freshness: stock can be up to one refresh interval stale. That
- * is fine for browsing - the basket is always live, and adding to it checks
- * the variant against Shopify at the time.
+ *  1. **Webhooks** do the real work. Shopify tells us the moment a product or
+ *     a stock level changes, so the mirror is current within seconds and costs
+ *     nothing to keep that way. On a busy store that matters: stock moves
+ *     constantly, and any fixed interval is either stale or wasteful.
+ *  2. **A delta pull** every minute asks only for what changed since the last
+ *     one - nine cost points against seventy-two for a full page. It covers
+ *     webhooks missed while we were restarting.
+ *  3. **A full reconcile** every half hour, to catch anything the other two
+ *     dropped and to notice deletions.
+ *
+ * Storefront traffic does not touch any of this. Shoppers browsing the store
+ * consume the Storefront API's quota, not the Admin API's, so how busy the
+ * shop is has no bearing on the sync.
+ *
+ * The trade is freshness: between a change and the webhook landing, the mirror
+ * is briefly behind. The basket is always live, and adding to it checks the
+ * variant against Shopify at the time, so the worst case is offering something
+ * that sold out moments ago.
  */
 
 const PAGE_SIZE = 50;
@@ -45,6 +58,7 @@ query Catalogue($cursor: String, $query: String) {
           price
           availableForSale
           selectedOptions { name value }
+          inventoryItem { id }
         }
       }
     }
@@ -58,6 +72,7 @@ interface AdminVariant {
   price: string;
   availableForSale: boolean;
   selectedOptions: Array<{ name: string; value: string }>;
+  inventoryItem?: { id?: string } | null;
 }
 
 interface AdminProduct {
@@ -85,6 +100,7 @@ function toVariant(raw: AdminVariant, currency: string): ProductVariant {
     available: raw.availableForSale,
     price: { amount: Number(raw.price), currency },
     options,
+    ...(raw.inventoryItem?.id ? { inventoryItemId: raw.inventoryItem.id } : {}),
   };
 }
 
@@ -137,8 +153,25 @@ interface CataloguePage {
 
 let products: Product[] = [];
 let byId = new Map<string, Product>();
+/** inventoryItemId -> productId, so an inventory webhook can find its product. */
+let byInventoryItem = new Map<string, string>();
 let lastSyncedAt = 0;
+let lastDeltaAt = 0;
 let syncing: Promise<void> | null = null;
+
+/** Rebuilt whenever the mirror changes; a few hundred products makes it cheap. */
+function rebuildInventoryIndex(): void {
+  byInventoryItem = new Map();
+  for (const product of products) {
+    for (const variant of product.variants) {
+      if (variant.inventoryItemId) byInventoryItem.set(variant.inventoryItemId, product.id);
+    }
+  }
+}
+
+export function productForInventoryItem(inventoryItemId: string): string | null {
+  return byInventoryItem.get(inventoryItemId) ?? null;
+}
 
 export interface CatalogueState {
   count: number;
@@ -188,6 +221,64 @@ async function pull(): Promise<Product[]> {
   return collected;
 }
 
+/**
+ * Asks only for products touched since a given moment.
+ *
+ * Nine cost points against seventy-two for a full page, so it can run often.
+ */
+async function pullChangedSince(since: Date): Promise<Product[]> {
+  const brand = env.shopify.brandTag ? `tag:${env.shopify.brandTag} AND ` : '';
+  const filter = `${brand}status:active AND updated_at:>'${since.toISOString()}'`;
+
+  const collected: Product[] = [];
+  let cursor: string | null = null;
+
+  for (let page = 0; page < 20; page += 1) {
+    const data: CataloguePage = await admin<CataloguePage>(QUERY, { cursor, query: filter });
+    collected.push(...data.products.nodes.map(toProduct));
+    if (!data.products.pageInfo.hasNextPage) break;
+    cursor = data.products.pageInfo.endCursor;
+  }
+  return collected;
+}
+
+/** Folds changed products into the mirror without disturbing the rest. */
+export function applyChanges(changed: Product[]): number {
+  if (changed.length === 0) return 0;
+
+  for (const product of changed) {
+    const index = products.findIndex((existing) => existing.id === product.id);
+    if (index === -1) products.push(product);
+    else products[index] = product;
+    byId.set(product.id, product);
+  }
+
+  rebuildInventoryIndex();
+  lastSyncedAt = Date.now();
+  log.info('catalogue.patched', { products: changed.length });
+  return changed.length;
+}
+
+/** Drops a product that has been deleted or unpublished. */
+export function removeProduct(productId: string): boolean {
+  const index = products.findIndex((product) => product.id === productId);
+  if (index === -1) return false;
+  products.splice(index, 1);
+  byId.delete(productId);
+  rebuildInventoryIndex();
+  log.info('catalogue.removed', { productId });
+  return true;
+}
+
+/** Re-reads one product, after a webhook says it changed. */
+export async function refreshProduct(productId: string): Promise<boolean> {
+  const data = await admin<CataloguePage>(QUERY, { cursor: null, query: `id:${productId.split('/').pop()}` });
+  const fresh = data.products.nodes.map(toProduct);
+  if (fresh.length === 0) return removeProduct(productId);
+  applyChanges(fresh);
+  return true;
+}
+
 /** Refreshes the mirror. Concurrent callers share one in-flight pull. */
 export async function syncCatalogue(): Promise<CatalogueState> {
   if (syncing) {
@@ -202,7 +293,9 @@ export async function syncCatalogue(): Promise<CatalogueState> {
       if (fresh.length > 0) {
         products = fresh;
         byId = new Map(fresh.map((product) => [product.id, product]));
+        rebuildInventoryIndex();
         lastSyncedAt = Date.now();
+        lastDeltaAt = Date.now();
       } else {
         log.warn('catalogue.empty', { kept: products.length });
       }
@@ -215,27 +308,52 @@ export async function syncCatalogue(): Promise<CatalogueState> {
   return catalogueState();
 }
 
-let timer: NodeJS.Timeout | null = null;
+let deltaTimer: NodeJS.Timeout | null = null;
+let reconcileTimer: NodeJS.Timeout | null = null;
+
+/** Catches up on anything missed since the last delta, or while we were down. */
+export async function syncDelta(): Promise<number> {
+  if (!lastDeltaAt) {
+    await syncCatalogue();
+    return products.length;
+  }
+
+  // A minute of overlap: a product saved during the last pull can carry a
+  // timestamp from just before it.
+  const changed = await pullChangedSince(new Date(lastDeltaAt - 60_000));
+  lastDeltaAt = Date.now();
+  return applyChanges(changed);
+}
 
 /**
- * Keeps the mirror warm.
+ * Keeps the mirror current.
  *
- * A failed refresh is logged and the previous catalogue kept, because serving
- * slightly stale products beats serving none.
+ * Webhooks do the real work; these two are the safety nets. A failed refresh
+ * is logged and the previous catalogue kept, because serving slightly stale
+ * products beats serving none.
  */
-export function startCatalogueSync(intervalMs = env.shopify.catalogueRefreshMs): void {
-  const refresh = () => {
-    syncCatalogue().catch((err) => log.error('catalogue.sync_failed', { err: String(err) }));
-  };
+export function startCatalogueSync(
+  deltaMs = env.shopify.catalogueDeltaMs,
+  reconcileMs = env.shopify.catalogueReconcileMs,
+): void {
+  syncCatalogue().catch((err) => log.error('catalogue.sync_failed', { err: String(err) }));
 
-  refresh();
-  timer = setInterval(refresh, intervalMs);
-  timer.unref?.();
+  deltaTimer = setInterval(() => {
+    syncDelta().catch((err) => log.warn('catalogue.delta_failed', { err: String(err) }));
+  }, deltaMs);
+  deltaTimer.unref?.();
+
+  reconcileTimer = setInterval(() => {
+    syncCatalogue().catch((err) => log.error('catalogue.sync_failed', { err: String(err) }));
+  }, reconcileMs);
+  reconcileTimer.unref?.();
 }
 
 export function stopCatalogueSync(): void {
-  if (timer) clearInterval(timer);
-  timer = null;
+  if (deltaTimer) clearInterval(deltaTimer);
+  if (reconcileTimer) clearInterval(reconcileTimer);
+  deltaTimer = null;
+  reconcileTimer = null;
 }
 
 /** Test seam. */

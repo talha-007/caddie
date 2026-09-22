@@ -11,7 +11,8 @@
     "test": "vitest run",
     "sync:assistant": "tsx scripts/syncAssistant.ts",
     "publish:profile": "node scripts/publishAgentProfile.mjs",
-    "eval:model": "node scripts/evalModel.mjs"
+    "eval:model": "node scripts/evalModel.mjs",
+    "webhooks": "node scripts/registerWebhooks.mjs"
   },
   "dependencies": {
     "@caddie/shared": "*",
