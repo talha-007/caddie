@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "sync:assistant": "tsx scripts/syncAssistant.ts",
-    "publish:profile": "node scripts/publishAgentProfile.mjs"
+    "publish:profile": "node scripts/publishAgentProfile.mjs",
+    "eval:model": "node scripts/evalModel.mjs"
   },
   "dependencies": {
     "@caddie/shared": "*",

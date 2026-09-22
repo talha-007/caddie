@@ -175,6 +175,34 @@ npm run test
 npm run build
 ```
 
+### Honesty checks
+
+`scripts/evalModel.mjs` runs the ways the Caddie has actually misled a customer
+during development - inventing a product, guessing a price, calling mens kit
+womens - against whichever model is answering. Run it before changing
+`OPENAI_MODEL`, and on Day 11.
+
+```bash
+OPENAI_MODEL=gpt-4.1-mini PORT=8899 npx tsx src/index.ts   # in one terminal
+npm run eval:model --workspace=@caddie/server -- 8899 gpt-4.1-mini
+```
+
+Measured on a five-message journey (search, pack, cheaper, size, add to basket):
+
+| model | honesty checks | cost per 1000 conversations |
+| --- | --- | --- |
+| gpt-4.1 | 8/8, 8/8 | $16.39 |
+| **gpt-4.1-mini** | **8/8, 8/8** | **$3.51** |
+| gpt-5-mini | 6/8, 8/8 | $1.65 |
+
+gpt-5-mini is the cheapest but was dropped: asked for a womens polo in a store
+that stocks none, it quoted a size and offered to go and find one, three times
+out of three. Voice transcription adds about $0.003/minute on top.
+
+The scores depend on the prompt as much as the model. The hedging case ("not
+listed exactly, but the closest match is...") only passes because the prompt
+names that phrasing and forbids it.
+
 ## Before the pilot
 
 Things deliberately left as placeholders, each marked `TODO` in the code:

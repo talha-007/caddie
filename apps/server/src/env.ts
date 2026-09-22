@@ -107,8 +107,15 @@ export const env = {
   },
   openai: {
     apiKey: optional('OPENAI_API_KEY'),
-    /** Used for text chat. Voice runs on whatever model Vapi is configured with. */
-    model: optional('OPENAI_MODEL', 'gpt-4.1'),
+    /**
+     * Used for text chat. Voice runs on whatever model Vapi is configured with.
+     *
+     * gpt-4.1-mini rather than gpt-4.1: five times cheaper and it held every
+     * honesty check in scripts/evalModel.mjs. gpt-5-mini is cheaper still but
+     * failed the womens-range check three times out of three - it quotes a
+     * size and offers to find womens polos we do not stock.
+     */
+    model: optional('OPENAI_MODEL', 'gpt-4.1-mini'),
     /** Speech to text for the widget's mic, until Vapi handles voice. */
     transcribeModel: optional('OPENAI_TRANSCRIBE_MODEL', 'gpt-4o-mini-transcribe'),
   },
