@@ -173,7 +173,7 @@ const sizeTool = defineTool({
       chestCm: { type: 'number' },
       waistCm: { type: 'number' },
       fitPreference: { type: 'string', enum: ['tight', 'regular', 'relaxed'] },
-      category: { type: 'string', description: 'mens-top, mens-bottom or womens-top' },
+      category: { type: 'string', description: "Which chart to use: 'tops' for polos, midlayers, hoodies, jackets and gilets; 'shorts'; or 'trousers'." },
     },
     required: [],
   },

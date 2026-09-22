@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { recommendSize, toCm, toKg } from '../src/recommend/size.js';
 
 /**
- * These lock the behaviour, not the numbers. When the real Druids size chart
- * replaces the placeholder on Day 4, expected sizes here will need updating -
- * the rules being tested should not.
+ * The chest and waist figures these assert against are Druids' own published
+ * charts (see data/size-chart.json). The height and weight cases assert our
+ * inference, which is deliberately held to a lower confidence.
  */
 
 describe('unit conversion', () => {
@@ -17,47 +17,80 @@ describe('unit conversion', () => {
   });
 });
 
-describe('recommendSize', () => {
+describe('recommendSize, against the published chart', () => {
+  it('reads a chest measurement straight off the Druids chart', () => {
+    // 100cm sits inside M (96-104).
+    const result = recommendSize({ chestCm: 100 });
+    expect(result.size).toBe('M');
+    expect(result.basis).toBe('measurement');
+    expect(result.confidence).toBeGreaterThan(0.7);
+  });
+
+  it('handles the whole published range', () => {
+    const cases: Array<[number, string]> = [
+      [92, 'S'],
+      [100, 'M'],
+      [108, 'L'],
+      [116, 'XL'],
+      [124, '2XL'],
+      [132, '3XL'],
+      [140, '4XL'],
+    ];
+    for (const [chestCm, expected] of cases) {
+      expect(recommendSize({ chestCm }).size).toBe(expected);
+    }
+  });
+
+  it('sizes shorts off the waist', () => {
+    // 88cm sits inside the 34 band (86-91).
+    const result = recommendSize({ waistCm: 88, category: 'shorts' });
+    expect(result.size).toBe('34');
+    expect(result.basis).toBe('measurement');
+  });
+
+  it('sizes trousers off the waist', () => {
+    expect(recommendSize({ waistCm: 93, category: 'trousers' }).size).toBe('36');
+  });
+});
+
+describe('recommendSize, without a measurement', () => {
   it('asks for more when it has nothing to go on', () => {
     const result = recommendSize({});
     expect(result.size).toBeNull();
+    expect(result.basis).toBe('none');
     expect(result.missing).toContain('height');
-    expect(result.missing).toContain('weight');
   });
 
-  it('recommends from height and weight', () => {
+  it('estimates from height and weight, but says so', () => {
     const result = recommendSize({
-      heightValue: 178,
+      heightValue: 180,
       heightUnit: 'cm',
-      weightValue: 78,
+      weightValue: 80,
       weightUnit: 'kg',
     });
     expect(result.size).not.toBeNull();
-    expect(result.confidence).toBeGreaterThan(0.4);
+    expect(result.basis).toBe('estimate');
+    expect(result.reason).toMatch(/estimate/i);
   });
 
-  it('treats imperial input the same as metric', () => {
-    const metric = recommendSize({ heightValue: 178, heightUnit: 'cm', weightValue: 82, weightUnit: 'kg' });
-    const imperial = recommendSize({ heightValue: 70, heightUnit: 'in', weightValue: 181, weightUnit: 'lb' });
-    expect(imperial.size).toBe(metric.size);
+  it('never lets an estimate claim measurement-level confidence', () => {
+    const estimate = recommendSize({ heightValue: 180, heightUnit: 'cm', weightValue: 80, weightUnit: 'kg' });
+    const measured = recommendSize({ chestCm: 100 });
+    expect(estimate.confidence).toBeLessThanOrEqual(0.55);
+    expect(measured.confidence).toBeGreaterThan(estimate.confidence);
   });
 
-  it('sizes up for a relaxed fit and down for a tight one', () => {
-    const base = { heightValue: 178, heightUnit: 'cm', weightValue: 78, weightUnit: 'kg' } as const;
-    const regular = recommendSize({ ...base, fitPreference: 'regular' });
-    const relaxed = recommendSize({ ...base, fitPreference: 'relaxed' });
-    const tight = recommendSize({ ...base, fitPreference: 'tight' });
-
-    expect(relaxed.size).not.toBe(regular.size);
-    expect(tight.size).not.toBe(regular.size);
-    expect(relaxed.size).not.toBe(tight.size);
+  it('offers Druids own measuring advice when it is only estimating', () => {
+    const result = recommendSize({ heightValue: 180, heightUnit: 'cm', weightValue: 80, weightUnit: 'kg' });
+    expect(result.measureAdvice).toMatch(/fullest part of the chest/i);
   });
 
-  it('prefers a chest measurement over height and weight', () => {
+  it('a real measurement beats height and weight', () => {
+    // Height and weight alone would say M; a 118cm chest is XL on the chart.
     const result = recommendSize({
-      heightValue: 178,
+      heightValue: 180,
       heightUnit: 'cm',
-      weightValue: 78,
+      weightValue: 80,
       weightUnit: 'kg',
       chestCm: 118,
     });
@@ -67,19 +100,33 @@ describe('recommendSize', () => {
   it('falls back to the usual size with low confidence', () => {
     const result = recommendSize({ usualSize: 'L' });
     expect(result.size).toBe('L');
+    expect(result.basis).toBe('usual-size');
     expect(result.confidence).toBeLessThan(0.5);
-    expect(result.missing.length).toBeGreaterThan(0);
   });
+});
 
-  it('refuses a size it cannot support', () => {
-    const result = recommendSize({ category: 'not-a-real-category', heightValue: 180 });
-    expect(result.size).toBeNull();
+describe('fit preference', () => {
+  it('sizes up for relaxed and down for tight', () => {
+    const base = { chestCm: 100 } as const;
+    const regular = recommendSize({ ...base, fitPreference: 'regular' });
+    const relaxed = recommendSize({ ...base, fitPreference: 'relaxed' });
+    const tight = recommendSize({ ...base, fitPreference: 'tight' });
+
+    expect(regular.size).toBe('M');
+    expect(relaxed.size).toBe('L');
+    expect(tight.size).toBe('S');
+  });
+});
+
+describe('edges', () => {
+  it('refuses a chart it does not have', () => {
+    expect(recommendSize({ category: 'not-a-real-category', chestCm: 100 }).size).toBeNull();
   });
 
   it('never returns a size outside the chart', () => {
-    const result = recommendSize({ heightValue: 210, heightUnit: 'cm', weightValue: 180, weightUnit: 'kg' });
+    const result = recommendSize({ chestCm: 250 });
     if (result.size) {
-      expect(['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']).toContain(result.size);
+      expect(['S', 'M', 'L', 'XL', '2XL', '3XL', '4XL']).toContain(result.size);
     }
   });
 });

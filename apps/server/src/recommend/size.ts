@@ -20,6 +20,8 @@ interface SizeRow {
 
 interface Category {
   label: string;
+  /** Druids' own instructions for taking the measurement. */
+  measure?: string;
   sizes: SizeRow[];
 }
 
@@ -28,8 +30,12 @@ interface SizeChart {
   categories: Record<string, Category>;
 }
 
-// Read rather than imported, so swapping in the real Druids chart on Day 4 is
-// a file edit and a restart - no rebuild, no code change.
+/*
+ * Read rather than imported, so updating the chart is a file edit and a
+ * restart - no rebuild. chestCm and waistCm in it are Druids' published
+ * figures; heightCm and weightKg are our own inference, which is why they
+ * carry far less weight below and cap the confidence.
+ */
 const chartPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../data/size-chart.json');
 const chart = JSON.parse(readFileSync(chartPath, 'utf8')) as SizeChart;
 
@@ -57,7 +63,13 @@ function rangeScore(value: number, range: number[] | undefined): number | null {
   return Math.max(0, 1 - distance / width);
 }
 
-const WEIGHTS = { chest: 3, waist: 3, weight: 2, height: 1 } as const;
+const WEIGHTS = { chest: 6, waist: 6, weight: 2, height: 1 } as const;
+
+/**
+ * Height and weight are ours, not Druids'. A size worked out from them alone
+ * is an educated guess, so it never claims more than this.
+ */
+const ESTIMATE_CONFIDENCE_CAP = 0.55;
 
 export function recommendSize(input: SizeInput): SizeRecommendation {
   const categoryKey = input.category ?? chart.defaultCategory;
@@ -69,6 +81,7 @@ export function recommendSize(input: SizeInput): SizeRecommendation {
       confidence: 0,
       alternativeSize: null,
       reason: `I do not have a size guide for "${categoryKey}".`,
+      basis: 'none',
       missing: ['category'],
     };
   }
@@ -101,8 +114,10 @@ export function recommendSize(input: SizeInput): SizeRecommendation {
           size: match.size,
           confidence: 0.45,
           alternativeSize: neighbour(category.sizes, match.size, input.fitPreference),
-          reason: `Going off the ${match.size} you normally wear. Height and weight would let me be surer.`,
+          reason: `Going off the ${match.size} you normally wear. A chest measurement would let me be sure.`,
+          basis: 'usual-size',
           missing: ['height', 'weight'],
+          ...(category.measure ? { measureAdvice: category.measure } : {}),
         };
       }
     }
@@ -111,6 +126,7 @@ export function recommendSize(input: SizeInput): SizeRecommendation {
       confidence: 0,
       alternativeSize: null,
       reason: 'I need a little more to go on before I call a size.',
+      basis: 'none',
       missing: ['height', 'weight'],
     };
   }
@@ -142,6 +158,7 @@ export function recommendSize(input: SizeInput): SizeRecommendation {
       confidence: 0,
       alternativeSize: null,
       reason: 'Those measurements sit outside our size guide. Let me get a human to help.',
+      basis: 'none',
       missing,
     };
   }
@@ -150,14 +167,22 @@ export function recommendSize(input: SizeInput): SizeRecommendation {
 
   // Confidence drops when the top two sizes are close - that is a genuine borderline.
   const gap = runnerUp ? best.score - runnerUp.score : 0.3;
-  const confidence = Math.min(1, Math.max(0.2, best.score * 0.7 + Math.min(gap, 0.3)));
+  let confidence = Math.min(1, Math.max(0.2, best.score * 0.7 + Math.min(gap, 0.3)));
+
+  // A real chest or waist puts us on Druids' own chart. Anything else is us
+  // guessing from height and weight, and it says so.
+  const measured = input.chestCm !== undefined || input.waistCm !== undefined;
+  const basis = measured ? 'measurement' : 'estimate';
+  if (!measured) confidence = Math.min(confidence, ESTIMATE_CONFIDENCE_CAP);
 
   return {
     size: adjusted,
     confidence: Number(confidence.toFixed(2)),
     alternativeSize: runnerUp && gap < 0.15 ? runnerUp.size : neighbour(category.sizes, adjusted, input.fitPreference),
-    reason: buildReason(adjusted, input, heightCm, weightKg, gap),
+    reason: buildReason(adjusted, input, heightCm, weightKg, gap, measured),
+    basis,
     missing,
+    ...(category.measure && !measured ? { measureAdvice: category.measure } : {}),
   };
 }
 
@@ -187,6 +212,7 @@ function buildReason(
   heightCm?: number,
   weightKg?: number,
   gap = 0,
+  measured = false,
 ): string {
   const bits: string[] = [];
   if (heightCm !== undefined) bits.push(`${Math.round(heightCm)}cm`);
@@ -194,7 +220,14 @@ function buildReason(
   if (input.chestCm !== undefined) bits.push(`${Math.round(input.chestCm)}cm chest`);
   if (input.waistCm !== undefined) bits.push(`${Math.round(input.waistCm)}cm waist`);
 
-  const base = bits.length ? `At ${bits.join(', ')}, a ${size} should fit you well.` : `A ${size} should fit you well.`;
+  // On a real measurement we are reading Druids' chart. Without one we are
+  // estimating, and the customer should hear the difference.
+  const base = measured
+    ? `At ${bits.join(', ')}, the Druids size guide puts you in a ${size}.`
+    : bits.length
+      ? `At ${bits.join(', ')}, I would put you in a ${size}, though that is my estimate rather than a measurement.`
+      : `A ${size} should fit you well.`;
+
   if (input.fitPreference === 'relaxed') return `${base} I have sized up since you like a relaxed fit.`;
   if (input.fitPreference === 'tight') return `${base} I have sized down since you like it closer fitting.`;
   if (gap > 0 && gap < 0.15) return `${base} You are between sizes, so it is worth checking the alternative too.`;

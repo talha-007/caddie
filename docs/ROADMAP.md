@@ -69,9 +69,19 @@ person has seen it work, and no placeholder data is left in that flow.
 
 ### Day 4 - Find my size
 **Talha**
-- [ ] **Replace `data/size-chart.json` with the real Druids size guide**
-- [ ] Size recommendation returning sensible sizes across the range
-- [ ] Tested with a spread of customer measurements (`npm run test`)
+- [x] **Replaced `data/size-chart.json` with the real Druids size guide** (druids.com published charts)
+- [x] Size recommendation returning sensible sizes across the range
+- [x] Tested with a spread of customer measurements (`npm run test`)
+
+> Shopify does not carry body measurements. Its catalogue gives us the sizes a
+> product *offers* and some fit prose ("Relaxed Fit", "the model is 6'1" and
+> wears a medium"), but the chest-to-size mapping only exists on Druids' own
+> size chart pages, which is where these numbers came from.
+>
+> Druids publishes no height/weight mapping, so inferring a size from those is
+> **our** estimate. It is weighted far lower, capped at 0.55 confidence, and the
+> Caddie says "that is my estimate rather than a measurement". Do not let that
+> slip: a wrong size is a return.
 
 **Amir**
 - [ ] Size questions UI

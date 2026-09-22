@@ -22,6 +22,15 @@ export interface SizeInput {
   category?: string;
 }
 
+/**
+ * What the recommendation was actually worked out from.
+ *
+ * `measurement` uses Druids' own published chart. `estimate` infers a chest or
+ * waist from height and weight, which Druids publishes no mapping for - it is
+ * our inference and the UI should say so rather than imply the brand said it.
+ */
+export type SizeBasis = 'measurement' | 'estimate' | 'usual-size' | 'none';
+
 export interface SizeRecommendation {
   /** null when we do not have enough information to be honest about a size. */
   size: string | null;
@@ -29,8 +38,11 @@ export interface SizeRecommendation {
   confidence: number;
   alternativeSize: string | null;
   reason: string;
+  basis: SizeBasis;
   /** Questions the Caddie still needs answered. Empty when we are confident. */
   missing: string[];
+  /** Druids' own instructions for taking the measurement that would settle it. */
+  measureAdvice?: string;
 }
 
 /* ---------------- Pack ---------------- */

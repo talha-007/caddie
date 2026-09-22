@@ -29,17 +29,21 @@ completed. These were created through the Admin API:
 
 | Product | Type | Price | Sizes |
 | --- | --- | --- | --- |
-| TOUR SHORT - NAVY | SHORTS | 42 | S–2XL (2XL deliberately out of stock) |
-| TOUR SHORT - KHAKI | SHORTS | 42 | S–2XL |
-| TECH TROUSER - BLACK | TROUSERS | 58 | S–2XL |
+| TOUR SHORT - NAVY | SHORTS | 42 | 30–40 (40 deliberately out of stock) |
+| TOUR SHORT - KHAKI | SHORTS | 42 | 30–40 |
+| TECH TROUSER - BLACK | TROUSERS | 58 | 30–40 |
 | TOUR BEANIE - BLACK | HEADWEAR | 22 | One Size |
 | PERFORMANCE SOCKS - WHITE | SOCKS | 16 | S/M, L/XL |
 
 Two deliberate choices in there:
 
-- **TOUR SHORT - NAVY in 2XL is out of stock on purpose.** Day 8 requires that
-  we check variants before adding them, and that path needs something real to
-  fail against. Do not "fix" it.
+- **TOUR SHORT - NAVY in waist 40 is out of stock on purpose.** Day 8 requires
+  that we check variants before adding them, and that path needs something real
+  to fail against. Do not "fix" it.
+- **Bottoms use waist sizes, not S/M/L**, because that is how Druids sizes them.
+  They were seeded with letter sizes first and converted by
+  `scripts/resizeBottoms.mjs`, since `find_my_size` answers "34" and the product
+  has to offer a 34.
 - **The images are borrowed from the demo products.** They depict the right
   garment, but they are not Druids photography. Replace before the client sees
   it.
