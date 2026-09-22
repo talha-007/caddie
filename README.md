@@ -56,13 +56,27 @@ Customer types    ──> POST /api/chat                  ──> tool runs
 The model gets a short spoken line. The widget gets the structured payload. The
 model never has to repeat a price, so it never gets one wrong.
 
-## Shopify: UCP, not the old Storefront MCP
+## Shopify Storefront MCP: two endpoints
 
-Shopify has moved the storefront catalog onto UCP (Universal Commerce Protocol).
-The old `/api/mcp` catalog tools (`search_shop_catalog`, `get_product_details`)
-are gone from our store — `/api/mcp` there now answers only policy and FAQ
-questions. We talk to `https://<store>/api/ucp/mcp` instead. Four things follow
-from that, and each one has already bitten once:
+We use Shopify's Storefront MCP, which is current and needs no authentication.
+It is split across two endpoints, and that trips people up:
+
+| Endpoint | Tools | We use it for |
+| --- | --- | --- |
+| `https://<store>/api/ucp/mcp` | `search_catalog`, `lookup_catalog`, `get_product`, `create_cart`, `get_cart`, `update_cart` | everything |
+| `https://<store>/api/mcp` | `search_shop_policies_and_faqs` (and, per the docs, the cart tools) | nothing yet |
+
+The catalog tools were renamed and moved to the `/api/ucp/mcp` endpoint so they
+conform to UCP (Universal Commerce Protocol). If you find a tutorial calling
+`search_shop_catalog` or `get_product_details` on `/api/mcp`, it predates that
+move — the names are `search_catalog` and `get_product` now.
+
+On our dummy store, `tools/list` on `/api/mcp` returns only the policies tool,
+though the docs say the cart tools live there too. It does not matter to us: the
+UCP endpoint carries a full cart API and that is the one we have tested against.
+Worth re-checking on the real Druids store.
+
+Four UCP behaviours follow from all this, and each one has already bitten once:
 
 **Every call carries an agent profile.** Shopify fetches
 `meta["ucp-agent"].profile` on each request to see what our agent supports, so

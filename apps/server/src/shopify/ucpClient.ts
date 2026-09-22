@@ -3,11 +3,17 @@ import { UpstreamError } from '../lib/errors.js';
 import { log } from '../lib/logger.js';
 
 /**
- * Client for the Shopify storefront catalog over UCP (Universal Commerce
- * Protocol), the successor to the old Storefront MCP catalog tools.
+ * Client for Shopify's Storefront MCP catalog and cart tools.
+ *
+ * Storefront MCP is split across two endpoints. The catalog and cart tools
+ * conform to UCP (Universal Commerce Protocol) and live at /api/ucp/mcp; the
+ * older /api/mcp endpoint keeps the shop policies and FAQ tool. The tools here
+ * used to be called search_shop_catalog and get_product_details on /api/mcp -
+ * if you find a tutorial using those names, it predates the move.
  *
  * Endpoint: https://<store-domain>/api/ucp/mcp
- * Docs: https://shopify.dev/docs/agents/catalog/storefront-catalog
+ * Docs: https://shopify.dev/docs/apps/build/storefront-mcp/servers/storefront
+ *       https://shopify.dev/docs/agents/catalog/storefront-catalog
  *
  * Two things that are easy to get wrong:
  *

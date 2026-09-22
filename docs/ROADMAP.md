@@ -26,7 +26,7 @@ person has seen it work, and no placeholder data is left in that flow.
 
 ### Day 2 - Live products
 **Talha**
-- [x] Shopify catalog connected over UCP - `GET /health/shopify` returns the tool list and real products
+- [x] Shopify Storefront MCP connected (UCP endpoint) - `GET /health/shopify` returns the tool list and real products
 - [ ] Product search returning real Druids products
 - [ ] Product details and variants verified (option names, stock flags)
 

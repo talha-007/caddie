@@ -4,8 +4,8 @@ Short list. If a change breaks one of these, it does not ship.
 
 ## 1. Shopify owns product data. We own recommendations.
 
-Products, prices, variants, stock and the cart come from the Shopify catalog
-(UCP, at `/api/ucp/mcp`) and nowhere else. Sizes, packs and outfits are decided by our code in
+Products, prices, variants, stock and the cart come from Shopify Storefront MCP
+(the UCP endpoint, `/api/ucp/mcp`) and nowhere else. Sizes, packs and outfits are decided by our code in
 `apps/server/src/recommend/`.
 
 Where the line lives in code: `apps/server/src/shopify/` is the only directory
