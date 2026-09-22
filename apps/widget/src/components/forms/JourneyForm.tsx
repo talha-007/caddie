@@ -37,9 +37,15 @@ const CONFIG: Record<'pack' | 'outfit', JourneyConfig> = {
     budgets: [60, 100, 150],
     counts: [3, 4, 6],
     submit: 'Find my pack',
+    /*
+     * "Ambassador Pack" is what the customer sees, but the words go to the
+     * catalogue search, and no product is called that - it finds nothing.
+     * Naming the garment is what returns a pack. See docs: the Ambassador
+     * Pack is polos.
+     */
     sentence: (choice, budget, count) =>
       [
-        `Help me choose an Ambassador Pack${count ? ` of ${count} pieces` : ''} for ${choice.phrase}`,
+        `Put together an Ambassador Pack of ${count ?? 4} polos for ${choice.phrase}`,
         budget ? `under £${budget}` : '',
       ]
         .filter(Boolean)
