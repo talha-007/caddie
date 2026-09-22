@@ -34,6 +34,8 @@ export interface CaddieSession {
     colour?: string;
     budgetAmount?: number;
     currency?: string;
+    /** Which range they are browsing, inferred from product tags. */
+    audience?: 'men' | 'women';
   };
   messages: CaddieMessage[];
 }

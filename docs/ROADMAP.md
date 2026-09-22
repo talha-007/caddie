@@ -75,8 +75,17 @@ person has seen it work, and no placeholder data is left in that flow.
 
 > Shopify does not carry body measurements. Its catalogue gives us the sizes a
 > product *offers* and some fit prose ("Relaxed Fit", "the model is 6'1" and
-> wears a medium"), but the chest-to-size mapping only exists on Druids' own
-> size chart pages, which is where these numbers came from.
+> wears a medium"), but the chest-to-size mapping is not in it.
+>
+> The chart is ported from Talha's try-on work:
+> `druids-automation/druids-tryon/widget/src/sizeGuide.ts`, which mirrors the
+> live Size Guide popup. **That file is the source of truth** - if it changes,
+> change `data/size-chart.json` with it.
+>
+> Mens and womens are different systems (S-4XL by chest vs UK 8-18), so the
+> Caddie asks which range rather than assuming, unless the customer is already
+> browsing one. Belts have their own chart; socks have none at all, and the
+> Caddie says so instead of calling a size.
 >
 > Druids publishes no height/weight mapping, so inferring a size from those is
 > **our** estimate. It is weighted far lower, capped at 0.55 confidence, and the

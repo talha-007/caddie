@@ -1,51 +1,171 @@
 {
-  "_source": "Druids published size charts, read 2026-09-22: https://www.druids.com/pages/size-chart-polo-shirts, /size-chart-midlayers-hoodies, /size-chart-jackets-gilets, /size-chart-shorts, /size-chart-trousers-joggers",
-  "_measurements": "chestCm and waistCm are REAL Druids figures. heightCm and weightKg are OUR estimates - Druids publishes no height or weight mapping - so they are weighted far lower and always produce a lower confidence. Never present them as the brand's guidance.",
-  "_todo": "Ladies charts exist and are not loaded yet: /pages/size-charts-ladies-gilets, /pages/size-charts-ladies-joggers-and-trouser, /pages/charts-ladies-shorts",
-  "defaultCategory": "tops",
-  "categories": {
-    "tops": {
-      "label": "Polos, midlayers, hoodies, jackets and gilets",
-      "_note": "Druids uses one chest chart across all of these.",
-      "measure": "Measure at the fullest part of the chest, under the armpits and over the shoulder blades, keeping the tape firm and level.",
-      "sizes": [
-        { "size": "S", "chestCm": [88, 96], "chestIn": [35, 38], "heightCm": [163, 175], "weightKg": [60, 70] },
-        { "size": "M", "chestCm": [96, 104], "chestIn": [38, 41], "heightCm": [168, 181], "weightKg": [70, 80] },
-        { "size": "L", "chestCm": [104, 112], "chestIn": [41, 45], "heightCm": [173, 186], "weightKg": [80, 92] },
-        { "size": "XL", "chestCm": [112, 120], "chestIn": [45, 48], "heightCm": [178, 191], "weightKg": [92, 104] },
-        { "size": "2XL", "chestCm": [120, 128], "chestIn": [48, 51], "heightCm": [180, 195], "weightKg": [104, 116] },
-        { "size": "3XL", "chestCm": [128, 136], "chestIn": [51, 54], "heightCm": [183, 198], "weightKg": [116, 128] },
-        { "size": "4XL", "chestCm": [136, 144], "chestIn": [54, 57], "heightCm": [185, 200], "weightKg": [128, 140] }
-      ]
+  "_source": "Ported from druids-automation/druids-tryon/widget/src/sizeGuide.ts, which mirrors the live Size Guide popup on druids.com. That file is the source of truth - if it changes, change this.",
+  "_shape": "The tryon guide stores display strings ('35-38\" / 88-96cm') because it renders a table. We need numbers to compare against, so the cm figures are extracted here. Inches are dropped: everything is converted to cm before comparison.",
+  "_bands": "Where Druids publishes a single figure per size rather than a range (mens shorts, womens chest), the band runs halfway to the neighbouring size.",
+  "_estimates": "heightCm and weightKg appear nowhere in the Druids guide. They are OUR inference, weighted far lower, and capped to a lower confidence. Never present them as the brand's sizing.",
+  "defaultAudience": "men",
+  "audiences": {
+    "men": {
+      "label": "Mens",
+      "defaultCategory": "polo",
+      "categories": {
+        "polo": {
+          "label": "Polos",
+          "aliases": ["polo", "shirt", "tee", "t-shirt", "tops"],
+          "measure": "Measure at the fullest part of the chest, under the armpits and over the shoulder blades, keeping the tape measure firm and level.",
+          "sizes": [
+            { "size": "S", "chestCm": [88, 96], "heightCm": [163, 175], "weightKg": [60, 70] },
+            { "size": "M", "chestCm": [96, 104], "heightCm": [168, 181], "weightKg": [70, 80] },
+            { "size": "L", "chestCm": [104, 112], "heightCm": [173, 186], "weightKg": [80, 92] },
+            { "size": "XL", "chestCm": [112, 120], "heightCm": [178, 191], "weightKg": [92, 104] },
+            { "size": "2XL", "chestCm": [120, 128], "heightCm": [180, 195], "weightKg": [104, 116] },
+            { "size": "3XL", "chestCm": [128, 136], "heightCm": [183, 198], "weightKg": [116, 128] },
+            { "size": "4XL", "chestCm": [136, 144], "heightCm": [185, 200], "weightKg": [128, 140] }
+          ]
+        },
+        "midlayer": {
+          "label": "Midlayers and hoodies",
+          "aliases": ["midlayer", "mid layer", "hoodie", "baselayer", "sweat"],
+          "sameAs": "polo"
+        },
+        "jacket": {
+          "label": "Jackets and gilets",
+          "aliases": ["jacket", "gilet", "vest", "rain"],
+          "sameAs": "polo"
+        },
+        "shorts": {
+          "label": "Shorts",
+          "aliases": ["short", "shorts"],
+          "measure": "Measure around the natural waistline, where you normally wear the waistband.",
+          "sizes": [
+            { "size": "30", "waistCm": [76, 81], "hipCm": [96, 101] },
+            { "size": "32", "waistCm": [81, 86], "hipCm": [101, 106] },
+            { "size": "34", "waistCm": [86, 91], "hipCm": [106, 111] },
+            { "size": "36", "waistCm": [91, 96], "hipCm": [111, 116] },
+            { "size": "38", "waistCm": [96, 101], "hipCm": [116, 120] },
+            { "size": "40", "waistCm": [101, 106], "hipCm": [120, 126] },
+            { "size": "42", "waistCm": [106, 112], "hipCm": [126, 131] }
+          ]
+        },
+        "trousers": {
+          "label": "Trousers and joggers",
+          "aliases": ["trouser", "trousers", "jogger", "joggers", "pant", "pants", "chino"],
+          "_note": "Druids sizes these waist/inseam, e.g. 32/32. We recommend the waist; the inside leg is a second question the customer answers themselves.",
+          "legLengthsCm": { "30": 75.5, "32": 80, "34": 85.5 },
+          "measure": "Measure around the natural waistline. Inside leg runs from the crotch to the floor.",
+          "sizes": [
+            { "size": "30", "waistCm": [76, 81], "hipCm": [96, 101] },
+            { "size": "32", "waistCm": [81, 86], "hipCm": [101, 106] },
+            { "size": "34", "waistCm": [86, 91], "hipCm": [106, 111] },
+            { "size": "36", "waistCm": [91, 96], "hipCm": [111, 116] },
+            { "size": "38", "waistCm": [96, 101], "hipCm": [116, 120] },
+            { "size": "40", "waistCm": [101, 106], "hipCm": [120, 126] },
+            { "size": "42", "waistCm": [106, 112], "hipCm": [126, 131] }
+          ]
+        },
+        "belt": {
+          "label": "Belts",
+          "aliases": ["belt", "belts"],
+          "measure": "Measure around the waistline where you wear your belt.",
+          "sizes": [
+            { "size": "M/L", "waistCm": [76, 86] },
+            { "size": "XL/2XL", "waistCm": [91, 102] }
+          ],
+          "alsoOffered": ["One size"]
+        },
+        "socks": {
+          "label": "Socks",
+          "aliases": ["sock", "socks"],
+          "noChart": "Sizing varies by style - crew, low cut and no show. Point the customer at the size guide on the product page rather than calling a size.",
+          "sizes": []
+        }
+      }
     },
-    "shorts": {
-      "label": "Shorts",
-      "_note": "Druids publishes one waist figure per size, not a range. The bands below sit halfway to the neighbouring size.",
-      "measure": "Measure around the natural waistline, where you normally wear the waistband.",
-      "sizes": [
-        { "size": "30", "waistCm": [76, 81], "hipCm": [96, 101] },
-        { "size": "32", "waistCm": [81, 86], "hipCm": [101, 106] },
-        { "size": "34", "waistCm": [86, 91], "hipCm": [106, 111] },
-        { "size": "36", "waistCm": [91, 96], "hipCm": [111, 116] },
-        { "size": "38", "waistCm": [96, 101], "hipCm": [116, 120] },
-        { "size": "40", "waistCm": [101, 106], "hipCm": [120, 126] },
-        { "size": "42", "waistCm": [106, 112], "hipCm": [126, 131] }
-      ]
-    },
-    "trousers": {
-      "label": "Trousers and joggers",
-      "_note": "Druids sizes these waist/length, e.g. 32/32. We recommend the waist; leg length is a second question the customer answers themselves.",
-      "measure": "Measure around the natural waistline. Inside leg is measured from the crotch to the floor.",
-      "legLengthsCm": { "30": 75.5, "32": 80, "34": 85.5 },
-      "sizes": [
-        { "size": "30", "waistCm": [76, 81], "hipCm": [96, 101] },
-        { "size": "32", "waistCm": [81, 86], "hipCm": [101, 106] },
-        { "size": "34", "waistCm": [86, 91], "hipCm": [106, 111] },
-        { "size": "36", "waistCm": [91, 96], "hipCm": [111, 116] },
-        { "size": "38", "waistCm": [96, 101], "hipCm": [116, 120] },
-        { "size": "40", "waistCm": [101, 106], "hipCm": [120, 126] },
-        { "size": "42", "waistCm": [106, 112], "hipCm": [126, 131] }
-      ]
+    "women": {
+      "label": "Womens",
+      "defaultCategory": "polo",
+      "_note": "A genuinely different system from mens: UK dress sizes 8-18, not S-4XL. Never answer a womens question off the mens chart.",
+      "categories": {
+        "polo": {
+          "label": "Polos",
+          "aliases": ["polo", "shirt", "tee", "t-shirt", "tops"],
+          "measure": "Measure at the fullest part of the chest, under the armpits and over the shoulder blades, keeping the tape measure firm and level.",
+          "sizes": [
+            { "size": "8", "chestCm": [88, 93], "heightCm": [155, 168], "weightKg": [48, 55] },
+            { "size": "10", "chestCm": [93, 99], "heightCm": [157, 170], "weightKg": [55, 62] },
+            { "size": "12", "chestCm": [99, 104], "heightCm": [160, 173], "weightKg": [62, 70] },
+            { "size": "14", "chestCm": [104, 109], "heightCm": [162, 175], "weightKg": [70, 78] },
+            { "size": "16", "chestCm": [109, 114], "heightCm": [163, 177], "weightKg": [78, 87] },
+            { "size": "18", "chestCm": [114, 120], "heightCm": [164, 178], "weightKg": [87, 97] }
+          ]
+        },
+        "midlayer": {
+          "label": "Midlayers and hoodies",
+          "aliases": ["midlayer", "mid layer", "hoodie", "baselayer", "sweat"],
+          "sameAs": "polo"
+        },
+        "jacket": {
+          "label": "Jackets and gilets",
+          "aliases": ["jacket", "gilet", "vest", "rain"],
+          "sameAs": "polo"
+        },
+        "shorts": {
+          "label": "Shorts",
+          "aliases": ["short", "shorts"],
+          "measure": "Measure around the natural waistline, where you normally wear the waistband.",
+          "sizes": [
+            { "size": "8", "waistCm": [66, 69], "hipCm": [75, 78] },
+            { "size": "10", "waistCm": [71, 74], "hipCm": [80, 83] },
+            { "size": "12", "waistCm": [76, 79], "hipCm": [85, 88] },
+            { "size": "14", "waistCm": [81, 84], "hipCm": [90, 93] },
+            { "size": "16", "waistCm": [86, 89], "hipCm": [95, 98] },
+            { "size": "18", "waistCm": [91, 94], "hipCm": [100, 103] }
+          ]
+        },
+        "skort": {
+          "label": "Skorts",
+          "aliases": ["skort", "skirt"],
+          "measure": "Measure around the natural waistline.",
+          "sizes": [
+            { "size": "8", "waistCm": [66, 69] },
+            { "size": "10", "waistCm": [71, 74] },
+            { "size": "12", "waistCm": [76, 79] },
+            { "size": "14", "waistCm": [81, 84] },
+            { "size": "16", "waistCm": [86, 89] },
+            { "size": "18", "waistCm": [91, 94] }
+          ]
+        },
+        "trousers": {
+          "label": "Trousers and joggers",
+          "aliases": ["trouser", "trousers", "jogger", "joggers", "pant", "pants", "chino"],
+          "_note": "Inside leg is 70cm across every size.",
+          "measure": "Measure around the natural waistline.",
+          "sizes": [
+            { "size": "8", "waistCm": [66, 69], "hipCm": [75, 78] },
+            { "size": "10", "waistCm": [71, 74], "hipCm": [80, 83] },
+            { "size": "12", "waistCm": [76, 79], "hipCm": [85, 88] },
+            { "size": "14", "waistCm": [81, 84], "hipCm": [90, 93] },
+            { "size": "16", "waistCm": [86, 89], "hipCm": [95, 98] },
+            { "size": "18", "waistCm": [91, 94], "hipCm": [100, 103] }
+          ]
+        },
+        "belt": {
+          "label": "Belts",
+          "aliases": ["belt", "belts"],
+          "measure": "Measure around the waistline where you wear your belt.",
+          "sizes": [
+            { "size": "S/M", "waistCm": [66, 71] },
+            { "size": "M/L", "waistCm": [71, 76] }
+          ],
+          "alsoOffered": ["One size"]
+        },
+        "socks": {
+          "label": "Socks",
+          "aliases": ["sock", "socks"],
+          "noChart": "Sizing varies by style - crew, low cut and no show. Point the customer at the size guide on the product page rather than calling a size.",
+          "sizes": []
+        }
+      }
     }
   }
 }

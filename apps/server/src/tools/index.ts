@@ -24,10 +24,35 @@ const money = (amount: number, currency: string) => {
   return symbol ? `${symbol}${amount.toFixed(2)}` : `${currency} ${amount.toFixed(2)}`;
 };
 
-/** One line per product, so the model knows exactly what is on screen. */
+/**
+ * Which range a set of products belongs to.
+ *
+ * Saves asking "mens or womens?" when the customer is plainly already looking
+ * at one of them. Returns undefined when the products disagree or say nothing,
+ * and then find_my_size asks rather than guessing.
+ */
+function audienceOf(products: Product[]): 'men' | 'women' | undefined {
+  const tags = products.flatMap((product) => product.tags.map((tag) => tag.toLowerCase()));
+  const men = tags.some((tag) => tag === 'mens' || tag === 'men');
+  const women = tags.some((tag) => tag === 'womens' || tag === 'women' || tag === 'ladies');
+  if (men === women) return undefined;
+  return men ? 'men' : 'women';
+}
+
+/**
+ * One line per product, so the model knows exactly what is on screen.
+ *
+ * The range is included because search does not respect it: ask for "womens
+ * polo" in a store that stocks none and you get six mens polos back. Without
+ * this the model relays them as womens.
+ */
 function listFacts(products: Product[]): string {
   return products
-    .map((product) => `- ${product.title} - ${money(product.price.amount, product.price.currency)} [${product.id}]`)
+    .map((product) => {
+      const range = audienceOf([product]);
+      const label = range ? ` (${range === 'men' ? 'mens' : 'womens'})` : '';
+      return `- ${product.title}${label} - ${money(product.price.amount, product.price.currency)} [${product.id}]`;
+    })
     .join('\n');
 }
 
@@ -66,6 +91,7 @@ const searchTool = defineTool({
         items: products.map((p) => ({ id: p.id, title: p.title })),
         query: args.query,
       },
+      preferences: { audience: audienceOf(products) },
     });
 
     if (products.length === 0) {
@@ -154,6 +180,7 @@ const sizeSchema = z.object({
   chestCm: z.number().positive().optional(),
   waistCm: z.number().positive().optional(),
   fitPreference: z.enum(['tight', 'regular', 'relaxed']).optional(),
+  audience: z.enum(['men', 'women']).optional(),
   category: z.string().optional(),
 });
 
@@ -173,13 +200,26 @@ const sizeTool = defineTool({
       chestCm: { type: 'number' },
       waistCm: { type: 'number' },
       fitPreference: { type: 'string', enum: ['tight', 'regular', 'relaxed'] },
-      category: { type: 'string', description: "Which chart to use: 'tops' for polos, midlayers, hoodies, jackets and gilets; 'shorts'; or 'trousers'." },
+      audience: {
+        type: 'string',
+        enum: ['men', 'women'],
+        description: 'Mens or womens range. They are sized completely differently, so ask if you do not know.',
+      },
+      category: {
+        type: 'string',
+        description: 'polo, midlayer, jacket, shorts, trousers, skort, belt or socks. Defaults to polo.',
+      },
     },
     required: [],
   },
   async run(args, ctx): Promise<ToolResult> {
-    // Merge with anything they told us earlier in the conversation.
-    const profile = { ...ctx.session.sizeProfile, ...args };
+    // Merge with anything they told us earlier, and with the range they are
+    // already browsing, so we only ask mens/womens when we truly cannot tell.
+    const profile = {
+      ...ctx.session.sizeProfile,
+      ...args,
+      audience: args.audience ?? ctx.session.sizeProfile.audience ?? ctx.session.preferences.audience,
+    };
     const recommendation = recommendSize(profile);
     await sessions.patch(ctx.session.id, { sizeProfile: profile });
 

@@ -8,6 +8,13 @@ export type HeightUnit = 'cm' | 'in';
 export type WeightUnit = 'kg' | 'lb';
 export type Fit = 'tight' | 'regular' | 'relaxed';
 
+/**
+ * Druids sizes mens and womens on different systems entirely - S to 4XL by
+ * chest, against UK dress sizes 8 to 18 - so this is never assumed. Answering
+ * a womens question off the mens chart gives a confidently wrong size.
+ */
+export type Audience = 'men' | 'women';
+
 export interface SizeInput {
   heightValue?: number;
   heightUnit?: HeightUnit;
@@ -18,7 +25,9 @@ export interface SizeInput {
   chestCm?: number;
   waistCm?: number;
   fitPreference?: Fit;
-  /** Which Druids size chart to use, e.g. 'mens-top'. */
+  /** Mens or womens. Asked for rather than assumed. */
+  audience?: Audience;
+  /** Which chart: polo, midlayer, jacket, shorts, trousers, skort, belt, socks. */
   category?: string;
 }
 
