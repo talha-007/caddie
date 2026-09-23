@@ -3,6 +3,7 @@ import type { Journey, SizeInput } from '@caddie/shared';
 import type { ThreadMessage } from '../lib/useCaddie.js';
 import { JourneyForm } from './forms/JourneyForm.js';
 import { SizeForm } from './forms/SizeForm.js';
+import { SparkleIcon, UserIcon } from './icons.js';
 import { AddedPanel } from './panels/BasketPanel.js';
 import { ResultPanel } from './panels/ResultPanel.js';
 import { Thinking } from './Thinking.js';
@@ -18,10 +19,14 @@ interface ThreadProps {
 }
 
 /**
- * The conversation as live captions rather than a chat log: words, product
- * cards and quick forms in the order they happened, with only the latest
- * exchange held at full strength. Everything said before it stays on screen,
- * quietened, so the thread reads like subtitles and not like messaging.
+ * The conversation as a chat log: every turn is a bubble beside the avatar of
+ * whoever said it - the customer on the right, the Caddie's sparkle on the
+ * left - with product cards and quick forms sitting full width underneath the
+ * turn that produced them.
+ *
+ * Earlier turns used to shrink and fade to 45%, which read as broken text
+ * rather than as history. Every turn now carries the same weight; scrolling is
+ * what puts an old line behind you.
  */
 export function Thread({ messages, busy, busyJourney, garment, onSubmitSize, onSubmitJourney }: ThreadProps) {
   const endRef = useRef<HTMLDivElement>(null);
@@ -33,10 +38,6 @@ export function Thread({ messages, busy, busyJourney, garment, onSubmitSize, onS
    */
   const visible = messages.filter((m) => m.text || m.attachment || m.local);
 
-  // The newest question and the answer to it: the only two lines shown in full.
-  const spoken = visible.filter((m) => m.text);
-  const current = new Set(spoken.slice(-2).map((m) => m.id));
-
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages.length, busy]);
@@ -46,10 +47,16 @@ export function Thread({ messages, busy, busyJourney, garment, onSubmitSize, onS
       {visible.map((message) => (
         <div key={message.id} className={`caddie-turn caddie-turn--${message.role}`}>
           {message.text ? (
-            <p className={`caddie-caption caddie-caption--${message.role}${current.has(message.id) ? '' : ' is-past'}`}>
-              {message.role === 'user' ? <span className="caddie-caption__who">You</span> : null}
-              {message.text}
-            </p>
+            <div className={`caddie-msg caddie-msg--${message.role}`}>
+              <span className="caddie-msg__avatar" aria-hidden="true">
+                {message.role === 'user' ? <UserIcon size={19} /> : <SparkleIcon size={20} />}
+              </span>
+              <p className="caddie-msg__bubble">
+                {/* The avatar is decorative, so the speaker is named here instead. */}
+                <span className="caddie-visually-hidden">{message.role === 'user' ? 'You said: ' : 'Caddie said: '}</span>
+                {message.text}
+              </p>
+            </div>
           ) : null}
 
           {message.attachment ? (

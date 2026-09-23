@@ -26,6 +26,14 @@ export const SparkleIcon = (p: IconProps) => (
   </Svg>
 );
 
+/** The customer's own avatar, beside what they said. */
+export const UserIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle {...stroke} cx="12" cy="8" r="3.6" />
+    <path {...stroke} d="M4.8 20c0-3.5 3.2-5.6 7.2-5.6s7.2 2.1 7.2 5.6" />
+  </Svg>
+);
+
 export const MicIcon = (p: IconProps) => (
   <Svg {...p}>
     <path

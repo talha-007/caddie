@@ -31,7 +31,8 @@ export function orbState(voice: VoiceState, busy: boolean): OrbState {
 
 const STATUS: Record<OrbState, string> = {
   idle: 'Tap to talk',
-  listening: 'Listening…',
+  // Says how to finish, now that no Send button does.
+  listening: 'Listening… tap to send',
   thinking: 'Thinking…',
   error: 'Tap to try again',
 };
@@ -40,6 +41,11 @@ const UNSUPPORTED = 'Voice needs a newer browser';
 
 /** A tap is a toggle; anything longer is hold-to-talk and sends on release. */
 const HOLD_MS = 600;
+
+/** Spoken label for the orb, which is now the only way to send a clip. */
+function orbHint(label: string, recording: boolean): string {
+  return recording ? `${label}. Tap to send, or hold and release.` : `${label}. Hold to talk, or tap to start.`;
+}
 
 /** The press behaviour every orb shares - identical to the old mic button. */
 function usePress(voice: VoiceState) {
@@ -73,7 +79,14 @@ function clock(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-/** Discard / Send, offered only while a clip is actually being recorded. */
+/**
+ * Discard and the running clock, offered only while a clip is actually being
+ * recorded.
+ *
+ * There is deliberately no Send button. Sending is the orb's job, WhatsApp
+ * style: release a hold, or tap the orb a second time. A separate Send gave
+ * the same action two controls, and the one people reached for was the orb.
+ */
 function Takes({ voice }: { voice: VoiceState }) {
   if (voice.status !== 'recording') return null;
   return (
@@ -87,9 +100,6 @@ function Takes({ voice }: { voice: VoiceState }) {
         <CloseIcon size={18} />
       </button>
       <span className="caddie-voice__time">{clock(voice.seconds)}</span>
-      <button type="button" className="caddie-btn caddie-btn--primary caddie-btn--small" onClick={voice.stop}>
-        Send
-      </button>
     </div>
   );
 }
@@ -134,7 +144,7 @@ export function VoiceOrb({ voice, busy }: OrbProps) {
         onKeyDown={onKeyDown}
         disabled={!voice.supported || voice.status === 'sending'}
         aria-pressed={recording}
-        aria-label={voice.supported ? `${label}. Hold to talk, or tap to start.` : UNSUPPORTED}
+        aria-label={voice.supported ? orbHint(label, recording) : UNSUPPORTED}
       >
         <span className="caddie-voiceorb__bloom" aria-hidden="true" />
         <span className="caddie-voiceorb__ring" aria-hidden="true" />
@@ -195,6 +205,18 @@ export function VoiceDock({ voice, busy }: OrbProps) {
   return (
     <div className="caddie-dock">
       <VoiceError voice={voice} />
+      {/*
+       * The label sits OUTSIDE the bar. Inside it, the pill's glass surface
+       * read as part of the button, so "Tap to talk" looked like a caption
+       * printed on the control rather than a status line above it.
+       */}
+      <div className="caddie-dock__text">
+        <span className="caddie-dock__status" role="status" aria-live="polite">
+          {label}
+        </span>
+        {recording ? <Wave level={level} /> : null}
+      </div>
+
       <div className="caddie-dock__bar">
         <button
           type="button"
@@ -207,7 +229,7 @@ export function VoiceDock({ voice, busy }: OrbProps) {
           onKeyDown={onKeyDown}
           disabled={!voice.supported || voice.status === 'sending'}
           aria-pressed={recording}
-          aria-label={voice.supported ? `${label}. Hold to talk, or tap to start.` : UNSUPPORTED}
+          aria-label={voice.supported ? orbHint(label, recording) : UNSUPPORTED}
         >
           <span className="caddie-voiceorb__bloom" aria-hidden="true" />
           <span className="caddie-voiceorb__ring" aria-hidden="true" />
@@ -217,12 +239,6 @@ export function VoiceDock({ voice, busy }: OrbProps) {
           <span className="caddie-voiceorb__glyph">{recording ? <StopIcon size={18} /> : <MicIcon size={20} />}</span>
         </button>
 
-        <div className="caddie-dock__text">
-          <span className="caddie-dock__status" role="status" aria-live="polite">
-            {label}
-          </span>
-          {recording ? <Wave level={level} /> : null}
-        </div>
         <Takes voice={voice} />
       </div>
     </div>
