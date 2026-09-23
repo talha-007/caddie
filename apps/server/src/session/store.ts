@@ -1,4 +1,4 @@
-import type { CaddieMessage, SizeInput } from '@caddie/shared';
+import type { CaddieMessage, PageContext, SizeInput } from '@caddie/shared';
 import { redisEnabled } from '../lib/redis.js';
 import { RedisSessionStore } from './redisStore.js';
 
@@ -32,6 +32,12 @@ export interface CaddieSession {
     budgetAmount?: number;
     colour?: string;
   };
+  /**
+   * The storefront page the customer is on, from the last message that told
+   * us. Held on the session because voice carries no context of its own - a
+   * spoken "what size am I in this" arrives with nothing attached.
+   */
+  page?: PageContext;
   preferences: {
     colour?: string;
     budgetAmount?: number;

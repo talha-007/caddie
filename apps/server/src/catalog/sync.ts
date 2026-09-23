@@ -205,8 +205,24 @@ export function allProducts(): Product[] {
   return products;
 }
 
+/**
+ * Accepts a product id in either form it actually arrives in.
+ *
+ * The mirror is keyed by GID, but a bare numeric id reaches us from two
+ * directions: a Shopify theme prints `{{ product.id }}` as a plain number into
+ * the widget page context, and the model sometimes drops the prefix when it
+ * copies an id out of the conversation. Both used to fall through to UCP and
+ * come back "product not found".
+ *
+ * Only a purely numeric id is rebuilt. Pulling the digits out of any string
+ * would read gid://shopify/ProductVariant/123 as product 123, which is a
+ * different product rather than a miss.
+ */
 export function productById(id: string): Product | null {
-  return byId.get(id) ?? null;
+  const direct = byId.get(id);
+  if (direct) return direct;
+  if (!/^\d+$/.test(id)) return null;
+  return byId.get(`gid://shopify/Product/${id}`) ?? null;
 }
 
 export function catalogueReady(): boolean {

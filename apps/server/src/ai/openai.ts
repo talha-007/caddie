@@ -6,6 +6,8 @@ import { log } from '../lib/logger.js';
 import { publish } from '../session/bus.js';
 import { sessions, type CaddieSession } from '../session/store.js';
 import { runTool, toolDefinitionsForVapi } from '../tools/index.js';
+import { costOfTokens } from '../usage/pricing.js';
+import { record } from '../usage/store.js';
 import { SYSTEM_PROMPT } from './prompt.js';
 
 /**
@@ -123,6 +125,34 @@ async function complete(messages: ChatMessage[]): Promise<{ choice: Choice; usag
  * Reminds the model what the customer is currently looking at, so "that one",
  * "the cheaper one" and "a different colour" have something to attach to.
  */
+/**
+ * Where the customer is standing in the shop.
+ *
+ * Deliberately short. The system prompt is identical on every call and caches
+ * at a quarter of the price; this varies per turn and does not, so it says
+ * which product and nothing else. It is also a pointer rather than a fact -
+ * it reached us through the browser, so the model is told to look the product
+ * up rather than read anything here back to the customer.
+ */
+export function pageContext(session: CaddieSession): ChatMessage | null {
+  const page = session.page;
+  if (!page || page.pageType === 'other') return null;
+
+  if (page.pageType === 'product') {
+    // A product page we cannot name is worse than silence: it tells the model
+    // there is a "this" to talk about without saying what it is.
+    if (!page.productId) return null;
+
+    const title = page.productTitle ? ` - ${page.productTitle}` : '';
+    return {
+      role: 'system',
+      content: `The customer is on the product page for [${page.productId}]${title}. "This", "it" and "this one" mean that product.`,
+    };
+  }
+
+  return { role: 'system', content: `The customer is on the ${page.pageType} page.` };
+}
+
 function screenContext(session: CaddieSession): ChatMessage | null {
   const shown = session.lastShown;
   if (!shown) return null;
@@ -152,12 +182,18 @@ export interface Reply {
   attachment?: CaddieAttachment;
 }
 
-export async function converse(sessionId: string, userText: string): Promise<Reply> {
+/** Who the turn belongs to, for the usage dashboard. Never used for anything else. */
+export interface TurnMeta {
+  client?: string;
+}
+
+export async function converse(sessionId: string, userText: string, meta?: TurnMeta): Promise<Reply> {
   const session = await sessions.getOrCreate(sessionId);
+  const turnStartedAt = Date.now();
 
   const messages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
-    ...(screenContext(session) ? [screenContext(session) as ChatMessage] : []),
+    ...([pageContext(session), screenContext(session)].filter(Boolean) as ChatMessage[]),
     ...history(session),
     { role: 'user', content: userText },
   ];
@@ -182,11 +218,27 @@ export async function converse(sessionId: string, userText: string): Promise<Rep
     const calls = choice.message.tool_calls ?? [];
     if (calls.length === 0) {
       log.info('openai.turn', {
+        sessionId,
         model: env.openai.model,
         steps: step + 1,
         promptTokens,
         cachedTokens,
         completionTokens,
+      });
+
+      record({
+        at: Date.now(),
+        sessionId,
+        kind: 'chat',
+        model: env.openai.model,
+        promptTokens,
+        cachedTokens,
+        completionTokens,
+        audioSeconds: 0,
+        costUsd: costOfTokens(env.openai.model, promptTokens, cachedTokens, completionTokens),
+        ms: Date.now() - turnStartedAt,
+        steps: step + 1,
+        ...(meta?.client ? { client: meta.client } : {}),
       });
       return { text: choice.message.content?.trim() || 'Sorry, I did not catch that.', attachment };
     }

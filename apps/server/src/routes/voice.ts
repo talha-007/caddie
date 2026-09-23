@@ -9,6 +9,8 @@ import { consumeShared, LIMITS } from '../lib/rateLimit.js';
 import { clientKey } from '../lib/request.js';
 import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
+import { clientHash } from '../usage/identity.js';
+import { recordMessage } from '../usage/store.js';
 
 /**
  * Voice in, chat out.
@@ -63,8 +65,10 @@ voiceRouter.post(
       });
     }
 
+    const client = clientHash(clientKey(req));
+
     try {
-      const transcript = await transcribe(req.body as Buffer, mimeType);
+      const transcript = await transcribe(req.body as Buffer, mimeType, { sessionId, client });
 
       // Nothing intelligible. Say so rather than sending silence to the model.
       if (!transcript) {
@@ -80,13 +84,17 @@ voiceRouter.post(
       const verdict = await screen(transcript, {
         hasHistory: session.messages.length > 0,
         lastAssistant: [...session.messages].reverse().find((m) => m.role === 'assistant' && m.text)?.text,
+        sessionId,
+        client,
       });
       if (!verdict.allow) {
         log.info('voice.declined', { sessionId, reason: verdict.reason });
         return res.json({ sessionId, transcript, message: assistantMessage(verdict.reply) });
       }
 
-      const reply = await converse(sessionId, transcript);
+      const reply = await converse(sessionId, transcript, { client });
+      recordMessage(sessionId, 'user', transcript);
+      recordMessage(sessionId, 'assistant', reply.text);
 
       const heard: CaddieMessage = {
         id: randomUUID(),
