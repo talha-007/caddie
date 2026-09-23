@@ -57,11 +57,13 @@ export function ContextBar({ context }: { context: WidgetContext }) {
   const title = context.page.productTitle;
   if (context.page.pageType !== 'product' || !title) return null;
   return (
-    <div className="caddie-context">
-      {context.productImage ? <img src={context.productImage} alt="" className="caddie-context__thumb" /> : null}
-      <p className="caddie-context__text">
-        <span className="caddie-eyebrow">You're looking at</span>
-        <strong>{title}</strong>
+    <div className="caddie-contextbar">
+      <p className="caddie-context">
+        {context.productImage ? <img src={context.productImage} alt="" className="caddie-context__thumb" /> : null}
+        <span className="caddie-context__text">
+          <span className="caddie-context__eyebrow">You're looking at</span>
+          <strong>{title}</strong>
+        </span>
       </p>
     </div>
   );

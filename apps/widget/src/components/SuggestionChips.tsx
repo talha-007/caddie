@@ -1,9 +1,11 @@
 import type { CaddieAttachment } from '@caddie/shared';
 
 /**
- * The follow-ups under the conversation ("Show me cheaper", "Change the
- * colour"). They are sent as plain sentences, exactly as if spoken, so the
- * Caddie's memory of the conversation does the rest.
+ * "Try saying…" - example phrases, not chat chips.
+ *
+ * They are sent as plain sentences, exactly as if spoken, so the Caddie's
+ * memory of the conversation does the rest. Presented as quiet suggestions so
+ * nothing here reads as a text box: speaking is the way in.
  */
 const BY_KIND: Record<CaddieAttachment['kind'] | 'start', string[]> = {
   start: ['What size should I buy?', 'Build me an outfit under £150', 'Recommend a pack for mixed conditions'],
@@ -23,14 +25,19 @@ export function SuggestionChips({
   disabled: boolean;
   onPick: (text: string) => void;
 }) {
-  const chips = BY_KIND[last ?? 'start'];
+  const phrases = BY_KIND[last ?? 'start'];
   return (
-    <div className="caddie-suggestions" role="group" aria-label="Suggestions">
-      {chips.map((chip) => (
-        <button key={chip} type="button" className="caddie-suggestion" disabled={disabled} onClick={() => onPick(chip)}>
-          {chip}
-        </button>
-      ))}
+    <div className="caddie-trysay" role="group" aria-label="Things you can say">
+      <p className="caddie-trysay__label">Try saying</p>
+      <div className="caddie-trysay__list">
+        {phrases.map((phrase) => (
+          <button key={phrase} type="button" className="caddie-trysay__item" disabled={disabled} onClick={() => onPick(phrase)}>
+            <span aria-hidden="true">“</span>
+            {phrase}
+            <span aria-hidden="true">”</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

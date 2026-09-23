@@ -21,6 +21,15 @@
   --caddie-accent-fg: #ffffff;
   --caddie-gradient: linear-gradient(135deg, #5e1f5e 0%, #7b2c7b 55%, #9b3a8e 100%);
 
+  /* Voice-first surfaces. Tints, glows and glass, all from the brand purple. */
+  --caddie-tint: #faf7fa;
+  --caddie-tint-strong: #f3ebf3;
+  --caddie-glass: rgba(255, 255, 255, 0.72);
+  --caddie-glass-line: rgba(123, 44, 123, 0.12);
+  --caddie-glow: rgba(123, 44, 123, 0.28);
+  --caddie-bloom: rgba(155, 58, 142, 0.22);
+  --caddie-orb-light: #b455a4;
+
   /* Surfaces and text */
   --caddie-bg: #f8f6f4;
   --caddie-surface: #ffffff;
@@ -41,12 +50,16 @@
   --caddie-radius-sheet: 20px;
   --caddie-radius: 16px;
   --caddie-radius-control: 12px;
+  --caddie-radius-pill: 999px;
   --caddie-shadow: 0 16px 48px rgba(40, 16, 40, 0.22);
   --caddie-shadow-soft: 0 2px 10px rgba(40, 16, 40, 0.06);
+  --caddie-shadow-lift: 0 10px 30px rgba(40, 16, 40, 0.1);
+  --caddie-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
   /* Sizing */
   --caddie-touch: 44px;
   --caddie-mic: 48px;
+  --caddie-orb: 124px;
   --caddie-gutter: 16px;
   /* Themes with a sticky add-to-cart bar can raise the launcher: #druids-caddie .caddie-root { --caddie-launcher-offset: 88px } */
   --caddie-launcher-offset: 16px;
@@ -230,7 +243,8 @@
   flex-direction: column;
   height: 92vh;
   height: 92dvh;
-  background: var(--caddie-bg);
+  /* A breath of purple behind the orb, white where the content sits. */
+  background: linear-gradient(180deg, #ffffff 0%, var(--caddie-tint) 34%, #ffffff 72%);
   border-radius: var(--caddie-radius-sheet) var(--caddie-radius-sheet) 0 0;
   box-shadow: var(--caddie-shadow);
   overflow: hidden;
@@ -251,19 +265,17 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px var(--caddie-gutter) calc(12px + env(safe-area-inset-bottom, 0px));
-  background: var(--caddie-surface);
-  border-top: 1px solid var(--caddie-line);
+  gap: 12px;
+  padding: 10px var(--caddie-gutter) calc(14px + env(safe-area-inset-bottom, 0px));
+  background: transparent;
 }
 
 /* ---------- Header ---------- */
 
 .caddie-header {
   flex: none;
-  background: var(--caddie-surface);
-  border-bottom: 1px solid var(--caddie-line);
-  padding: 6px 8px 8px var(--caddie-gutter);
+  background: transparent;
+  padding: 6px 8px 6px var(--caddie-gutter);
 }
 
 .caddie-header__grab {
@@ -299,6 +311,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
 
 .caddie-header__basket {
   position: relative;
@@ -345,30 +358,49 @@
 }
 
 /* ---------- Product context ---------- */
+/* A pill under the header, not a band across it. */
 
-.caddie-context {
+.caddie-contextbar {
   flex: none;
   display: flex;
+  justify-content: center;
+  padding: 2px var(--caddie-gutter) 6px;
+}
+
+.caddie-context {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px var(--caddie-gutter);
-  background: var(--caddie-accent-soft);
-  border-bottom: 1px solid var(--caddie-line);
+  gap: 8px;
+  max-width: 100%;
+  padding: 5px 14px;
+  border-radius: var(--caddie-radius-pill);
+  background: var(--caddie-tint-strong);
+  font-size: 13px;
 }
 
 .caddie-context__thumb {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
+  width: 26px;
+  height: 26px;
+  margin: -2px 0 -2px -8px;
+  border-radius: 50%;
   object-fit: cover;
   background: var(--caddie-surface);
 }
 
 .caddie-context__text {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   min-width: 0;
-  font-size: 14px;
+}
+
+.caddie-context__eyebrow {
+  flex: none;
+  color: var(--caddie-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .caddie-context__text strong {
@@ -542,58 +574,57 @@
   box-shadow: 0 0 0 8px var(--caddie-success-soft);
 }
 
-.caddie-orb--hero {
-  width: 76px;
-  height: 76px;
-  box-shadow: 0 0 0 10px rgba(123, 44, 123, 0.1), 0 0 0 22px rgba(123, 44, 123, 0.05);
-}
 
 /* ---------- Home ---------- */
+/* The orb is the screen; everything else sits quietly around it. */
 
 .caddie-home {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
+  padding-top: 8px;
 }
 
 .caddie-home__hero {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 12px 0 4px;
+  gap: 16px;
   text-align: center;
 }
 
-.caddie-home__voice-label {
-  color: var(--caddie-accent);
-  font-size: 14px;
-  font-weight: 600;
-}
-
 .caddie-home__title {
-  margin-top: 6px;
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
 }
 
-.caddie-features {
+.caddie-marks {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: 6px 16px;
+  gap: 6px 10px;
   color: var(--caddie-muted);
-  font-size: 13px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
 }
 
-.caddie-features li {
+.caddie-marks li {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
-.caddie-features .caddie-icon {
+.caddie-marks__dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--caddie-line-strong);
+}
+
+.caddie-marks .caddie-icon {
   color: var(--caddie-accent);
 }
 
@@ -609,21 +640,29 @@
   gap: 14px;
   width: 100%;
   min-height: 72px;
-  padding: 12px 14px;
-  border: 1px solid var(--caddie-line);
+  padding: 14px 16px;
+  border: 1px solid var(--caddie-glass-line);
   border-radius: var(--caddie-radius);
-  background: var(--caddie-surface);
+  background: var(--caddie-glass);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   box-shadow: var(--caddie-shadow-soft);
   text-align: left;
-  transition: border-color 120ms, transform 120ms;
+  transition: transform 240ms var(--caddie-ease), box-shadow 240ms var(--caddie-ease), border-color 240ms var(--caddie-ease);
 }
 
 .caddie-journey:hover:not(:disabled) {
-  border-color: var(--caddie-accent);
+  transform: translateY(-2px);
+  border-color: rgba(123, 44, 123, 0.28);
+  box-shadow: var(--caddie-shadow-lift);
 }
 
 .caddie-journey:active:not(:disabled) {
-  transform: scale(0.99);
+  transform: translateY(0) scale(0.995);
+}
+
+.caddie-journey:disabled {
+  opacity: 0.55;
 }
 
 .caddie-journey__icon {
@@ -633,14 +672,14 @@
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: var(--caddie-accent-soft);
+  background: var(--caddie-tint-strong);
   color: var(--caddie-accent);
 }
 
 .caddie-journey__text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -654,60 +693,63 @@
   font-size: 13px;
 }
 
-.caddie-home__ask {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 /* ---------- Thread ---------- */
+/* Captions, not chat: the latest exchange in full, the rest quietened. */
 
 .caddie-thread {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
 }
 
 .caddie-turn {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  animation: caddie-rise 220ms ease-out;
-}
-
-.caddie-turn__line {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.caddie-turn--user .caddie-turn__line {
-  justify-content: flex-end;
+  gap: 12px;
+  animation: caddie-rise 260ms var(--caddie-ease);
 }
 
 .caddie-turn__card {
   min-width: 0;
 }
 
-.caddie-bubble {
-  max-width: 85%;
-  padding: 10px 14px;
-  border-radius: 18px;
-  font-size: 15px;
-  line-height: 1.45;
+.caddie-caption {
+  max-width: 92%;
+  font-size: 19px;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
   overflow-wrap: anywhere;
+  transition: opacity 320ms var(--caddie-ease), font-size 320ms var(--caddie-ease);
 }
 
-.caddie-bubble--user {
-  background: var(--caddie-accent);
-  color: var(--caddie-accent-fg);
-  border-bottom-right-radius: 6px;
+.caddie-caption--user {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-self: flex-end;
+  max-width: 88%;
+  text-align: right;
+  color: var(--caddie-accent-strong);
+  font-weight: 600;
 }
 
-.caddie-bubble--assistant {
-  background: var(--caddie-surface);
-  border: 1px solid var(--caddie-line);
-  border-bottom-left-radius: 6px;
+.caddie-caption__who {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--caddie-muted);
+}
+
+/* Older lines stay readable but stop competing with the live one. */
+.caddie-caption.is-past {
+  font-size: 15px;
+  font-weight: 400;
+  opacity: 0.45;
+}
+
+.caddie-caption--user.is-past .caddie-caption__who {
+  display: none;
 }
 
 /* ---------- Thinking ---------- */
@@ -1453,217 +1495,295 @@
   box-shadow: var(--caddie-shadow-soft);
 }
 
-/* ---------- Suggestions ---------- */
+/* ---------- Try saying ---------- */
+/* Example phrases. Understated on purpose: nothing here is a text box. */
 
-.caddie-suggestions {
+.caddie-trysay {
   display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  margin: 0 calc(var(--caddie-gutter) * -1);
-  padding: 0 var(--caddie-gutter);
+  flex-direction: column;
+  gap: 6px;
 }
 
-.caddie-suggestions::-webkit-scrollbar {
-  display: none;
+.caddie-trysay__label {
+  color: var(--caddie-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
-.caddie-home .caddie-suggestions {
+.caddie-trysay__list {
+  display: flex;
   flex-wrap: wrap;
-  overflow: visible;
-  margin: 0;
-  padding: 0;
+  gap: 2px 16px;
 }
 
-.caddie-suggestion {
-  flex: none;
-  min-height: 40px;
-  padding: 0 14px;
-  border-radius: 999px;
-  background: var(--caddie-accent-soft);
+.caddie-trysay__item {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--caddie-touch);
   color: var(--caddie-accent-strong);
   font-size: 14px;
   font-weight: 500;
-  white-space: nowrap;
-}
-
-.caddie-home .caddie-suggestion {
-  min-height: var(--caddie-touch);
-  white-space: normal;
   text-align: left;
+  border-bottom: 1px solid transparent;
+  transition: border-color 200ms var(--caddie-ease), opacity 200ms var(--caddie-ease);
 }
 
-.caddie-suggestion:disabled {
-  opacity: 0.5;
+.caddie-trysay__item:hover:not(:disabled) {
+  border-bottom-color: currentColor;
 }
 
-/* ---------- Composer ---------- */
+.caddie-trysay__item:disabled {
+  opacity: 0.45;
+}
 
-.caddie-composer {
+/* ---------- Voice ---------- */
+/*
+ * The orb. Four states, each one something useVoice really reports:
+ * idle breathes, listening ripples and swells with the live mic level,
+ * thinking shimmers, error drains of colour.
+ */
+
+.caddie-voice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  /* The halo rings sit outside the button box. */
+  padding: 22px 0 4px;
+}
+
+.caddie-voiceorb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--caddie-orb);
+  height: var(--caddie-orb);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--caddie-accent-fg);
+  isolation: isolate;
+}
+
+.caddie-voiceorb__core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 34% 26%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 44%),
+    radial-gradient(circle at 74% 78%, var(--caddie-orb-light) 0%, rgba(180, 85, 164, 0) 56%),
+    radial-gradient(circle at 50% 46%, #7b2c7b 0%, #5e1f5e 100%);
+  /*
+   * The halo from the concept: two rings of thinning purple around the orb,
+   * there in every state, with the drop glow underneath.
+   */
+  box-shadow:
+    inset 0 -12px 28px rgba(30, 8, 30, 0.32),
+    0 0 0 12px rgba(123, 44, 123, 0.07),
+    0 0 0 26px rgba(123, 44, 123, 0.04),
+    0 16px 40px var(--caddie-glow);
+  /* The live microphone, straight from the hook. */
+  transform: scale(calc(1 + var(--caddie-level, 0) * 0.07));
+  transition: transform 120ms linear, filter 300ms var(--caddie-ease);
+}
+
+.caddie-voiceorb__bloom {
+  position: absolute;
+  inset: -16%;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--caddie-bloom) 0%, rgba(155, 58, 142, 0) 66%);
+  filter: blur(10px);
+  pointer-events: none;
+}
+
+.caddie-voiceorb__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--caddie-glow);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.caddie-voiceorb__shimmer {
+  position: absolute;
+  inset: -25%;
+  opacity: 0;
+  background: conic-gradient(
+    from 0deg,
+    rgba(255, 255, 255, 0) 0deg,
+    rgba(255, 255, 255, 0.4) 60deg,
+    rgba(255, 255, 255, 0) 150deg,
+    rgba(255, 255, 255, 0) 360deg
+  );
+  transition: opacity 300ms var(--caddie-ease);
+}
+
+.caddie-voiceorb__glyph {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+}
+
+.caddie-voiceorb--idle .caddie-voiceorb__bloom {
+  animation: caddie-orb-breathe 4.6s ease-in-out infinite;
+}
+
+.caddie-voiceorb--listening .caddie-voiceorb__ring {
+  animation: caddie-orb-ripple 2.2s var(--caddie-ease) infinite;
+}
+
+.caddie-voiceorb--listening .caddie-voiceorb__ring--late {
+  animation-delay: 1.1s;
+}
+
+.caddie-voiceorb--thinking .caddie-voiceorb__shimmer {
+  opacity: 1;
+  animation: caddie-spin 3.4s linear infinite;
+}
+
+.caddie-voiceorb--thinking .caddie-voiceorb__bloom {
+  animation: caddie-orb-breathe 2.4s ease-in-out infinite;
+}
+
+.caddie-voiceorb--error .caddie-voiceorb__core {
+  filter: saturate(0.22) brightness(0.94);
+  box-shadow: inset 0 -12px 28px rgba(30, 8, 30, 0.26);
+}
+
+.caddie-voiceorb--error .caddie-voiceorb__bloom {
+  opacity: 0.3;
+}
+
+.caddie-root .caddie-voiceorb:focus-visible {
+  outline: 3px solid var(--caddie-accent);
+  outline-offset: 6px;
+}
+
+.caddie-voice__status {
+  margin-top: 12px;
+  color: var(--caddie-accent);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.caddie-voice__hint {
+  padding: 8px 16px;
+  border-radius: var(--caddie-radius-pill);
+  background: var(--caddie-tint-strong);
+  color: var(--caddie-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.caddie-voice__takes {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.caddie-composer__field {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.caddie-root .caddie-composer__input {
-  min-height: var(--caddie-mic);
-  padding-right: 52px;
-  border-radius: 999px;
-  background: var(--caddie-bg);
-}
-
-.caddie-composer__send {
-  position: absolute;
-  top: 50%;
-  right: 4px;
-  transform: translateY(-50%);
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--caddie-accent);
-  color: var(--caddie-accent-fg);
-}
-
-.caddie-composer__send:disabled {
-  opacity: 0.35;
-}
-
-/* ---------- Voice ---------- */
-
-.caddie-mic {
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: var(--caddie-mic);
-  height: var(--caddie-mic);
-  border-radius: 50%;
-  background: var(--caddie-gradient);
-  color: var(--caddie-accent-fg);
-  box-shadow: 0 4px 14px rgba(123, 44, 123, 0.35);
-}
-
-.caddie-mic > .caddie-icon {
-  position: relative;
-}
-
-.caddie-mic--large {
-  width: 88px;
-  height: 88px;
-  box-shadow: 0 0 0 12px rgba(123, 44, 123, 0.1), 0 0 0 26px rgba(123, 44, 123, 0.05), 0 8px 24px rgba(123, 44, 123, 0.35);
-}
-
-.caddie-mic__pulse {
-  position: absolute;
-  inset: -6px;
-  border-radius: 50%;
-  background: var(--caddie-accent);
-  opacity: 0.2;
-  transition: transform 90ms linear;
-  pointer-events: none;
-}
-
-.caddie-mic--starting,
-.caddie-mic--sending {
-  opacity: 0.75;
-}
-
-.caddie-mic--starting .caddie-mic__pulse,
-.caddie-mic--sending .caddie-mic__pulse {
-  animation: caddie-breathe 1s ease-in-out infinite;
-}
-
-/* Recording: the button becomes the send action, and says so. */
-.caddie-mic--recording {
-  background: var(--caddie-warning-text);
-}
-
-.caddie-mic--recording .caddie-mic__pulse {
-  background: var(--caddie-warning-text);
-}
-
-.caddie-mic--error {
-  background: var(--caddie-warning-text);
-}
-
-.caddie-voicebar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  border-radius: var(--caddie-radius-control);
-  background: var(--caddie-accent-soft);
-}
-
-.caddie-voicebar--error {
-  background: var(--caddie-warning-soft);
-  color: var(--caddie-warning-text);
-}
-
-.caddie-voicebar__text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.caddie-voicebar__label {
-  color: var(--caddie-accent);
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.caddie-voicebar--error .caddie-voicebar__label {
-  color: inherit;
-}
-
-.caddie-voicebar__time {
-  font-size: 13px;
+.caddie-voice__time {
   color: var(--caddie-muted);
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
-.caddie-voicebar__actions {
+/* ---------- Voice dock ---------- */
+/* The same orb, shrunk, so a result panel and the microphone share the screen. */
+
+.caddie-dock {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
-  margin-left: auto;
 }
 
-/* A red dot while recording, so the state is obvious at a glance. */
-.caddie-voicebar__label::before {
-  content: '';
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: var(--caddie-warning-text);
-  animation: caddie-breathe 1.2s ease-in-out infinite;
+.caddie-dock__bar {
+  display: flex;
+  align-items: center;
+  /* The orb sits in the middle of the bar, not tucked into the corner. */
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: var(--caddie-radius-pill);
+  background: var(--caddie-glass);
+  border: 1px solid var(--caddie-glass-line);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--caddie-shadow-lift);
+}
+
+.caddie-voiceorb--pill {
+  width: var(--caddie-mic);
+  height: var(--caddie-mic);
+}
+
+.caddie-voiceorb--pill .caddie-voiceorb__bloom {
+  inset: -10%;
+}
+
+.caddie-dock__text {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Only as wide as its words, so the group stays centred. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.caddie-dock__status {
+  color: var(--caddie-accent-strong);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Discard and Send join the group rather than pushing it off centre. */
+.caddie-dock .caddie-voice__takes {
+  margin-left: 0;
 }
 
 .caddie-wave {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 28px;
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  height: 34px;
 }
 
-.caddie-wave span {
+.caddie-wave svg {
   display: block;
-  width: 4px;
-  height: 28px;
-  border-radius: 999px;
-  background: var(--caddie-accent);
-  transform-origin: center;
-  transition: transform 90ms linear;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.caddie-wave path {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.caddie-wave__line {
+  stroke: var(--caddie-accent);
+  stroke-width: 2;
+}
+
+.caddie-wave__echo {
+  stroke: var(--caddie-orb-light);
+  stroke-width: 6;
+  opacity: 0.18;
+}
+
+/* In the dock the line is a short flourish beside the label, not a banner. */
+.caddie-dock .caddie-wave {
+  max-width: 76px;
+  height: 24px;
 }
 
 /* ---------- Motion ---------- */
@@ -1697,6 +1817,16 @@
   to { transform: rotate(360deg); }
 }
 
+@keyframes caddie-orb-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+
+@keyframes caddie-orb-ripple {
+  0% { transform: scale(1); opacity: 0.5; }
+  100% { transform: scale(1.65); opacity: 0; }
+}
+
 @keyframes caddie-breathe {
   0%, 100% { opacity: 0.35; }
   50% { opacity: 1; }
@@ -1714,6 +1844,20 @@
   .caddie-thinking__ring {
     border-top-color: var(--caddie-accent-soft);
   }
+
+  /* No ripples, no shimmer, no level-tracking swell: colour and label only. */
+  .caddie-voiceorb__ring,
+  .caddie-voiceorb__shimmer {
+    display: none;
+  }
+
+  .caddie-voiceorb__core {
+    transform: none;
+  }
+
+  .caddie-journey:hover:not(:disabled) {
+    transform: none;
+  }
 }
 
 /* ---------- Phones ---------- */
@@ -1721,18 +1865,27 @@
 @media (max-width: 479px) {
   .caddie-root {
     --caddie-gutter: 14px;
+    --caddie-orb: 116px;
   }
 
   .caddie-home__title {
-    font-size: 20px;
+    font-size: 23px;
   }
 }
 
 /* The narrowest phones: orb-only launcher, shorter title. */
 @media (max-width: 359px) {
+  .caddie-root {
+    --caddie-orb: 104px;
+  }
+
   .caddie-launcher__label,
   .caddie-header__brand {
     display: none;
+  }
+
+  .caddie-home__title {
+    font-size: 21px;
   }
 }
 

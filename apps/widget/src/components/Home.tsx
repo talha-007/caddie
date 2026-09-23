@@ -3,11 +3,11 @@ import type { Journey } from '@caddie/shared';
 import type { VoiceState } from '../lib/useVoice.js';
 import { HangerIcon, RulerIcon, ShirtIcon, SparkleIcon, TagIcon } from './icons.js';
 import { SuggestionChips } from './SuggestionChips.js';
-import { VoiceButton, Wave } from './VoiceButton.js';
+import { VoiceOrb } from './VoiceOrb.js';
 
 /**
- * The welcome screen: the three journeys from the proposal, a big mic, and
- * the example questions. On a product page, sizing leads with that product.
+ * The welcome screen, built around the voice orb: speak first, tap a journey
+ * if you would rather not. On a product page, sizing leads with that product.
  */
 
 const JOURNEYS: Array<{ journey: Journey; title: string; blurb: string; icon: ReactNode }> = [
@@ -29,29 +29,19 @@ export function Home({ productTitle, voice, busy, onJourney, onAsk }: HomeProps)
   return (
     <div className="caddie-home">
       <div className="caddie-home__hero">
-        {voice.supported ? (
-          <>
-            <VoiceButton voice={voice} large />
-            <Wave level={voice.status === 'recording' ? voice.level : 0} />
-            <p className="caddie-home__voice-label">
-              {voice.status === 'recording' ? 'Listening… tap to send' : voice.status === 'sending' ? 'Transcribing…' : 'Hold to talk to your Caddie'}
-            </p>
-          </>
-        ) : (
-          <span className="caddie-orb caddie-orb--hero" aria-hidden="true">
-            <SparkleIcon size={30} />
-          </span>
-        )}
+        <VoiceOrb voice={voice} busy={busy} />
         <h2 className="caddie-home__title">How can I help you today?</h2>
-        <ul className="caddie-features">
+        <ul className="caddie-marks">
           <li>
-            <HangerIcon size={18} /> Expert styling
+            <HangerIcon size={15} /> Expert styling
           </li>
+          <li aria-hidden="true" className="caddie-marks__dot" />
           <li>
-            <ShirtIcon size={18} /> Real products
+            <ShirtIcon size={15} /> Real products
           </li>
+          <li aria-hidden="true" className="caddie-marks__dot" />
           <li>
-            <SparkleIcon size={18} /> Built for golfers
+            <SparkleIcon size={15} /> Built for golfers
           </li>
         </ul>
       </div>
@@ -70,10 +60,7 @@ export function Home({ productTitle, voice, busy, onJourney, onAsk }: HomeProps)
         ))}
       </div>
 
-      <div className="caddie-home__ask">
-        <p className="caddie-eyebrow">Or just ask</p>
-        <SuggestionChips last={null} disabled={busy} onPick={onAsk} />
-      </div>
+      <SuggestionChips last={null} disabled={busy} onPick={onAsk} />
     </div>
   );
 }
