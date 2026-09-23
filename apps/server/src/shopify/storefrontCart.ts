@@ -22,6 +22,25 @@ import { log } from '../lib/logger.js';
 
 const API_VERSION = '2025-07';
 
+/**
+ * Shopify has two kinds of Storefront token and they take different headers.
+ *
+ *  - A **public** token is 32 hex characters with no prefix, is safe in a
+ *    browser, and goes in `X-Shopify-Storefront-Access-Token`.
+ *  - A **private** (delegate) token is prefixed `shpat_`, is server-only, and
+ *    goes in `Shopify-Storefront-Private-Token`.
+ *
+ * Sending a private token in the public header returns a 401 with an empty
+ * message - no hint that the token is fine and the header is wrong. That cost
+ * an afternoon: the token had just been created, so the obvious reading was
+ * that it was the wrong token, not that we were asking the wrong way.
+ */
+export function authHeader(token: string): Record<string, string> {
+  return token.startsWith('shpat_')
+    ? { 'Shopify-Storefront-Private-Token': token }
+    : { 'X-Shopify-Storefront-Access-Token': token };
+}
+
 export function storefrontCartEnabled(): boolean {
   return Boolean(env.shopify.storefrontToken);
 }
@@ -75,7 +94,7 @@ async function storefront<T>(query: string, variables: Record<string, unknown>):
     timeoutMs: 15_000,
     label: 'Shopify Storefront API',
     headers: {
-      'X-Shopify-Storefront-Access-Token': env.shopify.storefrontToken,
+      ...authHeader(env.shopify.storefrontToken),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ query, variables }),

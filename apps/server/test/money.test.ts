@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { addMoney, decimalsFor, fromMinorUnits, readMoney, toMinorUnits } from '../src/shopify/money.js';
+import { authHeader } from '../src/shopify/storefrontCart.js';
 
 /**
  * UCP quotes prices in minor units. Getting this wrong makes the Caddie say a
@@ -48,5 +49,30 @@ describe('minor units', () => {
       { amount: 0.2, currency: 'GBP' },
     ]);
     expect(total).toEqual({ amount: 0.3, currency: 'GBP' });
+  });
+});
+
+/**
+ * Sending a private Storefront token in the public header returns a 401 with
+ * an empty message, which reads exactly like a bad token. The token had just
+ * been issued, so that is how it was read - and the wrong thing was replaced
+ * before anyone tried the other header.
+ */
+describe('which header a Storefront token goes in', () => {
+  it('sends a shpat_ token as a private token', () => {
+    expect(authHeader('shpat_0123456789abcdef')).toEqual({
+      'Shopify-Storefront-Private-Token': 'shpat_0123456789abcdef',
+    });
+  });
+
+  it('sends a bare 32-character token as a public one', () => {
+    const token = 'a'.repeat(32);
+    expect(authHeader(token)).toEqual({ 'X-Shopify-Storefront-Access-Token': token });
+  });
+
+  it('never sends both, so a 401 is never ambiguous', () => {
+    for (const token of ['shpat_abc', 'b'.repeat(32)]) {
+      expect(Object.keys(authHeader(token))).toHaveLength(1);
+    }
   });
 });
