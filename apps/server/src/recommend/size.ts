@@ -1,42 +1,66 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { SizeInput, SizeRecommendation } from '@caddie/shared';
+import type { Audience, SizeInput, SizeRecommendation } from '@caddie/shared';
 
 /**
  * Day 4 - Find My Size.
  *
  * Deterministic and testable on purpose: the AI collects the answers, this
  * function decides the size. Never let the model guess a size itself.
+ *
+ * The chart is ported from the Druids try-on size guide - see the notes at the
+ * top of data/size-chart.json. Two things it enforces:
+ *
+ *  - Mens and womens are different systems (S-4XL by chest vs UK 8-18), so the
+ *    audience is asked for rather than assumed.
+ *  - Chest and waist figures are Druids'. Height and weight are ours, so they
+ *    score lower and cap the confidence.
  */
 
 interface SizeRow {
   size: string;
   chestCm?: number[];
   waistCm?: number[];
+  hipCm?: number[];
   heightCm?: number[];
   weightKg?: number[];
 }
 
 interface Category {
   label: string;
-  sizes: SizeRow[];
+  aliases?: string[];
+  measure?: string;
+  /** Points at another category that shares this chart, e.g. midlayer -> polo. */
+  sameAs?: string;
+  /** Set when Druids publishes no table for this, e.g. socks. */
+  noChart?: string;
+  alsoOffered?: string[];
+  sizes?: SizeRow[];
 }
 
-interface SizeChart {
+interface AudienceChart {
+  label: string;
   defaultCategory: string;
   categories: Record<string, Category>;
 }
 
-// Read rather than imported, so swapping in the real Druids chart on Day 4 is
-// a file edit and a restart - no rebuild, no code change.
+interface SizeChart {
+  defaultAudience: Audience;
+  audiences: Record<string, AudienceChart>;
+}
+
+// Read rather than imported, so updating the chart is a file edit and a
+// restart - no rebuild.
 const chartPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../data/size-chart.json');
 const chart = JSON.parse(readFileSync(chartPath, 'utf8')) as SizeChart;
 
-const categories = chart.categories;
+export function listAudiences(): string[] {
+  return Object.keys(chart.audiences);
+}
 
-export function listCategories(): string[] {
-  return Object.keys(categories);
+export function listCategories(audience: Audience = chart.defaultAudience): string[] {
+  return Object.keys(chart.audiences[audience]?.categories ?? {});
 }
 
 export function toCm(value: number, unit: 'cm' | 'in' = 'cm'): number {
@@ -45,6 +69,31 @@ export function toCm(value: number, unit: 'cm' | 'in' = 'cm'): number {
 
 export function toKg(value: number, unit: 'kg' | 'lb' = 'kg'): number {
   return unit === 'lb' ? value * 0.453_592 : value;
+}
+
+/** Resolves a spoken category ("hoodie", "joggers") to a chart. */
+export function resolveCategory(audience: Audience, wanted?: string): { key: string; category: Category } | null {
+  const charts = chart.audiences[audience];
+  if (!charts) return null;
+
+  const key = wanted?.trim().toLowerCase() ?? charts.defaultCategory;
+  const direct = charts.categories[key];
+  const byAlias =
+    direct ??
+    Object.values(charts.categories).find((entry) => entry.aliases?.some((alias) => alias === key));
+
+  if (!byAlias) return null;
+
+  const resolvedKey = direct ? key : Object.keys(charts.categories).find((k) => charts.categories[k] === byAlias)!;
+
+  // midlayer and jacket share the polo chart rather than repeating it.
+  if (byAlias.sameAs) {
+    const shared = charts.categories[byAlias.sameAs];
+    if (shared) {
+      return { key: resolvedKey, category: { ...shared, label: byAlias.label, aliases: byAlias.aliases } };
+    }
+  }
+  return { key: resolvedKey, category: byAlias };
 }
 
 /** 1 inside the range, decaying to 0 as we move a full range-width outside it. */
@@ -57,67 +106,166 @@ function rangeScore(value: number, range: number[] | undefined): number | null {
   return Math.max(0, 1 - distance / width);
 }
 
-const WEIGHTS = { chest: 3, waist: 3, weight: 2, height: 1 } as const;
+const WEIGHTS = { chest: 6, waist: 6, hip: 3, weight: 2, height: 1 } as const;
 
-export function recommendSize(input: SizeInput): SizeRecommendation {
-  const categoryKey = input.category ?? chart.defaultCategory;
-  const category = categories[categoryKey];
+/**
+ * Height and weight are ours, not Druids'. A size worked out from them alone
+ * is an educated guess, so it never claims more than this.
+ */
+const ESTIMATE_CONFIDENCE_CAP = 0.55;
 
-  if (!category) {
+/**
+ * What a human actually measures, in centimetres and kilos.
+ *
+ * Anything outside this is a mistake rather than a measurement, and the
+ * mistake is nearly always inches typed as centimetres - a customer who says
+ * "36 centimetres" means 36 inches. Taken literally, a 36cm chest scores zero
+ * against a chart that starts at 88, so it is quietly ignored and the answer
+ * comes from height alone - while still claiming the size guide backs it.
+ */
+const PLAUSIBLE: Record<string, [number, number]> = {
+  chestCm: [60, 200],
+  waistCm: [50, 200],
+  heightCm: [120, 220],
+  weightKg: [30, 250],
+};
+
+/** An inches figure, read as centimetres, lands in this range. */
+function looksLikeInches(value: number, field: 'chestCm' | 'waistCm'): boolean {
+  const asCm = value * 2.54;
+  const [min, max] = PLAUSIBLE[field]!;
+  return asCm >= min && asCm <= max;
+}
+
+function implausible(input: SizeInput, heightCm?: number, weightKg?: number): SizeRecommendation | null {
+  const checks: Array<[string, number | undefined, string]> = [
+    ['chestCm', input.chestCm, 'chest'],
+    ['waistCm', input.waistCm, 'waist'],
+    ['heightCm', heightCm, 'height'],
+    ['weightKg', weightKg, 'weight'],
+  ];
+
+  for (const [key, value, label] of checks) {
+    if (value === undefined) continue;
+    const [min, max] = PLAUSIBLE[key]!;
+    if (value >= min && value <= max) continue;
+
+    // Offer the likely reading rather than just refusing.
+    const unit = key === 'weightKg' ? 'kg' : 'cm';
+    const inches =
+      (key === 'chestCm' || key === 'waistCm') && looksLikeInches(value, key)
+        ? ` Did you mean ${Math.round(value)} inches? That is about ${Math.round(value * 2.54)}cm.`
+        : '';
+
     return {
       size: null,
       confidence: 0,
       alternativeSize: null,
-      reason: `I do not have a size guide for "${categoryKey}".`,
+      reason: `${Math.round(value)}${unit} is not a ${label} I can work from.${inches}`,
+      basis: 'none',
+      missing: [label],
+    };
+  }
+
+  return null;
+}
+
+export function recommendSize(input: SizeInput): SizeRecommendation {
+  /*
+   * Without knowing mens or womens we cannot answer at all: the two systems do
+   * not even share a vocabulary, so a womens 12 answered off the mens chart
+   * comes back as an L. Ask rather than assume.
+   */
+  if (!input.audience) {
+    return {
+      size: null,
+      confidence: 0,
+      alternativeSize: null,
+      reason: 'Is that for the mens or the womens range? They are sized differently.',
+      basis: 'none',
+      missing: ['audience'],
+    };
+  }
+
+  const resolved = resolveCategory(input.audience, input.category);
+  if (!resolved) {
+    return {
+      size: null,
+      confidence: 0,
+      alternativeSize: null,
+      reason: `I do not have a ${input.audience} size guide for "${input.category}".`,
+      basis: 'none',
       missing: ['category'],
     };
   }
 
+  const { category } = resolved;
+
+  // Socks have no table - Druids says it varies by style.
+  if (category.noChart) {
+    return {
+      size: null,
+      confidence: 0,
+      alternativeSize: null,
+      reason: category.noChart,
+      basis: 'none',
+      missing: [],
+    };
+  }
+
+  const sizes = category.sizes ?? [];
   const heightCm =
     input.heightValue !== undefined ? toCm(input.heightValue, input.heightUnit ?? 'cm') : undefined;
   const weightKg =
     input.weightValue !== undefined ? toKg(input.weightValue, input.weightUnit ?? 'kg') : undefined;
 
+  const wantsWaist = sizes.some((row) => row.waistCm);
+  const measured = wantsWaist ? input.waistCm !== undefined : input.chestCm !== undefined;
+
+  // A number that cannot be a measurement is a mistake worth naming, not
+  // something to quietly drop and answer around.
+  const nonsense = implausible(input, heightCm, weightKg);
+  if (nonsense) return nonsense;
+
   const missing: string[] = [];
-  if (input.chestCm === undefined && input.waistCm === undefined) {
+  if (!measured) {
     if (heightCm === undefined) missing.push('height');
     if (weightKg === undefined) missing.push('weight');
   }
 
-  // Nothing measurable at all - fall back to what they usually wear, and say so.
-  const haveAnyMeasurement =
+  const haveAnything =
     input.chestCm !== undefined ||
     input.waistCm !== undefined ||
     heightCm !== undefined ||
     weightKg !== undefined;
 
-  if (!haveAnyMeasurement) {
-    if (input.usualSize) {
-      const match = category.sizes.find(
-        (row) => row.size.toLowerCase() === input.usualSize?.trim().toLowerCase(),
-      );
-      if (match) {
-        return {
-          size: match.size,
-          confidence: 0.45,
-          alternativeSize: neighbour(category.sizes, match.size, input.fitPreference),
-          reason: `Going off the ${match.size} you normally wear. Height and weight would let me be surer.`,
-          missing: ['height', 'weight'],
-        };
-      }
+  // Nothing measurable at all - fall back to what they usually wear, and say so.
+  if (!haveAnything) {
+    const match = sizes.find((row) => row.size.toLowerCase() === input.usualSize?.trim().toLowerCase());
+    if (match) {
+      return {
+        size: match.size,
+        confidence: 0.45,
+        alternativeSize: neighbour(sizes, match.size, input.fitPreference),
+        reason: `Going off the ${match.size} you normally wear. A ${wantsWaist ? 'waist' : 'chest'} measurement would let me be sure.`,
+        basis: 'usual-size',
+        missing: [wantsWaist ? 'waist' : 'chest'],
+        ...(category.measure ? { measureAdvice: category.measure } : {}),
+      };
     }
     return {
       size: null,
       confidence: 0,
       alternativeSize: null,
       reason: 'I need a little more to go on before I call a size.',
-      missing: ['height', 'weight'],
+      basis: 'none',
+      missing: [wantsWaist ? 'waist' : 'chest', 'height', 'weight'],
+      ...(category.measure ? { measureAdvice: category.measure } : {}),
     };
   }
 
-  const scored = category.sizes.map((row) => {
+  const scored = sizes.map((row) => {
     const parts: Array<{ score: number; weight: number }> = [];
-
     const push = (score: number | null, weight: number) => {
       if (score !== null) parts.push({ score, weight });
     };
@@ -127,8 +275,9 @@ export function recommendSize(input: SizeInput): SizeRecommendation {
     if (weightKg !== undefined) push(rangeScore(weightKg, row.weightKg), WEIGHTS.weight);
     if (heightCm !== undefined) push(rangeScore(heightCm, row.heightCm), WEIGHTS.height);
 
-    const totalWeight = parts.reduce((sum, p) => sum + p.weight, 0);
-    const score = totalWeight === 0 ? 0 : parts.reduce((sum, p) => sum + p.score * p.weight, 0) / totalWeight;
+    const totalWeight = parts.reduce((sum, part) => sum + part.weight, 0);
+    const score =
+      totalWeight === 0 ? 0 : parts.reduce((sum, part) => sum + part.score * part.weight, 0) / totalWeight;
     return { size: row.size, score };
   });
 
@@ -141,23 +290,28 @@ export function recommendSize(input: SizeInput): SizeRecommendation {
       size: null,
       confidence: 0,
       alternativeSize: null,
-      reason: 'Those measurements sit outside our size guide. Let me get a human to help.',
+      reason: 'Those measurements sit outside the Druids size guide. Let me get a person to help.',
+      basis: 'none',
       missing,
+      ...(category.measure ? { measureAdvice: category.measure } : {}),
     };
   }
 
-  const adjusted = applyFit(category.sizes, best.size, input.fitPreference);
+  const adjusted = applyFit(sizes, best.size, input.fitPreference);
 
-  // Confidence drops when the top two sizes are close - that is a genuine borderline.
+  // Confidence drops when the top two sizes are close - a genuine borderline.
   const gap = runnerUp ? best.score - runnerUp.score : 0.3;
-  const confidence = Math.min(1, Math.max(0.2, best.score * 0.7 + Math.min(gap, 0.3)));
+  let confidence = Math.min(1, Math.max(0.2, best.score * 0.7 + Math.min(gap, 0.3)));
+  if (!measured) confidence = Math.min(confidence, ESTIMATE_CONFIDENCE_CAP);
 
   return {
     size: adjusted,
     confidence: Number(confidence.toFixed(2)),
-    alternativeSize: runnerUp && gap < 0.15 ? runnerUp.size : neighbour(category.sizes, adjusted, input.fitPreference),
-    reason: buildReason(adjusted, input, heightCm, weightKg, gap),
+    alternativeSize: runnerUp && gap < 0.15 ? runnerUp.size : neighbour(sizes, adjusted, input.fitPreference),
+    reason: buildReason(adjusted, input, heightCm, weightKg, gap, measured),
+    basis: measured ? 'measurement' : 'estimate',
     missing,
+    ...(category.measure && !measured ? { measureAdvice: category.measure } : {}),
   };
 }
 
@@ -165,7 +319,12 @@ function indexOfSize(sizes: SizeRow[], size: string): number {
   return sizes.findIndex((row) => row.size === size);
 }
 
-/** Relaxed fit nudges up a size, tight nudges down - within the chart's bounds. */
+/**
+ * Relaxed nudges up a size, tight nudges down.
+ *
+ * This is the customer's stated preference, not Druids guidance - they publish
+ * no rule for sizing up or down, so we do not pretend they do.
+ */
 function applyFit(sizes: SizeRow[], size: string, fit?: SizeInput['fitPreference']): string {
   if (!fit || fit === 'regular') return size;
   const index = indexOfSize(sizes, size);
@@ -187,6 +346,7 @@ function buildReason(
   heightCm?: number,
   weightKg?: number,
   gap = 0,
+  measured = false,
 ): string {
   const bits: string[] = [];
   if (heightCm !== undefined) bits.push(`${Math.round(heightCm)}cm`);
@@ -194,7 +354,14 @@ function buildReason(
   if (input.chestCm !== undefined) bits.push(`${Math.round(input.chestCm)}cm chest`);
   if (input.waistCm !== undefined) bits.push(`${Math.round(input.waistCm)}cm waist`);
 
-  const base = bits.length ? `At ${bits.join(', ')}, a ${size} should fit you well.` : `A ${size} should fit you well.`;
+  // On a real measurement we are reading Druids' chart. Without one we are
+  // estimating, and the customer should hear the difference.
+  const base = measured
+    ? `At ${bits.join(', ')}, the Druids size guide puts you in a ${size}.`
+    : bits.length
+      ? `At ${bits.join(', ')}, I would put you in a ${size}, though that is my estimate rather than a measurement.`
+      : `A ${size} should fit you well.`;
+
   if (input.fitPreference === 'relaxed') return `${base} I have sized up since you like a relaxed fit.`;
   if (input.fitPreference === 'tight') return `${base} I have sized down since you like it closer fitting.`;
   if (gap > 0 && gap < 0.15) return `${base} You are between sizes, so it is worth checking the alternative too.`;

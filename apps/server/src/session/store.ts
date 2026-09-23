@@ -1,4 +1,6 @@
 import type { CaddieMessage, SizeInput } from '@caddie/shared';
+import { redisEnabled } from '../lib/redis.js';
+import { RedisSessionStore } from './redisStore.js';
 
 /**
  * Day 7 - Conversation memory.
@@ -16,10 +18,16 @@ export interface CaddieSession {
   cartId?: string;
   /** Everything we have learned about fit. */
   sizeProfile: SizeInput;
-  /** Last thing we showed, so "that one" and "cheaper" resolve. */
+  /**
+   * Last thing we showed, so "that one" and "cheaper" resolve.
+   *
+   * Titles are kept alongside the ids on purpose: the model is told what is on
+   * screen, and a bare list of ids leaves it guessing which one the customer
+   * means by "the shorts".
+   */
   lastShown?: {
     kind: 'products' | 'pack' | 'outfit';
-    productIds: string[];
+    items: Array<{ id: string; title: string }>;
     query?: string;
     budgetAmount?: number;
     colour?: string;
@@ -28,6 +36,8 @@ export interface CaddieSession {
     colour?: string;
     budgetAmount?: number;
     currency?: string;
+    /** Which range they are browsing, inferred from product tags. */
+    audience?: 'men' | 'women';
   };
   messages: CaddieMessage[];
 }
@@ -37,10 +47,38 @@ export interface SessionStore {
   getOrCreate(id: string): Promise<CaddieSession>;
   save(session: CaddieSession): Promise<void>;
   patch(id: string, patch: Partial<Omit<CaddieSession, 'id'>>): Promise<CaddieSession>;
+  /**
+   * Adds to the conversation without writing back anything else.
+   *
+   * A route reads the session, runs the model - which has its own tools
+   * patching size, budget and what is on screen - and then wants to record
+   * what was said. Saving the snapshot it read at the start would undo all of
+   * that. In memory this happened to work, because both held the same object;
+   * over Redis they are copies and the last write won.
+   */
+  append(id: string, messages: CaddieMessage[]): Promise<void>;
 }
 
 const TTL_MS = 1000 * 60 * 60 * 2; // 2 hours of idle, then the session is gone.
 const MAX_MESSAGES = 40;
+
+/**
+ * History keeps the words, never the payload.
+ *
+ * An attachment carries whole products - images, variants, tags, the lot - and
+ * a session holding ten of them is 153KB against 2KB without. At a thousand
+ * live sessions that is 149MB versus 2MB, for data nothing ever reads back:
+ * the model is only ever shown `text`, and `lastShown` carries the ids and
+ * titles needed to resolve "that one".
+ *
+ * Copied rather than deleted in place, because the caller is still holding
+ * the same message object and is about to send the attachment to the browser.
+ */
+function stripAttachment(message: CaddieMessage): CaddieMessage {
+  if (!message.attachment) return message;
+  const { attachment: _dropped, ...rest } = message;
+  return rest;
+}
 
 /**
  * Drops undefined values so a patch can never unset something the customer
@@ -88,6 +126,7 @@ export class MemorySessionStore implements SessionStore {
     if (session.messages.length > MAX_MESSAGES) {
       session.messages = session.messages.slice(-MAX_MESSAGES);
     }
+    session.messages = session.messages.map(stripAttachment);
     this.sessions.set(session.id, session);
     this.sweep();
   }
@@ -107,6 +146,12 @@ export class MemorySessionStore implements SessionStore {
     return session;
   }
 
+  async append(id: string, messages: CaddieMessage[]): Promise<void> {
+    const session = await this.getOrCreate(id);
+    session.messages.push(...messages);
+    await this.save(session);
+  }
+
   private sweep(): void {
     const cutoff = Date.now() - TTL_MS;
     for (const [id, session] of this.sessions) {
@@ -115,4 +160,10 @@ export class MemorySessionStore implements SessionStore {
   }
 }
 
-export const sessions: SessionStore = new MemorySessionStore();
+/**
+ * In Redis when there is one, in memory otherwise.
+ *
+ * Chosen once at startup rather than per call, so a Redis blip does not
+ * silently move a conversation between two different stores.
+ */
+export const sessions: SessionStore = redisEnabled() ? new RedisSessionStore() : new MemorySessionStore();

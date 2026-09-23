@@ -9,6 +9,15 @@ export interface ToolContext {
 export interface ToolResult {
   /** Short, speakable. This is what the model relays to the customer. */
   speech: string;
+  /**
+   * Grounding for the model: what actually came back, in plain text.
+   *
+   * Without this the model only knows how many results there were, so it
+   * fills the gap with the customer's own words - answering "show me a black
+   * polo" with "here are six black polos" when one of them is black. It is
+   * data, never a script: the prompt forbids reading it aloud.
+   */
+  facts?: string;
   /** Structured payload the widget renders. Never spoken verbatim. */
   attachment?: CaddieAttachment;
 }

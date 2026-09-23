@@ -8,6 +8,8 @@ Voice and chat shopping assistant for the Druids store. Two week sprint, two bui
 | **Amir** | UI, product cards, basket, mobile and device testing |
 
 Day by day plan: [docs/ROADMAP.md](docs/ROADMAP.md). The rules that keep us honest: [docs/RULES.md](docs/RULES.md).
+Building the widget: [docs/API.md](docs/API.md) is everything the UI needs from the backend,
+and [docs/widget-kickoff-prompt.md](docs/widget-kickoff-prompt.md) briefs a coding agent on it.
 
 ## Getting started
 
@@ -18,10 +20,20 @@ npm run dev:server      # http://localhost:8787
 npm run dev:widget      # http://localhost:5173
 ```
 
-You do **not** need Vapi keys to start. Without them the server falls back to a
-keyword router (`src/ai/devRouter.ts`) that calls the real tools against the
-real Shopify store, so the UI can be built on day 1. Add `VAPI_PRIVATE_KEY` and
-`VAPI_ASSISTANT_ID` and the same endpoints go through the AI instead.
+### Which brain is answering
+
+Text chat picks the best available of three, in this order:
+
+| | When | What it is |
+| --- | --- | --- |
+| **OpenAI** | `OPENAI_API_KEY` set | A real tool-calling loop in our own process. This is the text path that ships. |
+| **Vapi chat** | Vapi keys set, no OpenAI key | The same assistant that handles voice, answering text. |
+| **Keyword router** | no keys at all | `src/ai/devRouter.ts`. No AI, but it calls the real tools against the real store, so the UI can be built with no keys whatsoever. |
+
+Voice always goes through Vapi, which calls the same tools over the webhook.
+One system prompt, one tool registry, so the two paths cannot drift apart.
+
+`GET /health` tells you which mode is live.
 
 Check the store connection before anything else:
 
@@ -34,6 +46,7 @@ curl http://localhost:8787/health/shopify
 ```
 apps/server     Node + TypeScript. Vapi webhook, Shopify UCP client, recommendations. (Talha)
 apps/widget     React + Vite. The Caddie widget, embeddable in the Shopify theme.      (Amir)
+apps/caddie-ui  React + Vite. Our own working UI, so the backend is never blocked.     (Talha)
 packages/shared TypeScript types both sides import. The contract between us.
 ```
 
@@ -112,6 +125,7 @@ back" never means "the customer picked".
 | `GET /api/tools` | Tool definitions, including the exact JSON to give Vapi |
 | `POST /api/tools/:name` | Run one tool directly, no AI. Build and debug UI with this |
 | `POST /api/chat` | Text chat |
+| `POST /api/voice` | Voice in, chat out: post a recording, get the transcript and the reply |
 | `GET /api/events/:sessionId` | SSE stream of cards and speech for a session |
 | `POST /api/vapi/webhook` | Where Vapi sends tool calls |
 | `GET /ucp/agent-profile.json` | Our UCP agent profile, which Shopify fetches on every catalog call |
@@ -184,6 +198,34 @@ npm run typecheck
 npm run test
 npm run build
 ```
+
+### Honesty checks
+
+`scripts/evalModel.mjs` runs the ways the Caddie has actually misled a customer
+during development - inventing a product, guessing a price, calling mens kit
+womens - against whichever model is answering. Run it before changing
+`OPENAI_MODEL`, and on Day 11.
+
+```bash
+OPENAI_MODEL=gpt-4.1-mini PORT=8899 npx tsx src/index.ts   # in one terminal
+npm run eval:model --workspace=@caddie/server -- 8899 gpt-4.1-mini
+```
+
+Measured on a five-message journey (search, pack, cheaper, size, add to basket):
+
+| model | honesty checks | cost per 1000 conversations |
+| --- | --- | --- |
+| gpt-4.1 | 8/8, 8/8 | $16.39 |
+| **gpt-4.1-mini** | **8/8, 8/8** | **$3.51** |
+| gpt-5-mini | 6/8, 8/8 | $1.65 |
+
+gpt-5-mini is the cheapest but was dropped: asked for a womens polo in a store
+that stocks none, it quoted a size and offered to go and find one, three times
+out of three. Voice transcription adds about $0.003/minute on top.
+
+The scores depend on the prompt as much as the model. The hedging case ("not
+listed exactly, but the closest match is...") only passes because the prompt
+names that phrasing and forbids it.
 
 ## Before the pilot
 

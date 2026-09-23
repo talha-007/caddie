@@ -8,23 +8,31 @@ import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
 import { runTool } from '../tools/index.js';
 import { route } from '../ai/devRouter.js';
+import { screen } from '../ai/guard.js';
+import { converse, openaiEnabled } from '../ai/openai.js';
+import { consumeShared, LIMITS } from '../lib/rateLimit.js';
+import { clientKey } from '../lib/request.js';
 
 /**
  * Text chat for the widget.
  *
- * Two modes:
- *  - Vapi mode (default once VAPI_PRIVATE_KEY and VAPI_ASSISTANT_ID are set):
- *    the message goes to the Vapi Chat API, which calls our tools through the
- *    webhook. This is what ships.
- *  - Dev mode (no Vapi keys): a keyword router picks a tool directly, so the
- *    widget can be built and tested against REAL Shopify data without Vapi.
- *    The language understanding is dumb; the product data is real.
+ * Three modes, in order of preference:
+ *  1. OpenAI (OPENAI_API_KEY set) - a real tool-calling loop in our own
+ *     process. This is the text path that ships: lower latency than proxying
+ *     through Vapi, and it shares the prompt and tool registry with voice.
+ *  2. Vapi chat (VAPI_PRIVATE_KEY + VAPI_ASSISTANT_ID) - the same assistant
+ *     that handles voice, answering text.
+ *  3. Dev keyword router - no AI at all, so the UI can be built against real
+ *     Shopify data with no keys whatsoever.
+ *
+ * Voice always goes through Vapi, which calls the same tools over the webhook.
+ * One prompt, one tool registry, so the two cannot drift apart.
  */
 
 export const chatRouter: Router = Router();
 
 const bodySchema = z.object({
-  sessionId: z.string().min(1).optional(),
+  sessionId: z.string().min(1).max(100).optional(),
   text: z.string().min(1).max(2000),
 });
 
@@ -38,6 +46,15 @@ function message(role: CaddieMessage['role'], text: string, attachment?: CaddieM
   };
 }
 
+/** The last thing the Caddie said, so the screen can read a reply as a reply. */
+function lastAssistantMessage(session: { messages: CaddieMessage[] }): string | undefined {
+  for (let i = session.messages.length - 1; i >= 0; i -= 1) {
+    const message = session.messages[i];
+    if (message?.role === 'assistant' && message.text) return message.text;
+  }
+  return undefined;
+}
+
 const vapiEnabled = () => Boolean(env.vapi.privateKey && env.vapi.assistantId);
 
 chatRouter.post('/', async (req, res, next) => {
@@ -47,16 +64,51 @@ chatRouter.post('/', async (req, res, next) => {
   }
 
   const sessionId = parsed.data.sessionId ?? randomUUID();
+
+  // Public, unauthenticated, and every call spends money.
+  const [bySession, byAddress] = await Promise.all([
+    consumeShared(`chat:${sessionId}`, LIMITS.perSession),
+    consumeShared(`ip:${clientKey(req)}`, LIMITS.perAddress),
+  ]);
+  const limited = !bySession.ok ? bySession : !byAddress.ok ? byAddress : null;
+  if (limited) {
+    log.warn('chat.rate_limited', { sessionId });
+    return res.status(429).json({
+      error: 'rate_limited',
+      detail: 'That is a lot of questions at once. Give me a minute and try again.',
+      retryAfter: limited.retryAfter,
+    });
+  }
+
   const session = await sessions.getOrCreate(sessionId);
   const userMessage = message('user', parsed.data.text);
 
   try {
-    const reply = vapiEnabled()
-      ? await viaVapi(sessionId, parsed.data.text)
-      : await viaDevRouter(sessionId, parsed.data.text);
+    /*
+     * Screen before the expensive loop. The full call carries ~2,400 tokens of
+     * prompt and tool schemas before it reads a word, so an essay request that
+     * gets this far has already cost us.
+     */
+    const verdict = await screen(parsed.data.text, {
+      hasHistory: session.messages.length > 0,
+      lastAssistant: lastAssistantMessage(session),
+    });
+    if (!verdict.allow) {
+      log.info('chat.declined', { sessionId, reason: verdict.reason });
+      const reply = message('assistant', verdict.reply);
+      // Not remembered: a declined message should not shape what follows.
+      return res.json({ sessionId, message: reply });
+    }
 
-    session.messages.push(userMessage, reply);
-    await sessions.save(session);
+    const reply = openaiEnabled()
+      ? await viaOpenai(sessionId, parsed.data.text)
+      : vapiEnabled()
+        ? await viaVapi(sessionId, parsed.data.text)
+        : await viaDevRouter(sessionId, parsed.data.text);
+
+    // Appended rather than saved: the tools have been writing to this session
+    // throughout the turn, and saving the copy read at the start would undo it.
+    await sessions.append(sessionId, [userMessage, reply]);
 
     if (reply.attachment) {
       publish({ type: 'attachment', sessionId, attachment: reply.attachment });
@@ -67,6 +119,13 @@ chatRouter.post('/', async (req, res, next) => {
     return next(err);
   }
 });
+
+/* ---------------- OpenAI ---------------- */
+
+async function viaOpenai(sessionId: string, text: string): Promise<CaddieMessage> {
+  const reply = await converse(sessionId, text);
+  return message('assistant', reply.text, reply.attachment);
+}
 
 /* ---------------- Vapi Chat API ---------------- */
 

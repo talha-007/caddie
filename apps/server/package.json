@@ -9,13 +9,17 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "sync:assistant": "tsx scripts/syncAssistant.ts"
+    "sync:assistant": "tsx scripts/syncAssistant.ts",
+    "publish:profile": "node scripts/publishAgentProfile.mjs",
+    "eval:model": "node scripts/evalModel.mjs",
+    "webhooks": "node scripts/registerWebhooks.mjs"
   },
   "dependencies": {
     "@caddie/shared": "*",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
+    "ioredis": "^6.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

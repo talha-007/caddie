@@ -77,6 +77,12 @@ export const env = {
   nodeEnv: optional('NODE_ENV', 'development'),
   isProd: optional('NODE_ENV', 'development') === 'production',
   publicUrl: optional('CADDIE_PUBLIC_URL'),
+  /**
+   * Shared state, for running more than one instance. Sessions, rate limits,
+   * the event stream and catalogue changes all need it; without it everything
+   * falls back to this process's memory, which is correct for a single one.
+   */
+  redisUrl: optional('REDIS_URL'),
   corsOrigins: optional('CORS_ORIGINS', 'http://localhost:5173')
     .split(',')
     .map((origin) => origin.trim())
@@ -93,11 +99,68 @@ export const env = {
      * store's currency or budgets are out by whatever the exchange rate is.
      */
     defaultCurrency: optional('SHOPIFY_BUYER_CURRENCY', 'GBP').toUpperCase(),
+    /**
+     * Only recommend products carrying this tag. The test store also holds a
+     * generic demo catalogue, and without this the Caddie offers dresses and
+     * cargo pants as golf kit. Leave empty on a store that sells only Druids.
+     */
+    brandTag: optional('SHOPIFY_BRAND_TAG'),
+    /** Admin API token, used to mirror the catalogue. Not per-customer traffic. */
+    adminToken: optional('DUMMY_STORE_ACCESS_TOKEN') || optional('SHOPIFY_ADMIN_TOKEN'),
+    /**
+     * Storefront API token, for the basket. Shopify does not rate-limit buyer
+     * traffic there, unlike the UCP endpoint. Without it the cart falls back
+     * to UCP, which is throttled and will not survive real traffic.
+     */
+    storefrontToken: optional('SHOPIFY_STOREFRONT_TOKEN'),
+    /**
+     * Signs Shopify's webhooks. It is the app's client secret, found beside
+     * the API key in the admin. Without it webhooks are rejected and the
+     * mirror falls back to polling.
+     */
+    webhookSecret: optional('SHOPIFY_WEBHOOK_SECRET') || optional('DUMMY_STORE_SECRET'),
+    /**
+     * Safety nets behind the webhooks. The delta pull asks only for what
+     * changed, so it is cheap enough to run often; the reconcile is a full
+     * re-read that also notices deletions.
+     */
+    catalogueDeltaMs: Number(optional('SHOPIFY_CATALOGUE_DELTA_MS', String(60 * 1000))),
+    catalogueReconcileMs: Number(optional('SHOPIFY_CATALOGUE_RECONCILE_MS', String(30 * 60 * 1000))),
   },
   ucp: {
     get agentProfile() {
       return resolveAgentProfile();
     },
+  },
+  openai: {
+    apiKey: optional('OPENAI_API_KEY'),
+    /**
+     * Used for text chat. Voice runs on whatever model Vapi is configured with.
+     *
+     * gpt-4.1-mini rather than gpt-4.1: five times cheaper and it held every
+     * honesty check in scripts/evalModel.mjs. gpt-5-mini is cheaper still but
+     * failed the womens-range check three times out of three - it quotes a
+     * size and offers to find womens polos we do not stock.
+     */
+    model: optional('OPENAI_MODEL', 'gpt-4.1-mini'),
+    /** Speech to text for the widget's mic, until Vapi handles voice. */
+    transcribeModel: optional('OPENAI_TRANSCRIBE_MODEL', 'gpt-4o-mini-transcribe'),
+    /**
+     * Screens the first message of a conversation. One word in, one word out,
+     * so the cheapest model is the right one - it costs a fraction of letting
+     * an off-topic question reach the full loop.
+     */
+    guardModel: optional('OPENAI_GUARD_MODEL', 'gpt-4.1-nano'),
+    /**
+     * A hung call holds a customer's request open with nothing to show for it.
+     * Long enough for a slow answer, short enough to fail and let them retry.
+     */
+    timeoutMs: Number(optional('OPENAI_TIMEOUT_MS', '45000')),
+    /**
+     * Model calls allowed at once. Past this they queue here rather than
+     * turning into a wall of 429s at the provider.
+     */
+    maxConcurrent: Number(optional('OPENAI_MAX_CONCURRENT', '25')),
   },
   vapi: {
     privateKey: optional('VAPI_PRIVATE_KEY'),

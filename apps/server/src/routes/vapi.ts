@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { env } from '../env.js';
+import { UpstreamError } from '../lib/errors.js';
 import { log } from '../lib/logger.js';
 import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
@@ -93,9 +94,20 @@ vapiRouter.post('/webhook', async (req, res) => {
         publish({ type: 'speech', sessionId, text: result.speech });
 
         log.info('vapi.tool.ok', { tool: name, ms: Date.now() - startedAt, sessionId });
-        return { toolCallId: call.id, result: result.speech };
+        return {
+          toolCallId: call.id,
+          result: result.facts
+            ? `${result.speech}\n\nFACTS (data, do not read aloud):\n${result.facts}`
+            : result.speech,
+        };
       } catch (err) {
-        log.error('vapi.tool.failed', { tool: name, sessionId, err: String(err) });
+        log.error('vapi.tool.failed', {
+          tool: name,
+          sessionId,
+          args,
+          err: String(err),
+          detail: err instanceof UpstreamError ? err.detail : undefined,
+        });
         return {
           toolCallId: call.id,
           result:

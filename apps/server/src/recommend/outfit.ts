@@ -14,15 +14,49 @@ export interface OutfitSlot {
   slot: string;
   /** Search terms that tend to surface this slot in the Druids catalogue. */
   terms: string;
+  /**
+   * Words that prove a product really belongs in this slot.
+   *
+   * The catalogue search is semantic, so a search for "shorts trousers navy"
+   * happily returns a navy polo as its top hit. Without this check the outfit
+   * ends up wearing the same polo as both its top and its bottom.
+   */
+  keywords: string[];
   required: boolean;
 }
 
+/**
+ * Terms are matched against the Druids range as it is actually stocked:
+ * POLOS, MIDLAYERS, GOLF HOODIES, GILETS, JACKETS, SHORTS, TROUSERS,
+ * HEADWEAR, SOCKS. Re-check these when the real store replaces the test one.
+ */
 export const DEFAULT_SLOTS: OutfitSlot[] = [
-  { slot: 'top', terms: 'jersey shirt tee', required: true },
-  { slot: 'bottom', terms: 'shorts trousers', required: true },
-  { slot: 'layer', terms: 'hoodie jacket midlayer', required: false },
-  { slot: 'accessory', terms: 'socks cap bag', required: false },
+  { slot: 'top', terms: 'polo shirt tee', keywords: ['polo', 'shirt', 'tee', 't-shirt'], required: true },
+  {
+    slot: 'bottom',
+    terms: 'shorts trousers',
+    keywords: ['short', 'trouser', 'pant', 'jogger', 'chino'],
+    required: true,
+  },
+  {
+    slot: 'layer',
+    terms: 'midlayer hoodie gilet jacket',
+    keywords: ['midlayer', 'mid layer', 'hoodie', 'gilet', 'jacket', 'vest', 'sweat'],
+    required: false,
+  },
+  {
+    slot: 'accessory',
+    terms: 'socks beanie cap',
+    keywords: ['sock', 'beanie', 'cap', 'hat', 'glove', 'bag', 'belt'],
+    required: false,
+  },
 ];
+
+/** True when the product's name or tags say it belongs in this slot. */
+export function fitsSlot(product: Product, slot: OutfitSlot): boolean {
+  const haystack = [product.title, ...product.tags].join(' ').toLowerCase();
+  return slot.keywords.some((keyword) => haystack.includes(keyword));
+}
 
 function withinBudget(products: Product[], remaining: number | null): Product[] {
   if (remaining === null) return products;
@@ -51,30 +85,57 @@ export async function recommendOutfit(
   slots: OutfitSlot[] = DEFAULT_SLOTS,
 ): Promise<OutfitRecommendation> {
   const pieces: OutfitPiece[] = [];
+  const used = new Set<string>();
   let remaining = input.budget ? input.budget.amount : null;
 
   for (const slot of slots) {
-    const query = [input.seed, input.colour, slot.terms].filter(Boolean).join(' ');
-    const results = await searchProducts({
-      query,
-      limit: 8,
-      ...(remaining !== null
-        ? { maxPrice: remaining, currency: input.budget?.currency ?? storeCurrency() }
-        : {}),
-    });
+    /*
+     * Garment first, occasion second.
+     *
+     * Searching "match day navy shorts trousers" returns a polo, a gilet and a
+     * jacket - the occasion words swamp the garment. "navy shorts" returns the
+     * shorts. So we lead with colour and garment, and only fall back to the
+     * customer's own phrasing if that finds nothing.
+     */
+    const queries = [
+      [input.colour, slot.terms].filter(Boolean).join(' '),
+      [input.seed, input.colour, slot.terms].filter(Boolean).join(' '),
+    ];
 
-    const usable = withinBudget(
-      results.filter((p) => p.price.amount > 0 && hasSize(p, input.size)),
-      remaining,
-    ).sort((a, b) => scoreForColour(b, input.colour) - scoreForColour(a, input.colour));
+    let pick: Product | undefined;
 
-    const pick = usable[0];
-    if (!pick) {
-      if (slot.required) continue; // Nothing fits - say so rather than substitute.
-      continue;
+    for (const query of queries) {
+      const results = await searchProducts({
+        query,
+        limit: 8,
+        ...(remaining !== null
+          ? { maxPrice: remaining, currency: input.budget?.currency ?? storeCurrency() }
+          : {}),
+      });
+
+      const usable = withinBudget(
+        results.filter(
+          (p) =>
+            p.price.amount > 0 &&
+            hasSize(p, input.size) &&
+            // A polo is not a pair of shorts, whatever the search thinks.
+            fitsSlot(p, slot) &&
+            // And nothing gets worn twice.
+            !used.has(p.id),
+        ),
+        remaining,
+      ).sort((a, b) => scoreForColour(b, input.colour) - scoreForColour(a, input.colour));
+
+      pick = usable[0];
+      if (pick) break;
     }
 
+    // Nothing genuinely belongs in this slot - leave it empty and say so
+    // rather than padding the outfit with something that does not fit.
+    if (!pick) continue;
+
     pieces.push({ slot: slot.slot, product: pick });
+    used.add(pick.id);
     if (remaining !== null) remaining -= pick.price.amount;
   }
 

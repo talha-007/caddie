@@ -1,5 +1,11 @@
 import type { Cart, CartLine, Product, ProductOption, ProductVariant } from '@caddie/shared';
+import { env } from '../env.js';
+import { searchLocal } from '../catalog/search.js';
+import { catalogueReady, productById } from '../catalog/sync.js';
+import { cached, CATALOG_TTL_MS, clearCatalogCache } from './cache.js';
+import * as storefrontCart from './storefrontCart.js';
 import { addMoney, readMoney, storeCurrency, toMinorUnits } from './money.js';
+import { log } from '../lib/logger.js';
 import { buyerContext, callUcpTool } from './ucpClient.js';
 
 /**
@@ -118,34 +124,84 @@ interface SearchPayload {
   pagination?: { has_next_page?: boolean; cursor?: string };
 }
 
+/**
+ * Keeps the Caddie to the brand's own kit.
+ *
+ * UCP search has no vendor filter and its payload carries no vendor field, so
+ * we filter on the tag afterwards and over-fetch to compensate.
+ */
+export function isBrandProduct(product: Product): boolean {
+  const tag = env.shopify.brandTag;
+  if (!tag) return true;
+  const needle = tag.toLowerCase();
+  return product.tags.some((value) => value.toLowerCase() === needle);
+}
+
 export async function searchProducts(opts: SearchOptions): Promise<Product[]> {
+  const wanted = opts.limit ?? 10;
+
+  /*
+   * Served from the local mirror. Shopify's catalogue endpoint is throttled
+   * far too hard to call per customer - see catalog/sync.ts - and searching in
+   * memory is both unlimited and instant.
+   */
+  if (catalogueReady()) {
+    return searchLocal({
+      query: opts.query,
+      limit: wanted,
+      ...(opts.maxPrice !== undefined ? { maxPrice: opts.maxPrice } : {}),
+      ...(opts.minPrice !== undefined ? { minPrice: opts.minPrice } : {}),
+      ...(opts.available !== undefined ? { available: opts.available } : {}),
+    }).filter(isBrandProduct);
+  }
+
+  // Only before the first sync has landed, or if it is failing.
+  log.warn('catalogue.not_ready', { query: opts.query });
   const currency = opts.currency ?? DEFAULT_CURRENCY;
   const price: Record<string, number> = {};
   if (opts.minPrice !== undefined) price.min = toMinorUnits({ amount: opts.minPrice, currency });
   if (opts.maxPrice !== undefined) price.max = toMinorUnits({ amount: opts.maxPrice, currency });
 
-  const filters = {
-    available: opts.available ?? true,
-    ...(Object.keys(price).length ? { price } : {}),
-  };
-
-  const payload = await callUcpTool<SearchPayload>('search_catalog', {
+  const request = {
     catalog: {
       query: opts.query,
       context: buyerContext(),
-      filters,
-      pagination: { limit: opts.limit ?? 10 },
+      filters: { available: opts.available ?? true, ...(Object.keys(price).length ? { price } : {}) },
+      pagination: { limit: env.shopify.brandTag ? Math.min(wanted * 3, 50) : wanted },
     },
-  });
+  };
 
-  return (payload.products ?? []).map(toProduct).filter((product) => product.id);
+  const payload = await cached(`search:${JSON.stringify(request)}`, CATALOG_TTL_MS, () =>
+    callUcpTool<SearchPayload>('search_catalog', request),
+  );
+
+  const products = (payload.products ?? []).map(toProduct).filter((product) => product.id);
+  return products.filter(isBrandProduct).slice(0, wanted);
 }
 
 export async function getProductDetails(
   productId: string,
   selected?: Record<string, string>,
 ): Promise<Product | null> {
-  const payload = await callUcpTool<Record<string, unknown>>('get_product', {
+  const mirrored = productById(productId);
+  if (mirrored) {
+    if (!selected || Object.keys(selected).length === 0) return mirrored;
+
+    /*
+     * Narrow to the chosen combination, the way Shopify does. add_to_cart
+     * reads variants[0], so this has to leave exactly the variant the
+     * customer picked - or none, when that combination does not exist.
+     */
+    const variants = mirrored.variants.filter((variant) =>
+      Object.entries(selected).every(
+        ([name, value]) => variant.options[name]?.toLowerCase() === value.toLowerCase(),
+      ),
+    );
+    return { ...mirrored, variants };
+  }
+
+  log.warn('catalogue.miss', { productId });
+  const request = {
     catalog: {
       id: productId,
       context: buyerContext(),
@@ -153,7 +209,11 @@ export async function getProductDetails(
         ? { selected: Object.entries(selected).map(([name, label]) => ({ name, label })) }
         : {}),
     },
-  });
+  };
+
+  const payload = await cached(`product:${JSON.stringify(request)}`, CATALOG_TTL_MS, () =>
+    callUcpTool<Record<string, unknown>>('get_product', request),
+  );
 
   const raw = (payload.product ?? payload) as Record<string, unknown>;
   if (!raw?.id) return null;
@@ -163,9 +223,10 @@ export async function getProductDetails(
 /** Resolves several product or variant ids in one call. */
 export async function lookupProducts(ids: string[]): Promise<Product[]> {
   if (ids.length === 0) return [];
-  const payload = await callUcpTool<SearchPayload>('lookup_catalog', {
-    catalog: { ids: ids.slice(0, 10), context: buyerContext() },
-  });
+  const request = { catalog: { ids: ids.slice(0, 10), context: buyerContext() } };
+  const payload = await cached(`lookup:${JSON.stringify(request)}`, CATALOG_TTL_MS, () =>
+    callUcpTool<SearchPayload>('lookup_catalog', request),
+  );
   return (payload.products ?? []).map(toProduct).filter((product) => product.id);
 }
 
@@ -234,7 +295,14 @@ export interface CartLineInput {
   quantity: number;
 }
 
+/*
+ * The basket is the one thing that cannot be mirrored or cached - it has to be
+ * live and it is per customer. So it goes over the Storefront API, which
+ * Shopify does not rate-limit for buyer traffic, whenever a token is set.
+ * The UCP path stays as a fallback, but it will not survive real traffic.
+ */
 export async function getCart(cartId: string): Promise<Cart> {
+  if (storefrontCart.storefrontCartEnabled()) return storefrontCart.getCart(cartId);
   const payload = await callUcpTool<UcpCart>('get_cart', { id: cartId });
   return toCart(payload);
 }
@@ -257,6 +325,8 @@ export async function createCart(lines: CartLineInput[]): Promise<Cart> {
  * calling this directly. Quantity 0 removes a line.
  */
 async function replaceCartLines(cartId: string, lines: CartLineInput[]): Promise<Cart> {
+  // Buying something can take the last one, so cached availability is stale.
+  clearCatalogCache();
   const payload = await callUcpTool<UcpCart>('update_cart', {
     id: cartId,
     cart: {
@@ -277,6 +347,11 @@ export async function addToCart(
   variantId: string,
   quantity = 1,
 ): Promise<Cart> {
+  if (storefrontCart.storefrontCartEnabled()) {
+    clearCatalogCache();
+    return storefrontCart.addToCart(cartId, variantId, quantity);
+  }
+
   if (!cartId) return createCart([{ variantId, quantity }]);
 
   const current = await getCart(cartId);
@@ -291,6 +366,10 @@ export async function addToCart(
 
 /** Sets a line to an exact quantity. 0 removes it. */
 export async function setLineQuantity(cartId: string, lineId: string, quantity: number): Promise<Cart> {
+  if (storefrontCart.storefrontCartEnabled()) {
+    return storefrontCart.setLineQuantity(cartId, lineId, quantity);
+  }
+
   const current = await getCart(cartId);
   const lines = current.lines.map((line) => ({
     variantId: line.variantId,

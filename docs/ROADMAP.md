@@ -46,20 +46,51 @@ person has seen it work, and no placeholder data is left in that flow.
 
 ### Day 3 - Search via AI
 **Talha**
-- [ ] Product search works through the AI, not just the dev router
-- [ ] System prompt tightened (`src/ai/prompt.ts`)
-- [ ] AI confirmed not inventing products or prices - try to make it slip
+- [x] Product search works through the AI, not just the dev router (OpenAI tool-calling loop)
+- [x] System prompt tightened (`src/ai/prompt.ts`)
+- [x] AI confirmed not inventing products or prices - it slipped three times, see below
 
 **Amir**
 - [ ] Product carousel
 - [ ] Product selection
 - [ ] Loading and error states
 
+> Three real slips found by trying to make it lie, all now closed:
+> 1. Called six mixed polos "six black polos" - it only knew the result count,
+>    so it filled the gap with the customer's own words. Tools now return a
+>    FACTS block listing what actually came back.
+> 2. Confirmed a product that does not exist ("the Tour Championship jacket")
+>    because semantic search always returns neighbours. Search results are now
+>    worded as "closest matches", and the prompt says a result is not proof.
+> 3. **Invented variant ids** when asked to add to the basket - a different
+>    fabricated id each time. Instructions did not stop it, so `add_to_cart`
+>    no longer accepts a variant id at all: it takes a product id plus the
+>    chosen options and resolves the variant server side.
+
 ### Day 4 - Find my size
 **Talha**
-- [ ] **Replace `data/size-chart.json` with the real Druids size guide**
-- [ ] Size recommendation returning sensible sizes across the range
-- [ ] Tested with a spread of customer measurements (`npm run test`)
+- [x] **Replaced `data/size-chart.json` with the real Druids size guide** (druids.com published charts)
+- [x] Size recommendation returning sensible sizes across the range
+- [x] Tested with a spread of customer measurements (`npm run test`)
+
+> Shopify does not carry body measurements. Its catalogue gives us the sizes a
+> product *offers* and some fit prose ("Relaxed Fit", "the model is 6'1" and
+> wears a medium"), but the chest-to-size mapping is not in it.
+>
+> The chart is ported from Talha's try-on work:
+> `druids-automation/druids-tryon/widget/src/sizeGuide.ts`, which mirrors the
+> live Size Guide popup. **That file is the source of truth** - if it changes,
+> change `data/size-chart.json` with it.
+>
+> Mens and womens are different systems (S-4XL by chest vs UK 8-18), so the
+> Caddie asks which range rather than assuming, unless the customer is already
+> browsing one. Belts have their own chart; socks have none at all, and the
+> Caddie says so instead of calling a size.
+>
+> Druids publishes no height/weight mapping, so inferring a size from those is
+> **our** estimate. It is weighted far lower, capped at 0.55 confidence, and the
+> Caddie says "that is my estimate rather than a measurement". Do not let that
+> slip: a wrong size is a return.
 
 **Amir**
 - [ ] Size questions UI

@@ -57,7 +57,74 @@ export function buyerContext(): Record<string, string> {
   };
 }
 
+/** Shopify throttles this endpoint, and says so in the JSON-RPC error. */
+function isRateLimit(message: string): boolean {
+  return /rate limit|too many requests|throttl/i.test(message);
+}
+
+/** "Too many requests, please retry after 3253 seconds" */
+function retryAfterSeconds(detail: unknown): number | null {
+  const match = /retry after (\d+) seconds/i.exec(String(detail ?? ''));
+  return match?.[1] ? Number(match[1]) : null;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Set while Shopify is refusing us, so we stop asking until it lifts. */
+let throttledUntil = 0;
+
+export function throttledFor(): number {
+  return Math.max(0, Math.ceil((throttledUntil - Date.now()) / 1000));
+}
+
+/**
+ * Calls a UCP tool.
+ *
+ * Shopify's limit on this endpoint is unforgiving: trip it and the reply is
+ * "retry after 3253 seconds" - the best part of an hour. So a blind retry is
+ * worse than useless, and the only real defences are asking less often (see
+ * cache.ts) and, once refused, not hammering a door that will not open for
+ * another fifty minutes.
+ *
+ * A short retry-after is worth waiting out; a long one is recorded and every
+ * later call fails immediately with something honest to say.
+ */
 export async function callUcpTool<T = unknown>(
+  name: UcpTool,
+  args: Record<string, unknown>,
+  opts: { timeoutMs?: number } = {},
+): Promise<T> {
+  const waiting = throttledFor();
+  if (waiting > 0) {
+    throw new UpstreamError(
+      `The Druids catalogue is rate limiting us for another ${Math.ceil(waiting / 60)} minutes.`,
+      { retryAfter: waiting },
+    );
+  }
+
+  try {
+    return await callOnce<T>(name, args, opts);
+  } catch (err) {
+    if (!(err instanceof UpstreamError) || !isRateLimit(err.message)) throw err;
+
+    const after = retryAfterSeconds(err.detail) ?? retryAfterSeconds(err.message);
+
+    // A brief throttle is worth sitting out once.
+    if (after !== null && after <= 3) {
+      log.warn('shopify.ucp.throttled', { tool: name, retryAfter: after });
+      await sleep((after + 0.5) * 1000);
+      return callOnce<T>(name, args, opts);
+    }
+
+    if (after !== null) {
+      throttledUntil = Date.now() + after * 1000;
+      log.error('shopify.ucp.locked_out', { tool: name, retryAfterSeconds: after });
+    }
+    throw err;
+  }
+}
+
+async function callOnce<T = unknown>(
   name: UcpTool,
   args: Record<string, unknown>,
   opts: { timeoutMs?: number } = {},

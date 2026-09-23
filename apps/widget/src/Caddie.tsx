@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Journey } from '@caddie/shared';
+import type { Journey, Product } from '@caddie/shared';
 import { Composer } from './components/Composer.js';
 import { ContextBar, Header } from './components/Header.js';
 import { Home } from './components/Home.js';
@@ -9,6 +9,7 @@ import { ShopProvider, type Shop } from './components/ShopContext.js';
 import { SuggestionChips } from './components/SuggestionChips.js';
 import { Thread } from './components/Thread.js';
 import { VoiceBar } from './components/VoiceButton.js';
+import { runTool } from './lib/api.js';
 import type { WidgetContext } from './lib/context.js';
 import { onOpenRequest } from './lib/events.js';
 import { useCaddie } from './lib/useCaddie.js';
@@ -67,6 +68,43 @@ export function Caddie({ context }: { context: WidgetContext }) {
       startJourney(journey);
     },
     [startJourney],
+  );
+
+  const [adding, setAdding] = useState(false);
+
+  /**
+   * Adding goes through the same tools the AI uses, so the basket is always the
+   * real Shopify cart - never a local copy that can drift out of sync.
+   */
+  const addProducts = useCallback(
+    async (products: Product[]) => {
+      /*
+       * Only add outright when there is genuinely nothing to choose - every
+       * option has a single value - and it is in stock. Otherwise the size is
+       * the customer's call, so it goes through the Caddie, which asks.
+       */
+      const settled = products.every(
+        (product) =>
+          product.options.every((option) => option.values.length <= 1) &&
+          product.variants[0]?.available,
+      );
+
+      if (!settled) {
+        await caddie.send(`Add ${products.map((p) => p.title).join(' and ')} to my basket`);
+        return;
+      }
+
+      setAdding(true);
+      try {
+        for (const product of products) {
+          await runTool(caddie.sessionId, 'add_to_cart', { productId: product.id, quantity: 1 });
+        }
+        await runTool(caddie.sessionId, 'view_cart', {});
+      } finally {
+        setAdding(false);
+      }
+    },
+    [caddie],
   );
 
   // Theme buttons (data-caddie-open) and window.DruidsCaddie.open() land here.
