@@ -160,6 +160,8 @@ let byId = new Map<string, Product>();
 /** inventoryItemId -> productId, so an inventory webhook can find its product. */
 let byInventoryItem = new Map<string, string>();
 let lastSyncedAt = 0;
+/** Every successful check, whether or not it found anything. */
+let lastCheckedAt = 0;
 let lastDeltaAt = 0;
 let syncing: Promise<void> | null = null;
 
@@ -189,15 +191,33 @@ export function productForInventoryItem(inventoryItemId: string): string | null 
 
 export interface CatalogueState {
   count: number;
+  /** When the mirror last actually changed. */
   lastSyncedAt: number;
   ageSeconds: number;
+  /** When we last confirmed with Shopify that it is current. */
+  lastCheckedAt: number;
+  checkedSecondsAgo: number;
 }
 
+/**
+ * Two different ages, because they answer two different questions.
+ *
+ * `ageSeconds` is how long since anything in the catalogue moved, and on a
+ * quiet store it is supposed to be large. `checkedSecondsAgo` is how long
+ * since we last asked Shopify, and it is the one that says whether the sync
+ * is alive - it should never exceed the delta interval by much.
+ *
+ * Reporting only the first read as though the sync had died: a store that had
+ * not changed for three hours showed an age of three hours, which is correct
+ * and looks exactly like a stalled job.
+ */
 export function catalogueState(): CatalogueState {
   return {
     count: products.length,
     lastSyncedAt,
     ageSeconds: lastSyncedAt ? Math.round((Date.now() - lastSyncedAt) / 1000) : -1,
+    lastCheckedAt,
+    checkedSecondsAgo: lastCheckedAt ? Math.round((Date.now() - lastCheckedAt) / 1000) : -1,
   };
 }
 
@@ -383,6 +403,7 @@ export async function syncCatalogue(): Promise<CatalogueState> {
         byId = new Map(fresh.map((product) => [product.id, product]));
         rebuildInventoryIndex();
         lastSyncedAt = Date.now();
+        lastCheckedAt = Date.now();
         lastDeltaAt = Date.now();
         version += 1;
       } else {
@@ -427,6 +448,8 @@ async function runDelta(): Promise<number> {
   // timestamp from just before it.
   const changed = await pullChangedSince(new Date(lastDeltaAt - 60_000));
   lastDeltaAt = Date.now();
+  // A delta that found nothing still proves the sync is alive.
+  lastCheckedAt = Date.now();
   return applyChanges(changed);
 }
 
