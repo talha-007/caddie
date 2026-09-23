@@ -2,6 +2,8 @@ import { env } from '../env.js';
 import { CaddieError, UpstreamError } from '../lib/errors.js';
 import { fetchWithTimeout } from '../lib/http.js';
 import { log } from '../lib/logger.js';
+import { costOfAudio } from '../usage/pricing.js';
+import { record } from '../usage/store.js';
 
 /**
  * Speech to text.
@@ -39,7 +41,26 @@ export function transcribeEnabled(): boolean {
   return Boolean(env.openai.apiKey);
 }
 
-export async function transcribe(audio: Buffer, mimeType: string): Promise<string> {
+/**
+ * Roughly how long a clip is, from how big it is.
+ *
+ * Transcription is billed by the audio minute, but the gpt-4o transcribe
+ * models return only `json` or `text` - `verbose_json`, the one that carries a
+ * real duration, is whisper-1 only. So this is derived from the file size at a
+ * nominal speech bitrate, and the dashboard labels voice spend an estimate
+ * rather than pretending to a precision we do not have.
+ *
+ * MediaRecorder's default webm/opus for speech sits around 32 kbps.
+ */
+const NOMINAL_BYTES_PER_SECOND = 4000;
+
+/** Who the clip belongs to, for the usage dashboard. */
+export interface TranscribeMeta {
+  sessionId?: string;
+  client?: string;
+}
+
+export async function transcribe(audio: Buffer, mimeType: string, meta?: TranscribeMeta): Promise<string> {
   if (!env.openai.apiKey) {
     throw new UpstreamError('Transcription needs OPENAI_API_KEY.');
   }
@@ -79,5 +100,21 @@ export async function transcribe(audio: Buffer, mimeType: string): Promise<strin
   const body = (await res.json()) as { text?: string };
   const text = body.text?.trim() ?? '';
   log.info('voice.transcribed', { ms: Date.now() - startedAt, bytes: audio.byteLength, chars: text.length });
+
+  const seconds = audio.byteLength / NOMINAL_BYTES_PER_SECOND;
+  record({
+    at: Date.now(),
+    sessionId: meta?.sessionId ?? 'unknown',
+    kind: 'transcribe',
+    model: env.openai.transcribeModel,
+    promptTokens: 0,
+    cachedTokens: 0,
+    completionTokens: 0,
+    audioSeconds: seconds,
+    costUsd: costOfAudio(env.openai.transcribeModel, seconds),
+    ms: Date.now() - startedAt,
+    ...(meta?.client ? { client: meta.client } : {}),
+  });
+
   return text;
 }

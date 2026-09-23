@@ -5,6 +5,7 @@ import { startCatalogueSync, stopCatalogueSync, syncCatalogue } from './catalog/
 import { env } from './env.js';
 import { CaddieError } from './lib/errors.js';
 import { log } from './lib/logger.js';
+import { adminRouter } from './routes/admin.js';
 import { chatRouter } from './routes/chat.js';
 import { eventsRouter } from './routes/events.js';
 import { healthRouter } from './routes/health.js';
@@ -48,6 +49,8 @@ export function createApp() {
   app.use('/api/voice', voiceRouter);
   app.use('/api/vapi', vapiRouter);
   app.use('/ucp', ucpRouter);
+  // Owns both /admin and /api/admin, so it mounts at the root.
+  app.use(adminRouter);
 
   app.use((_req, res) => res.status(404).json({ error: 'not_found' }));
 

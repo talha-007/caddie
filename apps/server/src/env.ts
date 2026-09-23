@@ -162,6 +162,12 @@ export const env = {
      */
     maxConcurrent: Number(optional('OPENAI_MAX_CONCURRENT', '25')),
   },
+  /**
+   * Opens the usage dashboard at /admin. Without it the route 404s rather
+   * than 401s, so an unprotected deployment does not advertise that there is
+   * something there to guess at.
+   */
+  adminToken: optional('ADMIN_TOKEN'),
   vapi: {
     privateKey: optional('VAPI_PRIVATE_KEY'),
     assistantId: optional('VAPI_ASSISTANT_ID'),
