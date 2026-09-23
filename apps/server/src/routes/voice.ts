@@ -77,7 +77,10 @@ voiceRouter.post(
 
       const session = await sessions.getOrCreate(sessionId);
 
-      const verdict = await screen(transcript, session.messages.length > 0);
+      const verdict = await screen(transcript, {
+        hasHistory: session.messages.length > 0,
+        lastAssistant: [...session.messages].reverse().find((m) => m.role === 'assistant' && m.text)?.text,
+      });
       if (!verdict.allow) {
         log.info('voice.declined', { sessionId, reason: verdict.reason });
         return res.json({ sessionId, transcript, message: assistantMessage(verdict.reply) });

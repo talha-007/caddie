@@ -114,6 +114,62 @@ const WEIGHTS = { chest: 6, waist: 6, hip: 3, weight: 2, height: 1 } as const;
  */
 const ESTIMATE_CONFIDENCE_CAP = 0.55;
 
+/**
+ * What a human actually measures, in centimetres and kilos.
+ *
+ * Anything outside this is a mistake rather than a measurement, and the
+ * mistake is nearly always inches typed as centimetres - a customer who says
+ * "36 centimetres" means 36 inches. Taken literally, a 36cm chest scores zero
+ * against a chart that starts at 88, so it is quietly ignored and the answer
+ * comes from height alone - while still claiming the size guide backs it.
+ */
+const PLAUSIBLE: Record<string, [number, number]> = {
+  chestCm: [60, 200],
+  waistCm: [50, 200],
+  heightCm: [120, 220],
+  weightKg: [30, 250],
+};
+
+/** An inches figure, read as centimetres, lands in this range. */
+function looksLikeInches(value: number, field: 'chestCm' | 'waistCm'): boolean {
+  const asCm = value * 2.54;
+  const [min, max] = PLAUSIBLE[field]!;
+  return asCm >= min && asCm <= max;
+}
+
+function implausible(input: SizeInput, heightCm?: number, weightKg?: number): SizeRecommendation | null {
+  const checks: Array<[string, number | undefined, string]> = [
+    ['chestCm', input.chestCm, 'chest'],
+    ['waistCm', input.waistCm, 'waist'],
+    ['heightCm', heightCm, 'height'],
+    ['weightKg', weightKg, 'weight'],
+  ];
+
+  for (const [key, value, label] of checks) {
+    if (value === undefined) continue;
+    const [min, max] = PLAUSIBLE[key]!;
+    if (value >= min && value <= max) continue;
+
+    // Offer the likely reading rather than just refusing.
+    const unit = key === 'weightKg' ? 'kg' : 'cm';
+    const inches =
+      (key === 'chestCm' || key === 'waistCm') && looksLikeInches(value, key)
+        ? ` Did you mean ${Math.round(value)} inches? That is about ${Math.round(value * 2.54)}cm.`
+        : '';
+
+    return {
+      size: null,
+      confidence: 0,
+      alternativeSize: null,
+      reason: `${Math.round(value)}${unit} is not a ${label} I can work from.${inches}`,
+      basis: 'none',
+      missing: [label],
+    };
+  }
+
+  return null;
+}
+
 export function recommendSize(input: SizeInput): SizeRecommendation {
   /*
    * Without knowing mens or womens we cannot answer at all: the two systems do
@@ -165,6 +221,11 @@ export function recommendSize(input: SizeInput): SizeRecommendation {
 
   const wantsWaist = sizes.some((row) => row.waistCm);
   const measured = wantsWaist ? input.waistCm !== undefined : input.chestCm !== undefined;
+
+  // A number that cannot be a measurement is a mistake worth naming, not
+  // something to quietly drop and answer around.
+  const nonsense = implausible(input, heightCm, weightKg);
+  if (nonsense) return nonsense;
 
   const missing: string[] = [];
   if (!measured) {

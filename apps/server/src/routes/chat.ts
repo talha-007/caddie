@@ -46,6 +46,15 @@ function message(role: CaddieMessage['role'], text: string, attachment?: CaddieM
   };
 }
 
+/** The last thing the Caddie said, so the screen can read a reply as a reply. */
+function lastAssistantMessage(session: { messages: CaddieMessage[] }): string | undefined {
+  for (let i = session.messages.length - 1; i >= 0; i -= 1) {
+    const message = session.messages[i];
+    if (message?.role === 'assistant' && message.text) return message.text;
+  }
+  return undefined;
+}
+
 const vapiEnabled = () => Boolean(env.vapi.privateKey && env.vapi.assistantId);
 
 chatRouter.post('/', async (req, res, next) => {
@@ -80,7 +89,10 @@ chatRouter.post('/', async (req, res, next) => {
      * prompt and tool schemas before it reads a word, so an essay request that
      * gets this far has already cost us.
      */
-    const verdict = await screen(parsed.data.text, session.messages.length > 0);
+    const verdict = await screen(parsed.data.text, {
+      hasHistory: session.messages.length > 0,
+      lastAssistant: lastAssistantMessage(session),
+    });
     if (!verdict.allow) {
       log.info('chat.declined', { sessionId, reason: verdict.reason });
       const reply = message('assistant', verdict.reply);

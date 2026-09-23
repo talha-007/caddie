@@ -185,3 +185,42 @@ describe('categories beyond tops and bottoms', () => {
     expect(result.reason).toMatch(/varies by style/i);
   });
 });
+
+describe('measurements that cannot be real', () => {
+  /*
+   * From a live conversation: asked for a chest in centimetres, the customer
+   * answered "36 centimetres" meaning inches. 36 scores zero against a chart
+   * starting at 88, so it was silently dropped and the size came from height
+   * alone - while the reply still said the Druids size guide put them in an S.
+   */
+  it('refuses a chest that would belong to a toddler, and offers the likely reading', () => {
+    const result = recommendSize({ audience: 'men', heightValue: 163, heightUnit: 'cm', chestCm: 36 });
+    expect(result.size).toBeNull();
+    expect(result.basis).toBe('none');
+    expect(result.reason).toMatch(/36 inches/);
+    expect(result.reason).toMatch(/91cm/);
+    expect(result.missing).toContain('chest');
+  });
+
+  it('accepts the same person once the figure is in centimetres', () => {
+    const result = recommendSize({ audience: 'men', heightValue: 163, heightUnit: 'cm', chestCm: 91 });
+    expect(result.size).toBe('S');
+    expect(result.basis).toBe('measurement');
+  });
+
+  it('catches a waist given in inches too', () => {
+    const result = recommendSize({ audience: 'men', waistCm: 34, category: 'shorts' });
+    expect(result.size).toBeNull();
+    expect(result.reason).toMatch(/34 inches/);
+  });
+
+  it('catches a height and a weight that cannot be right', () => {
+    expect(recommendSize({ audience: 'men', heightValue: 64, heightUnit: 'cm' }).size).toBeNull();
+    expect(recommendSize({ audience: 'men', weightValue: 900, weightUnit: 'kg' }).size).toBeNull();
+  });
+
+  it('never claims the size guide backs a figure it ignored', () => {
+    const result = recommendSize({ audience: 'men', heightValue: 163, heightUnit: 'cm', chestCm: 36 });
+    expect(result.reason).not.toMatch(/size guide puts you/i);
+  });
+});
