@@ -2,6 +2,7 @@ import type { Product } from '@caddie/shared';
 import { z } from 'zod';
 import { recommendOutfit } from '../recommend/outfit.js';
 import { recommendPack } from '../recommend/pack.js';
+import { findNamedPack, findUnstockedBundle, recommendNamedPack } from '../recommend/packs.js';
 import { recommendSize } from '../recommend/size.js';
 import { addToCart, getCart, getProductDetails, searchProducts, setLineQuantity } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
@@ -249,7 +250,7 @@ const packSchema = z.object({
 const packTool = defineTool({
   name: 'recommend_pack',
   description:
-    'Build a multi-item pack of real Druids products for a budget. Use when the customer asks for several things at once, or mentions a total spend.',
+    'Build a pack of real Druids products. Pass the words the customer used as the query: if they name a pack Druids sells - the Ambassador Pack, the Rainsuit Special - that pack comes back at its real price. Otherwise a selection is put together for their budget.',
   schema: packSchema,
   parameters: {
     type: 'object',
@@ -266,6 +267,61 @@ const packTool = defineTool({
   async run(args, ctx): Promise<ToolResult> {
     const currency = args.currency ?? ctx.session.preferences.currency ?? storeCurrency();
     const budgetAmount = args.budgetAmount ?? ctx.session.preferences.budgetAmount;
+
+    /*
+     * A pack Druids actually sells is a different answer to a selection put
+     * together for a budget. "What is in the Ambassador Pack" is a question
+     * about a real product with a real price, so it is answered from that
+     * product rather than by assembling something that costs about the same.
+     */
+    /*
+     * A bundle Druids sells that this store does not carry. Checked first,
+     * because otherwise the budget assembler answers it: "the Prestige Pack
+     * includes three items and costs £92" was a real reply, about a pack that
+     * is not in the store, at a price that is not its own.
+     */
+    const unstocked = findUnstockedBundle(args.query);
+    if (unstocked) {
+      return {
+        speech: `I cannot pull up the ${unstocked.name} - I do not have its contents or its price to hand, so I would rather not guess at them. The team on the website can tell you. Shall I show you what we do have instead?`,
+        facts: `${unstocked.name} is a real Druids bundle, but it is not in this catalogue and we hold no price for it. Do not describe it, price it, or offer a substitute as though it were that pack.`,
+      };
+    }
+
+    const named = findNamedPack(args.query);
+    if (named) {
+      const real = await recommendNamedPack(named, {
+        colour: args.colour ?? ctx.session.preferences.colour,
+        size: args.size ?? ctx.session.sizeProfile.usualSize,
+      });
+
+      if (real?.pack) {
+        await sessions.patch(ctx.session.id, {
+          lastShown: {
+            kind: 'pack',
+            // The pack itself first, so "add it" means the pack and not the polo.
+            items: [
+              { id: real.pack.productId, title: real.pack.title },
+              ...real.items.map((p) => ({ id: p.id, title: p.title })),
+            ],
+            query: args.query,
+            colour: args.colour,
+          },
+          preferences: { colour: args.colour, currency },
+        });
+
+        return {
+          speech: real.reason,
+          facts: `${real.pack.title} [${real.pack.productId}] - ${money(
+            real.pack.price.amount,
+            real.pack.price.currency,
+          )}, the price of the pack and not the sum of its pieces.
+Filling it from stock:
+${listFacts(real.items)}`,
+          attachment: { kind: 'pack', recommendation: real },
+        };
+      }
+    }
 
     const recommendation = await recommendPack({
       query: args.query,

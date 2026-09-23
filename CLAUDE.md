@@ -61,6 +61,13 @@ when the customer has chosen nothing, so a size picker built from `variants`
 silently adds whichever size came back first. Build the picker from `options`;
 use `variants` only for availability.
 
+**Product ids arrive in two forms.** The mirror is keyed by GID, but a theme's
+`{{ product.id }}` and `ShopifyAnalytics.meta` both give a bare number, and the
+model drops the prefix often enough to matter. `productById` in
+`apps/server/src/catalog/sync.ts` takes either - go through it rather than
+reading `byId`. A miss there falls through to throttled UCP and comes back
+"product not found", which reads like a broken catalogue rather than an id.
+
 **Money is already in major units.** `{ amount: 42, currency: 'GBP' }` is
 £42.00. The Shopify payloads use minor units; the conversion happens once, in
 `apps/server/src/shopify/money.ts`, and nothing downstream deals in pence.
@@ -71,6 +78,29 @@ price or a product name out of the text — it is written by a model.
 **Cart updates replace rather than merge.** Shopify's `update_cart` sets the
 cart's lines to exactly what you send, so sending one line deletes the rest.
 Go through `addToCart` / `setLineQuantity` in `apps/server/src/shopify/catalog.ts`.
+
+**Sizes come on two scales, and in words.** Tops are lettered (S-4XL), bottoms
+carry waist numbers (32, 34). They are not one scale: a customer who says
+"medium" has told you nothing about which trousers fit. Filtering trousers by
+"M" silently dropped every pair, so an outfit arrived with nothing to wear
+below the waist. Customers and the model both say "Medium" where the catalogue
+says "M", and an exact string match empties the whole result. Everything that
+compares a size goes through `src/recommend/sizeWords.ts`, which normalises the
+word, ignores a size it cannot read rather than filtering on it, and only
+applies a size to products sized on that same scale.
+
+**Search matches literal words, so a recommendation cannot depend on the
+customer's phrasing.** "A pack of basic clothing" returns nothing - no product
+has "basic" in its name - and the customer hears that we have nothing in their
+budget. Both `recommend_pack` and `recommend_outfit` search garment words first
+and fall back to the customer's own wording, never the other way round.
+
+**A pack has a price of its own, and it is not the sum of its pieces.** The
+Ambassador Pack is £99 for six garments that add up to more. `recommend_pack`
+returns the pack's Shopify price as `total` and the pieces as `items`; adding
+the items up quotes a different number to the one on the product page. Packs
+are products, so `isPack` in `src/recommend/packs.ts` keeps them out of
+garment selection - otherwise a pack ends up inside a pack, or worn as a top.
 
 **Outfit slots can be missing.** If nothing in stock fits a slot we leave it
 out rather than pad the outfit. Do not assume four pieces.
@@ -190,6 +220,30 @@ Abuse and off-topic messages are screened by `src/ai/guard.ts` before the
 expensive loop, on the cheapest model available, and obvious cases are caught
 by local rules for nothing at all. `src/lib/rateLimit.ts` caps what one session
 or address can spend.
+
+### Seeing where it goes
+
+`GET /admin` is the usage dashboard: spend by model and by kind of call, cost
+per thousand conversations, cache hit rate, which conversations cost what, and
+what was said in them. Set `ADMIN_TOKEN` to open it - without one the route
+404s rather than 401s, because the server is reachable through a public tunnel
+and a 401 is an invitation.
+
+Three things it will not tell you honestly unless you know them:
+
+- **The money is our arithmetic, not OpenAI's.** Rates live in
+  `src/usage/pricing.ts` and are maintained by hand. A model with no rate in
+  that table reads as zero, so the dashboard names it rather than hiding it.
+- **Voice minutes are estimated from audio size.** The `gpt-4o-*-transcribe`
+  models only return `json` or `text`; `verbose_json`, the response format
+  carrying a real duration, is whisper-1 only.
+- **`prompt_tokens` already includes the cached ones.** Billing both at the
+  full input rate overstates a cached turn about fourfold, which at our hit
+  rate is most of them. `test/usage.test.ts` pins this down.
+
+Conversations are kept for seven days and then expire. Client labels are a
+salted hash of the address rather than the address, salted with `ADMIN_TOKEN`
+so every instance derives the same label.
 
 ## Running under load
 

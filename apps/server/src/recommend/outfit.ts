@@ -1,6 +1,8 @@
 import type { Money, OutfitInput, OutfitPiece, OutfitRecommendation, Product } from '@caddie/shared';
 import { searchProducts } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
+import { isPack } from './packs.js';
+import { stockedInSize } from './sizeWords.js';
 
 /**
  * Day 6 - Outfit builder.
@@ -64,13 +66,7 @@ function withinBudget(products: Product[], remaining: number | null): Product[] 
 }
 
 function hasSize(product: Product, size?: string): boolean {
-  if (!size) return true;
-  if (product.variants.length === 0) return true;
-  const needle = size.trim().toLowerCase();
-  return product.variants.some(
-    (variant) =>
-      variant.available && Object.values(variant.options).some((value) => value.toLowerCase() === needle),
-  );
+  return stockedInSize(product.variants, size);
 }
 
 function scoreForColour(product: Product, colour?: string): number {
@@ -117,6 +113,8 @@ export async function recommendOutfit(
         results.filter(
           (p) =>
             p.price.amount > 0 &&
+            // Nobody wears the Ambassador Pack as a top.
+            !isPack(p) &&
             hasSize(p, input.size) &&
             // A polo is not a pair of shorts, whatever the search thinks.
             fitsSlot(p, slot) &&

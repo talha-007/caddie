@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Audience, SizeInput, SizeRecommendation } from '@caddie/shared';
+import { sameSize } from './sizeWords.js';
 
 /**
  * Day 4 - Find My Size.
@@ -241,7 +242,7 @@ export function recommendSize(input: SizeInput): SizeRecommendation {
 
   // Nothing measurable at all - fall back to what they usually wear, and say so.
   if (!haveAnything) {
-    const match = sizes.find((row) => row.size.toLowerCase() === input.usualSize?.trim().toLowerCase());
+    const match = sizes.find((row) => input.usualSize && sameSize(row.size, input.usualSize));
     if (match) {
       return {
         size: match.size,
