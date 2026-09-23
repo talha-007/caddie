@@ -11,7 +11,8 @@ import { VoiceButton, Wave } from './VoiceButton.js';
  */
 
 const JOURNEYS: Array<{ journey: Journey; title: string; blurb: string; icon: ReactNode }> = [
-  { journey: 'size', title: 'Find My Size', blurb: 'A few quick questions, one confident size.', icon: <RulerIcon /> },
+  // Find My Size is parked for now - uncomment to bring the card back.
+  // { journey: 'size', title: 'Find My Size', blurb: 'A few quick questions, one confident size.', icon: <RulerIcon /> },
   { journey: 'pack', title: 'Choose My Ambassador Pack', blurb: 'The right pack for how and where you play.', icon: <TagIcon /> },
   { journey: 'outfit', title: 'Build My Outfit', blurb: 'A complete look, inside your budget.', icon: <HangerIcon /> },
 ];

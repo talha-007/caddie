@@ -421,10 +421,29 @@ export function useCaddie(page: PageContext): CaddieState {
   const sendClip = useCallback(
     async (clip: Blob) => {
       await withBusy(null, async () => {
-        const reply = await sendVoice(sessionId, clip);
-        // Show what the Caddie heard, so a misheard word is obvious on screen.
-        if (reply.transcript) setMessages((prev) => [...prev, message('user', reply.transcript)]);
-        deliver(reply.message.text, reply.message.attachment, reply.message);
+        /*
+         * The transcript is only known once the server answers, but the card it
+         * raises on the way comes down SSE before that. Appending the customer's
+         * line afterwards put it below the Caddie's reply. So take its place in
+         * the thread now, while nothing else has been added, and fill in the
+         * words when they arrive. An empty turn renders nothing.
+         */
+        const heard = message('user', '');
+        setMessages((prev) => [...prev, heard]);
+        try {
+          const reply = await sendVoice(sessionId, clip);
+          // Show what the Caddie heard, so a misheard word is obvious on screen.
+          if (reply.transcript) {
+            setMessages((prev) => prev.map((m) => (m.id === heard.id ? { ...m, text: reply.transcript } : m)));
+          } else {
+            setMessages((prev) => prev.filter((m) => m.id !== heard.id));
+          }
+          deliver(reply.message.text, reply.message.attachment, reply.message);
+        } catch (err) {
+          // Nothing was heard, so leave no gap behind.
+          setMessages((prev) => prev.filter((m) => m.id !== heard.id));
+          throw err;
+        }
       });
     },
     [deliver, sessionId, withBusy],

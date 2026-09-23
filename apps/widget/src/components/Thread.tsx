@@ -35,9 +35,15 @@ export function Thread({ messages, busy, busyJourney, garment, onSubmitSize, onS
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages.length, busy]);
 
+  /*
+   * A turn with nothing in it yet - a voice transcript holding its place while
+   * the clip is still being transcribed - would otherwise leave a gap.
+   */
+  const visible = messages.filter((m) => m.text || m.attachment || m.local);
+
   return (
     <div className="caddie-thread" role="log" aria-live="polite" aria-relevant="additions">
-      {messages.map((message) => (
+      {visible.map((message) => (
         <div key={message.id} className={`caddie-turn caddie-turn--${message.role}`}>
           {message.text ? (
             <div className="caddie-turn__line">
