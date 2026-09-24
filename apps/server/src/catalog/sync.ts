@@ -38,6 +38,17 @@ import { redis, redisSubscriber } from '../lib/redis.js';
 
 const PAGE_SIZE = 50;
 
+/**
+ * How far pagination may run before we assume something is wrong.
+ *
+ * It is a guard against a pagination bug looping forever against a live API,
+ * not a statement about catalogue size - so it has to sit far above the real
+ * one. It was 50 pages, which is 2,500 products, and the live Druids store
+ * holds about 2,400 active: one ordinary month of new stock from silently
+ * losing the newest products with nothing in the logs.
+ */
+const MAX_PAGES = 400;
+
 const QUERY = `
 query Catalogue($cursor: String, $query: String) {
   products(first: ${PAGE_SIZE}, after: $cursor, query: $query) {
@@ -258,13 +269,29 @@ async function pull(): Promise<Product[]> {
   const collected: Product[] = [];
   let cursor: string | null = null;
 
-  // Bounded so a pagination bug cannot loop forever against a live API.
-  for (let page = 0; page < 50; page += 1) {
+  let truncated = false;
+
+  for (let page = 0; page < MAX_PAGES; page += 1) {
     const data: CataloguePage = await admin<CataloguePage>(QUERY, { cursor, query: filter });
 
     collected.push(...data.products.nodes.map(toProduct));
     if (!data.products.pageInfo.hasNextPage) break;
     cursor = data.products.pageInfo.endCursor;
+    truncated = page === MAX_PAGES - 1;
+  }
+
+  /*
+   * Loud, because the quiet version of this is the dangerous one: the
+   * catalogue simply stops at the cap, the newest products are missing, every
+   * search still works, and nothing anywhere says why the Caddie cannot find
+   * the thing that went live this morning.
+   */
+  if (truncated) {
+    log.error('catalogue.truncated', {
+      products: collected.length,
+      cap: MAX_PAGES * PAGE_SIZE,
+      fix: 'raise MAX_PAGES in src/catalog/sync.ts',
+    });
   }
 
   log.info('catalogue.pulled', { products: collected.length, ms: Date.now() - startedAt });

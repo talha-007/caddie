@@ -2,6 +2,7 @@ import type { Money, PackInput, PackRecommendation, Product } from '@caddie/shar
 import { searchProducts } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
 import { isPack } from './packs.js';
+import { priceFor, totalFor } from './pricing.js';
 import { stockedInSize } from './sizeWords.js';
 
 /**
@@ -45,18 +46,28 @@ function hasSize(product: Product, size?: string): boolean {
   return stockedInSize(product.variants, size);
 }
 
-function sum(products: Product[]): Money {
-  return {
-    amount: Number(products.reduce((total, p) => total + p.price.amount, 0).toFixed(2)),
-    currency: products[0]?.price.currency ?? storeCurrency(),
-  };
+/**
+ * Priced at the size the customer is actually buying, not at the cheapest
+ * variant. `product.price` is Shopify's minimum, and adding minimums up gave
+ * a total that could not be checked out at.
+ */
+function sum(products: Product[], size?: string): Money & { exact: boolean } {
+  return totalFor(products, size, storeCurrency());
 }
 
 /**
  * Greedy fill: take the best-ranked candidates that keep us inside budget,
  * then top up with the cheapest remaining ones if we are short on items.
  */
-function fillWithinBudget(candidates: Product[], itemCount: number, budget?: Money): Product[] {
+function fillWithinBudget(
+  candidates: Product[],
+  itemCount: number,
+  budget?: Money,
+  size?: string,
+): Product[] {
+  // What this customer pays, at their size where we know it.
+  const cost = (product: Product) => priceFor(product, size).amount;
+
   if (!budget) return candidates.slice(0, itemCount);
 
   const chosen: Product[] = [];
@@ -64,21 +75,21 @@ function fillWithinBudget(candidates: Product[], itemCount: number, budget?: Mon
 
   for (const product of candidates) {
     if (chosen.length >= itemCount) break;
-    if (spend + product.price.amount <= budget.amount) {
+    if (spend + cost(product) <= budget.amount) {
       chosen.push(product);
-      spend += product.price.amount;
+      spend += cost(product);
     }
   }
 
   if (chosen.length < itemCount) {
     const cheapestFirst = candidates
       .filter((c) => !chosen.includes(c))
-      .sort((a, b) => a.price.amount - b.price.amount);
+      .sort((a, b) => cost(a) - cost(b));
     for (const product of cheapestFirst) {
       if (chosen.length >= itemCount) break;
-      if (spend + product.price.amount <= budget.amount) {
+      if (spend + cost(product) <= budget.amount) {
         chosen.push(product);
-        spend += product.price.amount;
+        spend += cost(product);
       }
     }
   }
@@ -116,25 +127,31 @@ export async function recommendPack(input: PackInput): Promise<PackRecommendatio
     const preferred = available.filter((p) => matchesColour(p, input.colour) && hasSize(p, input.size));
     const candidates = preferred.length >= itemCount ? preferred : available;
 
-    const filled = fillWithinBudget(candidates, itemCount, input.budget);
+    const filled = fillWithinBudget(candidates, itemCount, input.budget, input.size);
     // Keep the best attempt, so a fallback that finds less cannot lose us one
     // the customer's own wording already found.
     if (filled.length > items.length) items = filled;
     if (items.length >= itemCount) break;
   }
 
-  const total = sum(items);
+  const total = sum(items, input.size);
   const overBudget = Boolean(input.budget && total.amount > input.budget.amount);
 
   return {
     items,
-    total,
+    total: { amount: total.amount, currency: total.currency },
     overBudget,
-    reason: buildReason(items.length, itemCount, input, overBudget),
+    reason: buildReason(items.length, itemCount, input, overBudget, total.exact),
   };
 }
 
-function buildReason(found: number, wanted: number, input: PackInput, overBudget: boolean): string {
+function buildReason(
+  found: number,
+  wanted: number,
+  input: PackInput,
+  overBudget: boolean,
+  exact = true,
+): string {
   if (found === 0) {
     return input.budget
       ? `I could not find anything matching that under ${input.budget.amount} ${input.budget.currency}.`
@@ -145,6 +162,8 @@ function buildReason(found: number, wanted: number, input: PackInput, overBudget
   if (input.budget && !overBudget) bits.push(`inside your ${input.budget.amount} ${input.budget.currency} budget`);
   let reason = `${bits.join(' ')}.`;
   if (found < wanted) reason += ` I could only fit ${found} of the ${wanted} you asked for at that budget.`;
+  // Said out loud, because a total built from "from" prices is not a total.
+  if (!exact) reason += ' That is a starting price - the final one depends on the sizes chosen.';
   if (overBudget) reason += ' This comes in slightly over budget - say the word and I will swap something out.';
   return reason;
 }

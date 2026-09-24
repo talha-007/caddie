@@ -192,11 +192,20 @@ export async function getProductDetails(
      * reads variants[0], so this has to leave exactly the variant the
      * customer picked - or none, when that combination does not exist.
      */
-    const variants = mirrored.variants.filter((variant) =>
-      Object.entries(selected).every(
-        ([name, value]) => variant.options[name]?.toLowerCase() === value.toLowerCase(),
-      ),
-    );
+    const variants = mirrored.variants.filter((variant) => {
+      /*
+       * The option name comes from the model, so its capitalisation is not
+       * ours to rely on: { size: "L" } never matched { Size: "L" }, narrowed
+       * to nothing, and the customer was told we could not find the
+       * combination for a garment sitting in stock.
+       */
+      const byName = new Map(
+        Object.entries(variant.options).map(([name, value]) => [name.toLowerCase(), value]),
+      );
+      return Object.entries(selected).every(
+        ([name, value]) => byName.get(name.toLowerCase())?.toLowerCase() === value.toLowerCase(),
+      );
+    });
     return { ...mirrored, variants };
   }
 

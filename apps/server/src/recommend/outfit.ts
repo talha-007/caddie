@@ -2,6 +2,7 @@ import type { Money, OutfitInput, OutfitPiece, OutfitRecommendation, Product } f
 import { searchProducts } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
 import { isPack } from './packs.js';
+import { priceFor } from './pricing.js';
 import { stockedInSize } from './sizeWords.js';
 
 /**
@@ -60,9 +61,16 @@ export function fitsSlot(product: Product, slot: OutfitSlot): boolean {
   return slot.keywords.some((keyword) => haystack.includes(keyword));
 }
 
-function withinBudget(products: Product[], remaining: number | null): Product[] {
+/**
+ * What is still affordable, at the size the customer is buying.
+ *
+ * `product.price` is Shopify's cheapest variant. Filtering on it let a
+ * garment into the outfit that the customer could not afford once their
+ * actual size was priced, and the total under-read to match.
+ */
+function withinBudget(products: Product[], remaining: number | null, size?: string): Product[] {
   if (remaining === null) return products;
-  return products.filter((p) => p.price.amount <= remaining);
+  return products.filter((p) => priceFor(p, size).amount <= remaining);
 }
 
 function hasSize(product: Product, size?: string): boolean {
@@ -122,6 +130,7 @@ export async function recommendOutfit(
             !used.has(p.id),
         ),
         remaining,
+        input.size,
       ).sort((a, b) => scoreForColour(b, input.colour) - scoreForColour(a, input.colour));
 
       pick = usable[0];
@@ -134,15 +143,24 @@ export async function recommendOutfit(
 
     pieces.push({ slot: slot.slot, product: pick });
     used.add(pick.id);
-    if (remaining !== null) remaining -= pick.price.amount;
+    if (remaining !== null) remaining -= priceFor(pick, input.size).amount;
   }
 
+  const priced = pieces.map((piece) => priceFor(piece.product, input.size));
   const total: Money = {
-    amount: Number(pieces.reduce((sum, piece) => sum + piece.product.price.amount, 0).toFixed(2)),
-    currency: pieces[0]?.product.price.currency ?? input.budget?.currency ?? storeCurrency(),
+    amount: Number(priced.reduce((sum, price) => sum + price.amount, 0).toFixed(2)),
+    currency: priced[0]?.currency ?? input.budget?.currency ?? storeCurrency(),
   };
+  const exact = priced.every((price) => price.exact);
 
-  return { pieces, total, reason: buildReason(pieces, input) };
+  const reason = buildReason(pieces, input);
+  return {
+    pieces,
+    total,
+    // A total added up from "from" prices is not a total, and saying so costs
+    // less than a customer discovering it at checkout.
+    reason: exact ? reason : `${reason} That is a starting price - the final one depends on the sizes chosen.`,
+  };
 }
 
 function buildReason(pieces: OutfitPiece[], input: OutfitInput): string {

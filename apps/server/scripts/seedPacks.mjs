@@ -116,9 +116,9 @@ function inputFor(product) {
 }
 
 /**
- * productSet creates the product but leaves it unpublished, and publishing
- * over GraphQL needs write_publications, which this token does not have.
- * The REST endpoint accepts it under write_products.
+ * productSet leaves the product unpublished. This puts it on the Online Store,
+ * which is what a shopper browsing the site sees - and is not enough on its
+ * own. See publishToHeadless below for the half that makes it buyable.
  */
 async function publish(productGid) {
   const id = productGid.split('/').pop();
@@ -132,6 +132,29 @@ async function publish(productGid) {
   return Boolean(body.product?.published_at);
 }
 
+/**
+ * Publishing to the Online Store is not enough.
+ *
+ * The Storefront API - which is what the basket runs on - reads its own
+ * publication, so a product published only to `web` is searchable and cannot
+ * be bought: "The merchandise with id ... does not exist". Every product this
+ * script seeded had that shape until it was noticed, which meant the packs
+ * could be shown to a customer and not added.
+ */
+async function publishToHeadless(gid) {
+  const pubs = await admin(`{ publications(first: 20) { nodes { id name } } }`, {});
+  const headless = pubs.publications.nodes.filter((node) => /headless/i.test(node.name));
+  if (headless.length === 0) return 'no headless publication on this store';
+
+  const result = await admin(
+    `mutation Publish($id: ID!, $input: [PublicationInput!]!) {
+       publishablePublish(id: $id, input: $input) { userErrors { message } } }`,
+    { id: gid, input: headless.map((node) => ({ publicationId: node.id })) },
+  );
+  const errors = result.publishablePublish?.userErrors ?? [];
+  return errors.length ? errors.map((e) => e.message).join('; ') : null;
+}
+
 const only = process.argv[2];
 const queue = only ? PRODUCTS.filter((p) => p.title === only) : PRODUCTS;
 
@@ -143,7 +166,9 @@ for (const product of queue) {
     continue;
   }
   const published = await publish(created.id);
+  const headlessError = await publishToHeadless(created.id);
   console.log(
-    `created  ${created.title.padEnd(24)} ${created.variants.nodes.length} variant(s) @ ${created.variants.nodes[0]?.price}  published:${published ? 'yes' : 'NO'}`,
+    `created  ${created.title.padEnd(24)} ${created.variants.nodes.length} variant(s) @ ${created.variants.nodes[0]?.price}  ` +
+      `published:${published ? 'yes' : 'NO'}  storefront:${headlessError ? 'FAILED - ' + headlessError : 'yes'}`,
   );
 }
