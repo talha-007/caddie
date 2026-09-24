@@ -70,47 +70,28 @@ export interface CaddieState {
   clearError: () => void;
 }
 
-const SESSION_KEY = 'druids-caddie-session';
-const THREAD_KEY = 'druids-caddie-thread';
-const MAX_STORED = 40;
+const LEGACY_KEYS = ['druids-caddie-session', 'druids-caddie-thread'];
 /** How long a card counts as "just shown" when the same one arrives again. */
 const DUPLICATE_WINDOW_MS = 6000;
 
-/* ---------------- storage ---------------- */
+/* ---------------- session ---------------- */
 
-function readStorage<T>(key: string): T | null {
-  try {
-    const raw = sessionStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key: string, value: unknown): void {
-  try {
-    sessionStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
-  } catch {
-    // Private mode or storage full - the Caddie still works, it just forgets on reload.
-  }
-}
-
-/** One session id per browser tab, reused across page views in the same visit. */
+/**
+ * Every page load is a new conversation. Nothing about the thread is stored,
+ * so a reload always drops the customer back at the start with an empty chat.
+ */
 function useSessionId(): string {
   return useMemo(() => {
-    const existing = readStorage<string>(SESSION_KEY);
-    if (typeof existing === 'string' && existing) return existing;
-    const id = crypto.randomUUID();
-    writeStorage(SESSION_KEY, JSON.stringify(id));
-    return id;
+    try {
+      // Clear threads left behind by older builds that did persist.
+      for (const key of LEGACY_KEYS) sessionStorage.removeItem(key);
+    } catch {
+      // Private mode - there was nothing stored to clear anyway.
+    }
+    return crypto.randomUUID();
   }, []);
 }
 
-interface StoredThread {
-  messages: ThreadMessage[];
-  cart: Cart | null;
-  size: SizeRecommendation | null;
-}
 
 /* ---------------- helpers ---------------- */
 
@@ -136,11 +117,10 @@ const INTROS: Record<Journey, string> = {
 
 export function useCaddie(page: PageContext): CaddieState {
   const sessionId = useSessionId();
-  const stored = useMemo(() => readStorage<StoredThread>(THREAD_KEY), []);
 
-  const [messages, setMessages] = useState<ThreadMessage[]>(stored?.messages ?? []);
-  const [cart, setCart] = useState<Cart | null>(stored?.cart ?? null);
-  const [size, setSize] = useState<SizeRecommendation | null>(stored?.size ?? null);
+  const [messages, setMessages] = useState<ThreadMessage[]>([]);
+  const [cart, setCart] = useState<Cart | null>(null);
+  const [size, setSize] = useState<SizeRecommendation | null>(null);
   const [details, setDetails] = useState<Record<string, Product>>({});
   const [busy, setBusy] = useState(false);
   const [busyJourney, setBusyJourney] = useState<Journey | null>(null);
@@ -152,10 +132,6 @@ export function useCaddie(page: PageContext): CaddieState {
   const silentProducts = useRef(new Set<string>());
   /** While > 0, cart cards only update the basket, they do not post to the thread. */
   const quietCart = useRef(0);
-
-  useEffect(() => {
-    writeStorage(THREAD_KEY, { messages: messages.slice(-MAX_STORED), cart, size } satisfies StoredThread);
-  }, [messages, cart, size]);
 
   const updateCart = useCallback((next: Cart) => {
     setCart(next);
