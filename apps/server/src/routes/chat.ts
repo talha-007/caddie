@@ -5,7 +5,8 @@ import type { CaddieMessage } from '@caddie/shared';
 import { env } from '../env.js';
 import { log } from '../lib/logger.js';
 import { publish } from '../session/bus.js';
-import { sessions } from '../session/store.js';
+import { sessions, stateOf } from '../session/store.js';
+import { pageContextSchema, stateSchema } from '../session/stateSchema.js';
 import { runTool } from '../tools/index.js';
 import { route } from '../ai/devRouter.js';
 import { screen } from '../ai/guard.js';
@@ -33,23 +34,19 @@ import { recordMessage } from '../usage/store.js';
 
 export const chatRouter: Router = Router();
 
-/*
- * Validated rather than trusted. It comes from data attributes on a page we do
- * not control, so every field is bounded - an unbounded productTitle would go
- * straight into a prompt we pay for by the token.
- */
-const contextSchema = z.object({
-  pageType: z.enum(['product', 'collection', 'cart', 'other']),
-  productId: z.string().max(200).optional(),
-  productHandle: z.string().max(200).optional(),
-  productTitle: z.string().max(200).optional(),
-  variantId: z.string().max(200).optional(),
-});
-
 const bodySchema = z.object({
   sessionId: z.string().min(1).max(100).optional(),
   text: z.string().min(1).max(2000),
-  context: contextSchema.optional(),
+  context: pageContextSchema.optional(),
+  /*
+   * The conversation, as the client remembers it.
+   *
+   * This is what keeps the backend stateless: a message can land on any
+   * instance behind the load balancer and that instance knows the customer
+   * without ever having seen them. Bounded and stripped in stateSchema,
+   * because it has been round tripped through a browser.
+   */
+  state: stateSchema.optional(),
 });
 
 function message(role: CaddieMessage['role'], text: string, attachment?: CaddieMessage['attachment']): CaddieMessage {
@@ -96,7 +93,14 @@ chatRouter.post('/', async (req, res, next) => {
     });
   }
 
-  const session = await sessions.getOrCreate(sessionId);
+  /*
+   * The client's copy wins when it sends one. Anything this instance still
+   * holds is a leftover from an earlier turn it happened to serve, and
+   * merging the two would resurrect state the customer has moved on from.
+   */
+  const session = parsed.data.state
+    ? await sessions.restore(sessionId, parsed.data.state)
+    : await sessions.getOrCreate(sessionId);
 
   // Written before the model runs, and kept on the session so a spoken
   // follow-up - which carries no context of its own - still knows the page.
@@ -123,8 +127,9 @@ chatRouter.post('/', async (req, res, next) => {
     if (!verdict.allow) {
       log.info('chat.declined', { sessionId, reason: verdict.reason });
       const reply = message('assistant', verdict.reply);
-      // Not remembered: a declined message should not shape what follows.
-      return res.json({ sessionId, message: reply });
+      // Not remembered: a declined message should not shape what follows, so
+      // the state goes back exactly as it arrived.
+      return res.json({ sessionId, message: reply, state: stateOf(session) });
     }
 
     const reply = openaiEnabled()
@@ -143,7 +148,14 @@ chatRouter.post('/', async (req, res, next) => {
       publish({ type: 'attachment', sessionId, attachment: reply.attachment });
     }
 
-    return res.json({ sessionId, message: reply });
+    /*
+     * Read back after the turn, not before. The model's tools have been
+     * writing to this session throughout - the size it just worked out, what
+     * is on screen, the basket it opened - and the snapshot taken at the top
+     * has none of it.
+     */
+    const finished = await sessions.getOrCreate(sessionId);
+    return res.json({ sessionId, message: reply, state: stateOf(finished) });
   } catch (err) {
     return next(err);
   }

@@ -266,17 +266,30 @@ The things that only bite at scale, and what handles them.
 Set `REDIS_URL` and run as many as you like. Without it everything falls back
 to this process's memory, which is correct for one instance and for local work.
 
-Four things need sharing, and only the first is obvious:
+**The conversation is not one of them.** The client holds it and sends it back
+as `state` on every request, so a message can land on an instance that has
+never seen that customer and it still knows their size, their budget and their
+basket. That is what keeps the backend stateless, and it is why ~100k daily
+sessions need no shared session store at all. The server still keeps a
+short-lived copy for the length of a turn, because the model's tools write to
+it as they run, but nothing reads it back on the next request.
+
+Two things still need sharing, and the second is the one people miss:
 
 | | Why it breaks otherwise |
 | --- | --- |
-| **Sessions** | The next message can land on another instance. The customer loses their size, their budget and their basket mid-conversation. |
 | **Rate limits** | Per-instance counters mean the real limit is the limit times the size of the fleet. |
 | **The event stream** | An SSE connection lives on the instance that accepted it, but the message producing a card may be handled by another. The card is published into the wrong process and never reaches the screen - with nothing in the logs to say so. |
-| **Catalogue changes** | Shopify posts a webhook to one instance. The others serve the old price until their own delta pull, so two customers can be quoted differently for the same minute. |
+| **Catalogue changes** | Shopify posts a webhook to one instance. The others serve the old price until their own delta pull - a window of at most one minute, so this one is survivable without Redis if you accept that. |
 
 The mirror itself is fine duplicated: each instance holds its own copy and they
 are kept in step by the change channel above.
+
+**State the client sends replaces, it does not merge.** Whatever an instance
+still holds for that session is a leftover from an earlier turn it happened to
+serve; merging would resurrect a budget or a colour the customer has moved on
+from. And the state handed back is read *after* the turn, never the snapshot
+taken at the start - the tools have been writing to it throughout.
 
 **`append`, not `save`, for conversation history.** A route reads the session,
 the model's tools write to it during the turn, and saving the snapshot read at

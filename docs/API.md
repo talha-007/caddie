@@ -40,6 +40,34 @@ POST /api/chat
 → { "sessionId": "abc", "message": { ... } }
 ```
 
+### Conversation state lives with you, not with us
+
+The backend is stateless. Every reply carries a `state` object; store it and
+send it straight back as `state` on the next request:
+
+```jsonc
+→ { "sessionId": "abc", "message": { ... }, "state": { ... } }
+
+POST /api/chat
+{ "sessionId": "abc", "text": "build me an outfit", "state": { ...the last one... } }
+```
+
+Treat it as **opaque** - do not read from it or write to it, just hand it back
+unchanged. It carries the size profile, budget and colour preferences, what was
+last shown, the basket id, the page, and the conversation so far (words only -
+attachments are stripped, and you already have those from each reply).
+
+It runs about **1.5KB after six messages** and is capped at forty.
+
+For voice, the body is the recording, so send the same JSON in an
+`x-caddie-state` header instead. Unparseable state is ignored rather than
+refused - a spoken question gets an answer, it just starts fresh.
+
+Omit it on the first message of a conversation. If you never send it, the
+server falls back to remembering the session itself for two hours, keyed on
+`sessionId` - which works for local development and breaks the moment there is
+more than one server.
+
 ### Telling the Caddie which page they are on
 
 `context` is optional and the server now uses it, so a customer on a product

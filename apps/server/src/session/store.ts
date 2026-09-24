@@ -1,4 +1,4 @@
-import type { CaddieMessage, PageContext, SizeInput } from '@caddie/shared';
+import type { CaddieMessage, CaddieState } from '@caddie/shared';
 import { redisEnabled } from '../lib/redis.js';
 import { RedisSessionStore } from './redisStore.js';
 
@@ -10,42 +10,29 @@ import { RedisSessionStore } from './redisStore.js';
  * here so we can drop in Redis for the pilot without touching callers.
  */
 
-export interface CaddieSession {
+/**
+ * One conversation, as the server works with it during a turn.
+ *
+ * The remembered part is `CaddieState`, which is the contract the client holds
+ * and resends - defined once in @caddie/shared so the two cannot drift. The
+ * three fields here are the server's own bookkeeping and are not sent back.
+ */
+export interface CaddieSession extends CaddieState {
   id: string;
   createdAt: number;
   updatedAt: number;
-  /** Shopify cart id, once the customer adds anything. */
-  cartId?: string;
-  /** Everything we have learned about fit. */
-  sizeProfile: SizeInput;
-  /**
-   * Last thing we showed, so "that one" and "cheaper" resolve.
-   *
-   * Titles are kept alongside the ids on purpose: the model is told what is on
-   * screen, and a bare list of ids leaves it guessing which one the customer
-   * means by "the shorts".
-   */
-  lastShown?: {
-    kind: 'products' | 'pack' | 'outfit';
-    items: Array<{ id: string; title: string }>;
-    query?: string;
-    budgetAmount?: number;
-    colour?: string;
+}
+
+/** Just the remembered part, for handing back to the client. */
+export function stateOf(session: CaddieSession): CaddieState {
+  return {
+    sizeProfile: session.sizeProfile,
+    preferences: session.preferences,
+    messages: session.messages,
+    ...(session.lastShown ? { lastShown: session.lastShown } : {}),
+    ...(session.cartId ? { cartId: session.cartId } : {}),
+    ...(session.page ? { page: session.page } : {}),
   };
-  /**
-   * The storefront page the customer is on, from the last message that told
-   * us. Held on the session because voice carries no context of its own - a
-   * spoken "what size am I in this" arrives with nothing attached.
-   */
-  page?: PageContext;
-  preferences: {
-    colour?: string;
-    budgetAmount?: number;
-    currency?: string;
-    /** Which range they are browsing, inferred from product tags. */
-    audience?: 'men' | 'women';
-  };
-  messages: CaddieMessage[];
 }
 
 export interface SessionStore {
@@ -63,6 +50,15 @@ export interface SessionStore {
    * over Redis they are copies and the last write won.
    */
   append(id: string, messages: CaddieMessage[]): Promise<void>;
+  /**
+   * Seeds a session from state the client sent back.
+   *
+   * This is what makes the backend stateless: a request can land on a server
+   * that has never seen this customer, and the state it carries is enough to
+   * carry on. The store is then a scratchpad for the length of one turn
+   * rather than the place the conversation lives.
+   */
+  restore(id: string, state: CaddieState): Promise<CaddieSession>;
 }
 
 const TTL_MS = 1000 * 60 * 60 * 2; // 2 hours of idle, then the session is gone.
@@ -156,6 +152,16 @@ export class MemorySessionStore implements SessionStore {
     const session = await this.getOrCreate(id);
     session.messages.push(...messages);
     await this.save(session);
+  }
+
+  async restore(id: string, state: CaddieState): Promise<CaddieSession> {
+    const session = await this.getOrCreate(id);
+    // Replaced, not merged: the client's copy is the conversation now, and
+    // merging would resurrect whatever this instance happened to remember
+    // from an older turn of the same session.
+    Object.assign(session, state);
+    await this.save(session);
+    return session;
   }
 
   private sweep(): void {
