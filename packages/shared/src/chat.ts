@@ -28,6 +28,9 @@ export type CaddieAttachment =
  * The theme passes it as data attributes, so it arrives by way of the browser.
  * Treat it as a pointer, never a fact: the ids say which product to look up,
  * and the Caddie still fetches it from Shopify before describing or pricing it.
+ * Where the customer is on the storefront when they talk to the Caddie. The
+ * theme provides it (see apps/widget/src/lib/context.ts), so the Caddie can
+ * answer "what size in this?" without asking which product.
  */
 export interface PageContext {
   pageType: 'product' | 'collection' | 'cart' | 'other';
@@ -43,6 +46,7 @@ export interface ChatRequest {
   sessionId: string;
   text: string;
   /** Where the customer is standing in the shop, if the theme tells us. */
+  /** Optional. The server ignores it until the prompt makes use of it. */
   context?: PageContext;
 }
 

@@ -1,4 +1,4 @@
-import type { CaddieAttachment, CaddieMessage } from '@caddie/shared';
+import type { CaddieAttachment, CaddieMessage, ChatRequest, PageContext } from '@caddie/shared';
 
 const BASE = (import.meta.env.VITE_CADDIE_API_URL ?? 'http://localhost:8787').replace(/\/$/, '');
 
@@ -8,12 +8,7 @@ export class ApiError extends Error {
   }
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+async function unwrap<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     throw new ApiError(detail?.detail ?? `Request failed (${res.status})`, res.status);
@@ -21,16 +16,55 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function sendMessage(sessionId: string, text: string) {
-  return post<{ sessionId: string; message: CaddieMessage }>('/api/chat', { sessionId, text });
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return unwrap<T>(res);
+}
+
+export function sendMessage(sessionId: string, text: string, context?: PageContext) {
+  const body: ChatRequest = { sessionId, text, ...(context ? { context } : {}) };
+  return post<{ sessionId: string; message: CaddieMessage }>('/api/chat', body);
 }
 
 /** Runs a tool directly. Useful while building UI before the AI understands the phrasing. */
+export interface ToolResponse {
+  sessionId: string;
+  speech: string;
+  attachment?: CaddieAttachment;
+}
+
 export function runTool(sessionId: string, name: string, args: Record<string, unknown>) {
-  return post<{ sessionId: string; speech: string; attachment?: CaddieAttachment }>(`/api/tools/${name}`, {
+  return post<ToolResponse>(`/api/tools/${name}`, {
     sessionId,
     args,
   });
+}
+
+export interface VoiceResponse {
+  sessionId: string;
+  /** What the customer actually said, as the server heard it. */
+  transcript: string;
+  message: CaddieMessage;
+}
+
+/**
+ * Sends one recorded clip. The body is the audio itself - no form wrapper -
+ * and the server transcribes it and answers in the same round trip.
+ */
+export function sendVoice(sessionId: string, clip: Blob) {
+  // Browsers report types like "audio/webm;codecs=opus"; the server wants the
+  // plain type it can map to a file extension for transcription.
+  const contentType = (clip.type || 'audio/webm').split(';')[0] as string;
+
+  return fetch(`${BASE}/api/voice?sessionId=${encodeURIComponent(sessionId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': contentType },
+    body: clip,
+  }).then((res) => unwrap<VoiceResponse>(res));
 }
 
 export interface CaddieEvent {
