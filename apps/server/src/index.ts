@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { startCatalogueSync, stopCatalogueSync, syncCatalogue } from './catalog/sync.js';
+import { verifyEnvironment } from './startupCheck.js';
 import { env } from './env.js';
 import { CaddieError } from './lib/errors.js';
 import { log } from './lib/logger.js';
@@ -99,6 +100,23 @@ if (isEntrypoint) {
    * mirror exists to avoid. Better to start a few seconds later.
    */
   const boot = async () => {
+    /*
+     * Before anything else, and fatal on purpose.
+     *
+     * A box with half its environment missing should fail here with the
+     * variable named, not on a customer's first message. It has to exit
+     * rather than throw: the unhandledRejection handler logs and survives,
+     * which is right for one bad request and wrong for a bad deploy - the
+     * orchestrator needs a non-zero exit to know the release failed instead
+     * of leaving a half-alive instance in the load balancer.
+     */
+    try {
+      verifyEnvironment();
+    } catch (err) {
+      log.error('env.invalid', { err: err instanceof Error ? err.message : String(err) });
+      process.exit(1);
+    }
+
     try {
       const state = await syncCatalogue();
       log.info('catalogue.ready', { products: state.count });

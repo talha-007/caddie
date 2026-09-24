@@ -13,7 +13,8 @@
     "dev:widget": "npm run dev --workspace=@caddie/widget",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "start": "npm run start --workspace=@caddie/server"
   },
   "engines": {
     "node": ">=20"
