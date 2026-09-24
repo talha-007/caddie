@@ -222,7 +222,24 @@ export async function screen(text: string, conversation: Conversation | boolean)
     if (verdict.startsWith('abuse')) {
       return { allow: false, reason: 'abuse', reply: 'I will leave that there. Can I help you find something?' };
     }
+    /*
+     * Off-topic is a first-message judgement, not a running one.
+     *
+     * The guard exists to stop people using a retailer's assistant as a free
+     * chatbot. Someone four turns into buying an outfit is not that, whatever
+     * their next message looks like - and it can look like anything, because
+     * voice mangles it. "Captains Midlayer is missing" reached us as "Symptoms
+     * a bit layer is missing", the classifier read it as nonsense, and a
+     * customer mid-purchase was told "I only help with Druids kit".
+     *
+     * Abuse and injection still stop a conversation at any point. Being hard
+     * to understand does not.
+     */
     if (verdict.startsWith('off')) {
+      if (hasHistory) {
+        log.info('guard.off_topic_allowed', { reason: 'mid-conversation' });
+        return { allow: true };
+      }
       return { allow: false, reason: 'off_topic', reply: DECLINE };
     }
     return { allow: true };

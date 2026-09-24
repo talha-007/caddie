@@ -12,7 +12,6 @@ size, builds a pack or an outfit, and fills a real Shopify basket.
 | --- | --- | --- |
 | `apps/server` | Talha | AI, Vapi, Shopify, recommendations, cart |
 | `apps/widget` | Amir | The storefront widget |
-| `apps/caddie-ui` | Talha | A second, plainer UI that keeps the backend unblocked |
 | `packages/shared` | both | The contract. Change it here first, then tell the other person. |
 
 **Work in your own app.** If a change on one side forces a change on the other,
@@ -24,7 +23,7 @@ say so rather than editing across the line.
 npm install
 cp .env.example .env                    # SHOPIFY_STORE_DOMAIN at minimum
 npm run dev:server                      # :8787
-npm run dev --workspace=@caddie/ui      # :5174  (or @caddie/widget on :5173)
+npm run dev --workspace=@caddie/widget  # :5173
 ```
 
 `GET /health` says which model is answering, whether voice is on, and whether
@@ -101,6 +100,51 @@ returns the pack's Shopify price as `total` and the pieces as `items`; adding
 the items up quotes a different number to the one on the product page. Packs
 are products, so `isPack` in `src/recommend/packs.ts` keeps them out of
 garment selection - otherwise a pack ends up inside a pack, or worn as a top.
+
+**A product on the Online Store is not necessarily buyable.** The Storefront
+API, which the basket runs on, reads its own publication. Seed a product and
+publish it with REST `published_scope: 'web'` and it is searchable, renders
+fine, and fails at the basket with *"The merchandise with id ... does not
+exist"* - the one error that looks like a bug in our code and is not. The seed
+scripts publish to the headless publication as well; if you add products any
+other way, check `resourcePublications` before assuming the cart is broken.
+
+**A price is per variant, not per product.** `product.price` is Shopify's
+`minVariantPrice`. Adding those up gave a pack total a customer buying at 2XL
+could not check out at, and let garments past a budget filter they could not
+afford. Everything that prices a recommendation goes through
+`src/recommend/pricing.ts`, which uses the variant for the size being bought
+and marks the figure inexact when the variant is not pinned yet - and the
+Caddie then says "that is a starting price" rather than quoting it as settled.
+
+**Push to talk loses words in three places.** `getUserMedia` on the button
+press means the first word goes into a device that has not started - keep the
+stream open between turns instead. `autoGainControl: false` gives a truer
+level reading and a worse recording, so leave it on. And stopping the recorder
+on the release takes the tail of the last word with it, so keep going for
+about 200ms. All three, and the two that follow from keeping the microphone
+open, are written up in `docs/widget-update-prompt.md` - they were found in a
+test UI that no longer exists, and the widget has not had them applied yet.
+
+**Never send silence to the transcriber.** Given a clip with no speech in it,
+a transcription model does not return nothing - it invents, out of whatever
+vocabulary the prompt gave it. Ours listed garments and sizes, and a customer
+who tapped the mic and said nothing had "I need a medium polo, a large
+midlayer, and an extra-large gilet" appear as their own message. The prompt in
+`src/ai/transcribe.ts` is now the brand name and nothing else; do not put
+garments or sizes back into it. Short clips are refused and a transcript
+claiming more words than the clip could hold is dropped - but the real guard
+is in the browser, which knows whether the microphone heard anything at all.
+Any UI that records audio needs that check.
+
+**Cart writes must not run alongside each other.** The model issues one
+`add_to_cart` per garment, and the tool batch used to run in parallel - so
+four adds all read an empty `session.cartId`, all four opened a *separate*
+basket, and the customer was told four items had gone in at £100 while seeing
+one at £58. `writesToCart` in `src/ai/openai.ts` keeps those calls sequential,
+each re-reading the session so the second add finds the first one's basket.
+Searches still run together. Add a third cart-writing tool and name it there,
+or `test/cartOrder.test.ts` will fail.
 
 **Outfit slots can be missing.** If nothing in stock fits a slot we leave it
 out rather than pad the outfit. Do not assume four pieces.
@@ -266,30 +310,17 @@ The things that only bite at scale, and what handles them.
 Set `REDIS_URL` and run as many as you like. Without it everything falls back
 to this process's memory, which is correct for one instance and for local work.
 
-**The conversation is not one of them.** The client holds it and sends it back
-as `state` on every request, so a message can land on an instance that has
-never seen that customer and it still knows their size, their budget and their
-basket. That is what keeps the backend stateless, and it is why ~100k daily
-sessions need no shared session store at all. The server still keeps a
-short-lived copy for the length of a turn, because the model's tools write to
-it as they run, but nothing reads it back on the next request.
-
-Two things still need sharing, and the second is the one people miss:
+Four things need sharing, and only the first is obvious:
 
 | | Why it breaks otherwise |
 | --- | --- |
+| **Sessions** | The next message can land on another instance. The customer loses their size, their budget and their basket mid-conversation. |
 | **Rate limits** | Per-instance counters mean the real limit is the limit times the size of the fleet. |
 | **The event stream** | An SSE connection lives on the instance that accepted it, but the message producing a card may be handled by another. The card is published into the wrong process and never reaches the screen - with nothing in the logs to say so. |
-| **Catalogue changes** | Shopify posts a webhook to one instance. The others serve the old price until their own delta pull - a window of at most one minute, so this one is survivable without Redis if you accept that. |
+| **Catalogue changes** | Shopify posts a webhook to one instance. The others serve the old price until their own delta pull, so two customers can be quoted differently for the same minute. |
 
 The mirror itself is fine duplicated: each instance holds its own copy and they
 are kept in step by the change channel above.
-
-**State the client sends replaces, it does not merge.** Whatever an instance
-still holds for that session is a leftover from an earlier turn it happened to
-serve; merging would resurrect a budget or a colour the customer has moved on
-from. And the state handed back is read *after* the turn, never the snapshot
-taken at the start - the tools have been writing to it throughout.
 
 **`append`, not `save`, for conversation history.** A route reads the session,
 the model's tools write to it during the turn, and saving the snapshot read at
