@@ -1598,6 +1598,12 @@
   background: transparent;
   color: var(--caddie-accent-fg);
   isolation: isolate;
+  /* A hold is a hold: no scroll, no text selection, no long-press menu. Each
+     of those cancels the pointer, which used to cut the clip off mid-word. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .caddie-voiceorb__core {

@@ -107,8 +107,7 @@ export function Composer({ voice, busy, onSend, placeholder = 'Ask me anythingâ€
             style={{ '--caddie-level': level } as CSSProperties}
             onPointerDown={down}
             onPointerUp={up}
-            onPointerLeave={up}
-            onPointerCancel={() => voice.cancel()}
+            onPointerCancel={up}
             onKeyDown={orbKeys}
             disabled={!voice.supported || voice.status === 'sending'}
             aria-pressed={recording}

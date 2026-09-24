@@ -1,4 +1,4 @@
-import { useRef, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, type CSSProperties, type PointerEvent } from 'react';
 import type { VoiceState } from '../lib/useVoice.js';
 import { CloseIcon, MicIcon, StopIcon } from './icons.js';
 
@@ -47,27 +47,92 @@ export function orbHint(label: string, recording: boolean): string {
   return recording ? `${label}. Tap to send, or hold and release.` : `${label}. Hold to talk, or tap to start.`;
 }
 
-/** The press behaviour every orb shares - identical to the old mic button. */
+/**
+ * The press behaviour every orb shares.
+ *
+ * Two gestures, one control, the way a messaging app does it:
+ *
+ *   tap        starts recording and leaves it running; the next tap sends
+ *   hold       records while held and sends on release
+ *
+ * The pointer is captured on the way down, so a finger that slides off the orb
+ * - or an orb that moves because the panel relaid out the moment recording
+ * started - keeps the same gesture. Before capture, that slide fired
+ * pointerleave, which the orb read as a release and used to cut the clip off
+ * mid-sentence and send it.
+ *
+ * pointercancel is treated as a release rather than a discard. The browser
+ * cancels the pointer for things as ordinary as a scroll, and throwing the
+ * clip away there lost recordings people had already finished speaking.
+ */
 export function usePress(voice: VoiceState) {
-  const pressedAt = useRef(0);
+  /** The live press: which pointer, when it started, and whether it opened the mic. */
+  const press = useRef<{ id: number; at: number; opened: boolean } | null>(null);
+  const stopRef = useRef(voice.stop);
+  stopRef.current = voice.stop;
   const recording = voice.status === 'recording' || voice.status === 'starting';
 
-  const down = () => {
+  /**
+   * The release is watched on the window, not only on the orb. A pointer that
+   * has been captured, retargeted or lost to another element still reports its
+   * release here, and a press that never hears its release leaves the mic
+   * running with no way to end the clip.
+   */
+  const watch = useRef<((event: globalThis.PointerEvent) => void) | null>(null);
+
+  const settle = useCallback((pointerId: number) => {
+    const current = press.current;
+    if (!current || current.id !== pointerId) return;
+    press.current = null;
+    if (watch.current) {
+      window.removeEventListener('pointerup', watch.current);
+      window.removeEventListener('pointercancel', watch.current);
+      watch.current = null;
+    }
+    if (!current.opened) {
+      // A press on a clip that was already running is the tap that sends it.
+      stopRef.current();
+      return;
+    }
+    // This press opened the mic: only a real hold sends on release. A tap
+    // leaves it listening until they tap again.
+    if (Date.now() - current.at >= HOLD_MS) stopRef.current();
+  }, []);
+
+  // A press in flight when the panel closes must not outlive its listeners.
+  useEffect(
+    () => () => {
+      if (!watch.current) return;
+      window.removeEventListener('pointerup', watch.current);
+      window.removeEventListener('pointercancel', watch.current);
+      watch.current = null;
+    },
+    [],
+  );
+
+  const down = (event: PointerEvent<HTMLButtonElement>) => {
     if (voice.status === 'sending') return;
-    if (recording) return;
-    pressedAt.current = Date.now();
-    void voice.start();
+    if (press.current) return; // a second finger is not a second gesture
+    // Keep every later event for this pointer on the orb, wherever it travels.
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Capture is a nicety; the window listener below is the real guarantee.
+    }
+    press.current = { id: event.pointerId, at: Date.now(), opened: !recording };
+    const handler = (e: globalThis.PointerEvent) => settle(e.pointerId);
+    watch.current = handler;
+    window.addEventListener('pointerup', handler);
+    window.addEventListener('pointercancel', handler);
+    if (!recording) void voice.start();
   };
 
-  const up = () => {
-    if (!recording) return;
-    if (Date.now() - pressedAt.current < HOLD_MS) return; // tapped: stay recording
-    voice.stop();
-  };
+  const up = (event: PointerEvent<HTMLButtonElement>) => settle(event.pointerId);
 
-  const onKeyDown = (event: { key: string; preventDefault: () => void }) => {
+  const onKeyDown = (event: { key: string; repeat?: boolean; preventDefault: () => void }) => {
     if (event.key !== ' ' && event.key !== 'Enter') return;
     event.preventDefault();
+    if (event.repeat) return; // held key: one toggle, not fifty
     if (recording) voice.stop();
     else void voice.start();
   };
@@ -139,8 +204,7 @@ export function VoiceOrb({ voice, busy }: OrbProps) {
         style={{ '--caddie-level': level } as CSSProperties}
         onPointerDown={down}
         onPointerUp={up}
-        onPointerLeave={up}
-        onPointerCancel={() => voice.cancel()}
+        onPointerCancel={up}
         onKeyDown={onKeyDown}
         disabled={!voice.supported || voice.status === 'sending'}
         aria-pressed={recording}

@@ -115,6 +115,26 @@ const INTROS: Record<Journey, string> = {
 
 /* ---------------- hook ---------------- */
 
+/**
+ * The basket is a state view, not a remark: there is only ever one of it in
+ * the thread, and it belongs at the bottom showing what is in there now.
+ *
+ * Adding two garments is two `add_to_cart` calls and each one answers with a
+ * cart card, so the customer watched the basket appear holding one item and
+ * then a second basket arrive below it holding two - the same basket twice,
+ * which reads as if something had been added twice. Only the newest card
+ * survives; where an older one carried words of its own, the words stay and
+ * only the card goes.
+ */
+function dropOldCarts(messages: ThreadMessage[], incoming: CaddieAttachment | undefined): ThreadMessage[] {
+  if (incoming?.kind !== 'cart') return messages;
+  return messages.flatMap((entry) => {
+    if (entry.attachment?.kind !== 'cart') return [entry];
+    const { attachment: _replaced, ...rest } = entry;
+    return rest.text ? [rest as ThreadMessage] : [];
+  });
+}
+
 export function useCaddie(page: PageContext): CaddieState {
   const sessionId = useSessionId();
 
@@ -132,6 +152,12 @@ export function useCaddie(page: PageContext): CaddieState {
   const silentProducts = useRef(new Set<string>());
   /** While > 0, cart cards only update the basket, they do not post to the thread. */
   const quietCart = useRef(0);
+  /**
+   * A basket that arrived mid-turn. The model adds one garment per call, so
+   * "add all three" sends three cart cards; the thread gets the finished
+   * basket once, when the turn is over.
+   */
+  const heldCart = useRef<Cart | null>(null);
 
   const updateCart = useCallback((next: Cart) => {
     setCart(next);
@@ -151,7 +177,11 @@ export function useCaddie(page: PageContext): CaddieState {
   /** Post a Caddie turn to the thread, unless the same card was shown moments ago. */
   const deliver = useCallback(
     (text: string, attachment?: CaddieAttachment, base?: CaddieMessage) => {
-      if (attachment?.kind === 'cart') updateCart(attachment.cart);
+      if (attachment?.kind === 'cart') {
+        updateCart(attachment.cart);
+        // This card is the basket now, so there is nothing left to flush.
+        heldCart.current = null;
+      }
       if (attachment?.kind === 'size') setSize(attachment.recommendation);
       if (attachment?.kind === 'products') remember(attachment.products);
 
@@ -176,7 +206,7 @@ export function useCaddie(page: PageContext): CaddieState {
 
       const next: ThreadMessage = base ? { ...base } : message('assistant', text, attachment ? { attachment } : {});
       if (signature) recent.current.push({ signature, at: now, id: next.id });
-      setMessages((prev) => [...prev, next]);
+      setMessages((prev) => [...dropOldCarts(prev, attachment), next]);
     },
     [remember, updateCart],
   );
@@ -195,8 +225,11 @@ export function useCaddie(page: PageContext): CaddieState {
             return;
           }
         }
-        if (attachment.kind === 'cart' && quietCart.current > 0) {
+        if (attachment.kind === 'cart' && (quietCart.current > 0 || busyRef.current)) {
+          // Either the widget is doing the adding, or the model is mid-turn and
+          // more garments are still to come. Keep the basket current; show it once.
           updateCart(attachment.cart);
+          if (quietCart.current === 0) heldCart.current = attachment.cart;
           return;
         }
         deliver('', attachment);
@@ -222,8 +255,12 @@ export function useCaddie(page: PageContext): CaddieState {
       busyRef.current = false;
       setBusy(false);
       setBusyJourney(null);
+      // Every add has landed: post the finished basket, if the reply did not.
+      const held = heldCart.current;
+      heldCart.current = null;
+      if (held) deliver('', { kind: 'cart', cart: held });
     }
-  }, []);
+  }, [deliver]);
 
   const send = useCallback(
     async (text: string) => {
