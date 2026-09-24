@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CaddieAttachment, CaddieMessage } from '@caddie/shared';
+import type { CaddieAttachment, CaddieMessage, CaddieState } from '@caddie/shared';
 import { ApiError, openEventStream, runTool, sendMessage, sendVoice } from './api.js';
 
 /** One session per tab, so a reload does not start a new customer. */
@@ -29,7 +29,7 @@ function message(role: CaddieMessage['role'], text: string, attachment?: CaddieA
   };
 }
 
-export interface CaddieState {
+export interface Caddie {
   sessionId: string;
   messages: CaddieMessage[];
   /** The latest structured result - what the main panel renders. */
@@ -44,8 +44,21 @@ export interface CaddieState {
   clearError: () => void;
 }
 
-export function useCaddie(): CaddieState {
+export function useCaddie(): Caddie {
   const sessionId = useSessionId();
+  /**
+   * The conversation, as the server handed it back.
+   *
+   * The backend keeps nothing between requests, so this is where the customer
+   * actually lives: their size, their budget, what is on screen and the
+   * basket they have open. Every call sends it and every reply replaces it.
+   *
+   * A ref rather than state on purpose. Nothing renders from it - it is
+   * opaque - and a re-render between a request going out and its reply coming
+   * back would hand the next call a stale copy.
+   */
+  const state = useRef<CaddieState | undefined>(undefined);
+
   const [messages, setMessages] = useState<CaddieMessage[]>([]);
   const [attachment, setAttachment] = useState<CaddieAttachment | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,7 +94,8 @@ export function useCaddie(): CaddieState {
       setMessages((prev) => [...prev, message('user', trimmed)]);
 
       try {
-        const reply = await sendMessage(sessionId, trimmed);
+        const reply = await sendMessage(sessionId, trimmed, state.current);
+        state.current = reply.state;
         seen.current.add(reply.message.createdAt);
         setMessages((prev) => [...prev, reply.message]);
         if (reply.message.attachment) setAttachment(reply.message.attachment);
@@ -102,7 +116,8 @@ export function useCaddie(): CaddieState {
       setError(null);
 
       try {
-        const reply = await sendVoice(sessionId, audio);
+        const reply = await sendVoice(sessionId, audio, state.current);
+        state.current = reply.state;
         seen.current.add(reply.message.createdAt);
         // Show what we heard, then the answer. Without the transcript nobody
         // can tell a bad answer from a bad recording.
@@ -132,7 +147,11 @@ export function useCaddie(): CaddieState {
       setBusy(true);
       setError(null);
       try {
-        const result = await runTool(sessionId, name, args);
+        const result = await runTool(sessionId, name, args, state.current);
+        // Matters as much here as on chat: add_to_cart writes the basket id
+        // into the state, and without keeping it the next add opens a second
+        // basket and the first item disappears.
+        state.current = result.state;
         if (result.attachment) setAttachment(result.attachment);
         if (result.speech) setMessages((prev) => [...prev, message('assistant', result.speech)]);
       } catch (err) {

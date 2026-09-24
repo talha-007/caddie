@@ -1,14 +1,17 @@
-import type { CaddieAttachment, CaddieMessage } from '@caddie/shared';
+import type { CaddieAttachment, CaddieMessage, CaddieState } from '@caddie/shared';
 
 /**
  * Everything this app knows about the backend.
  *
- * Shapes are documented in docs/API.md. Two rules worth repeating here because
- * they are easy to get wrong in components:
+ * Shapes are documented in docs/API.md. Three rules worth repeating here
+ * because they are easy to get wrong in components:
  *
  *  - `message.text` is for reading. Every fact you display comes from
  *    `attachment`, never from parsing the text.
  *  - Money is already in major units: { amount: 42 } is £42.00, not 42p.
+ *  - The backend keeps nothing between requests. Every reply carries `state`;
+ *    hold it and send it straight back. It is opaque - never read it, never
+ *    reshape it, just hand it over.
  */
 
 const BASE = (import.meta.env.VITE_CADDIE_API_URL ?? 'http://localhost:8787').replace(/\/$/, '');
@@ -36,14 +39,28 @@ async function toError(res: Response): Promise<ApiError> {
   return new ApiError(body.detail ?? `Something went wrong (${res.status}).`, res.status, body.error);
 }
 
-export async function sendMessage(sessionId: string, text: string) {
+export async function sendMessage(sessionId: string, text: string, state?: CaddieState) {
   const res = await fetch(`${BASE}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, text }),
+    body: JSON.stringify({ sessionId, text, ...(state ? { state } : {}) }),
   });
   if (!res.ok) throw await toError(res);
-  return (await res.json()) as { sessionId: string; message: CaddieMessage };
+  return (await res.json()) as { sessionId: string; message: CaddieMessage; state: CaddieState };
+}
+
+/**
+ * The state, packed for an HTTP header.
+ *
+ * Base64 because the state carries what was said, and what the Caddie says is
+ * full of pound signs - a browser throws on a header value outside Latin-1,
+ * so the raw JSON would work until the first time a price came up.
+ */
+function packState(state: CaddieState): string {
+  const utf8 = new TextEncoder().encode(JSON.stringify(state));
+  let binary = '';
+  for (const byte of utf8) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 export interface VoiceReply {
@@ -51,13 +68,18 @@ export interface VoiceReply {
   /** What we heard. Always shown - a bad answer is often a bad transcript. */
   transcript: string;
   message: CaddieMessage;
+  state: CaddieState;
 }
 
-export async function sendVoice(sessionId: string, audio: Blob): Promise<VoiceReply> {
+export async function sendVoice(sessionId: string, audio: Blob, state?: CaddieState): Promise<VoiceReply> {
   const res = await fetch(`${BASE}/api/voice?sessionId=${encodeURIComponent(sessionId)}`, {
     method: 'POST',
-    // Raw body, not multipart. The server reads the blob straight off it.
-    headers: { 'Content-Type': audio.type || 'audio/webm' },
+    // Raw body, not multipart. The server reads the blob straight off it, so
+    // the state has to travel in a header rather than alongside it.
+    headers: {
+      'Content-Type': audio.type || 'audio/webm',
+      ...(state ? { 'x-caddie-state': packState(state) } : {}),
+    },
     body: audio,
   });
   if (!res.ok) {
@@ -71,14 +93,26 @@ export async function sendVoice(sessionId: string, audio: Blob): Promise<VoiceRe
 }
 
 /** Runs a tool with no AI in the way. Used for picking a size and adding it. */
-export async function runTool(sessionId: string, name: string, args: Record<string, unknown>) {
+export async function runTool(
+  sessionId: string,
+  name: string,
+  args: Record<string, unknown>,
+  state?: CaddieState,
+) {
   const res = await fetch(`${BASE}/api/tools/${name}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, args }),
+    // The state matters as much here as on chat: add_to_cart needs the basket
+    // the customer already has, and that id lives nowhere else.
+    body: JSON.stringify({ sessionId, args, ...(state ? { state } : {}) }),
   });
   if (!res.ok) throw await toError(res);
-  return (await res.json()) as { sessionId: string; speech: string; attachment?: CaddieAttachment };
+  return (await res.json()) as {
+    sessionId: string;
+    speech: string;
+    attachment?: CaddieAttachment;
+    state: CaddieState;
+  };
 }
 
 export interface CaddieEvent {

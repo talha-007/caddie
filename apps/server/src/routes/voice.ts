@@ -39,18 +39,25 @@ export const voiceRouter: Router = Router();
 /**
  * Reads conversation state out of the x-caddie-state header.
  *
- * Capped before it is parsed, because a header is the cheapest thing in the
+ * **Base64, not raw JSON.** The state carries what was said, and what the
+ * Caddie says is full of pound signs. A browser throws on a header value
+ * outside Latin-1, so raw JSON here would work in testing and then fail the
+ * first time a price was mentioned - which is every real conversation.
+ *
+ * Capped before it is decoded, because a header is the cheapest thing in the
  * world for a caller to make enormous. Anything that fails simply starts the
- * customer fresh - a spoken question deserves an answer more than it deserves
+ * customer fresh: a spoken question deserves an answer more than it deserves
  * a 400 about a header they have never heard of.
  */
-const MAX_STATE_HEADER = 64_000;
+const MAX_STATE_HEADER = 96_000;
 
 async function restoreFromHeader(sessionId: string, raw: string | undefined) {
   if (!raw || raw.length > MAX_STATE_HEADER) return sessions.getOrCreate(sessionId);
 
   try {
-    const parsed = stateSchema.safeParse(JSON.parse(raw));
+    // Plain JSON is accepted too, so a curl by hand is not a puzzle.
+    const text = raw.trimStart().startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8');
+    const parsed = stateSchema.safeParse(JSON.parse(text));
     if (!parsed.success) return sessions.getOrCreate(sessionId);
     return await sessions.restore(sessionId, parsed.data);
   } catch {

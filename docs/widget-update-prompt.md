@@ -75,11 +75,28 @@ Three places send it:
 | --- | --- |
 | `POST /api/chat` | `state` field in the JSON body |
 | `POST /api/tools/:name` | `state` field alongside `sessionId` and `args` |
-| `POST /api/voice` | `x-caddie-state` header, because the body is the recording |
+| `POST /api/voice` | `x-caddie-state` header, **base64 encoded** - see below |
 
 **The tools route matters as much as chat.** That is how your Add button
 reaches the basket, and the cart id lives in the state. Miss it there and every
 add opens a fresh basket — the customer watches their first item vanish.
+
+The voice header must be base64, not raw JSON:
+
+```ts
+function packState(state: CaddieState): string {
+  const utf8 = new TextEncoder().encode(JSON.stringify(state));
+  let binary = '';
+  for (const byte of utf8) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+```
+
+The state carries what was said, and what the Caddie says is full of pound
+signs. A browser throws `Cannot convert argument to a ByteString` on a header
+value outside Latin-1 - so raw JSON passes every test you write until someone
+mentions a price. `apps/caddie-ui/src/lib/api.ts` has this working if you want
+a reference.
 
 All three responses return an updated `state`. Always keep the newest one.
 
