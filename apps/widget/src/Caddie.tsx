@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Journey, Product } from '@caddie/shared';
+import { Composer } from './components/Composer.js';
 import { ContextBar, Header } from './components/Header.js';
 import { Home } from './components/Home.js';
 import { Launcher } from './components/Launcher.js';
@@ -7,7 +8,6 @@ import { BasketPanel } from './components/panels/BasketPanel.js';
 import { ShopProvider, type Shop } from './components/ShopContext.js';
 import { SuggestionChips } from './components/SuggestionChips.js';
 import { Thread } from './components/Thread.js';
-import { VoiceDock } from './components/VoiceOrb.js';
 import { runTool } from './lib/api.js';
 import type { WidgetContext } from './lib/context.js';
 import { onOpenRequest } from './lib/events.js';
@@ -222,7 +222,7 @@ export function Caddie({ context }: { context: WidgetContext }) {
             )}
           </div>
 
-          {screen === 'chat' && (!empty || caddie.error) ? (
+          {screen === 'chat' ? (
             <footer className="caddie-footer">
               {caddie.error ? (
                 <p className="caddie-notice caddie-notice--error" role="alert">
@@ -232,13 +232,10 @@ export function Caddie({ context }: { context: WidgetContext }) {
                   </button>
                 </p>
               ) : null}
-              {/* On the home screen the hero orb is the microphone; here it shrinks to a pill. */}
-              {!empty ? (
-                <>
-                  <SuggestionChips last={lastKind} disabled={caddie.busy} onPick={caddie.send} />
-                  <VoiceDock voice={voice} busy={caddie.busy} />
-                </>
-              ) : null}
+              {/* The home screen carries its own example phrases under the hero orb. */}
+              {!empty ? <SuggestionChips last={lastKind} disabled={caddie.busy} onPick={caddie.send} /> : null}
+              {/* Typing and talking share one bar: mic when the box is empty, Send once it is not. */}
+              <Composer voice={voice} busy={caddie.busy} onSend={caddie.send} />
             </footer>
           ) : null}
         </div>

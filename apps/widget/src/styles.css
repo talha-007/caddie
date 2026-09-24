@@ -2016,3 +2016,94 @@
   font-weight: 600;
   cursor: pointer;
 }
+
+/* ---------- Composer ---------- */
+/* Type or talk in one bar: the mic holds the right-hand slot until there are
+   words in the box, and Send takes it over for as long as they are there. */
+
+.caddie-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.caddie-composer__bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 6px 6px 14px;
+  border-radius: var(--caddie-radius-pill);
+  background: var(--caddie-glass);
+  border: 1px solid var(--caddie-glass-line);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--caddie-shadow-lift);
+}
+
+.caddie-composer__box {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Matches the mic, so a one-line message sits centred against the orb. */
+  min-height: var(--caddie-mic);
+  max-height: 96px;
+  padding: 11px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 16px; /* under 16px and iOS Safari zooms the page on focus */
+  line-height: 20px;
+  resize: none;
+  overflow-y: auto;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.caddie-composer__box:focus {
+  outline: none;
+}
+
+.caddie-composer__box::placeholder {
+  color: var(--caddie-muted);
+}
+
+.caddie-composer__box:disabled {
+  opacity: 0.6;
+}
+
+.caddie-composer__send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--caddie-mic);
+  height: var(--caddie-mic);
+  border: 0;
+  border-radius: 50%;
+  background: var(--caddie-accent);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 6px 16px var(--caddie-glow);
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.caddie-composer__send:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+
+.caddie-composer__send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Recording takes the row: the status line and waveform sit above the bar. */
+.caddie-composer__status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.caddie-composer .caddie-voice__takes {
+  flex: 1 1 auto;
+}

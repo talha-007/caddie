@@ -29,7 +29,7 @@ export function orbState(voice: VoiceState, busy: boolean): OrbState {
   return 'idle';
 }
 
-const STATUS: Record<OrbState, string> = {
+export const STATUS: Record<OrbState, string> = {
   idle: 'Tap to talk',
   // Says how to finish, now that no Send button does.
   listening: 'Listening… tap to send',
@@ -37,18 +37,18 @@ const STATUS: Record<OrbState, string> = {
   error: 'Tap to try again',
 };
 
-const UNSUPPORTED = 'Voice needs a newer browser';
+export const UNSUPPORTED = 'Voice needs a newer browser';
 
 /** A tap is a toggle; anything longer is hold-to-talk and sends on release. */
 const HOLD_MS = 600;
 
 /** Spoken label for the orb, which is now the only way to send a clip. */
-function orbHint(label: string, recording: boolean): string {
+export function orbHint(label: string, recording: boolean): string {
   return recording ? `${label}. Tap to send, or hold and release.` : `${label}. Hold to talk, or tap to start.`;
 }
 
 /** The press behaviour every orb shares - identical to the old mic button. */
-function usePress(voice: VoiceState) {
+export function usePress(voice: VoiceState) {
   const pressedAt = useRef(0);
   const recording = voice.status === 'recording' || voice.status === 'starting';
 
@@ -87,7 +87,7 @@ function clock(seconds: number): string {
  * style: release a hold, or tap the orb a second time. A separate Send gave
  * the same action two controls, and the one people reached for was the orb.
  */
-function Takes({ voice }: { voice: VoiceState }) {
+export function Takes({ voice }: { voice: VoiceState }) {
   if (voice.status !== 'recording') return null;
   return (
     <div className="caddie-voice__takes">
@@ -105,7 +105,7 @@ function Takes({ voice }: { voice: VoiceState }) {
 }
 
 /** The one place a microphone failure is explained, wherever the orb is. */
-function VoiceError({ voice }: { voice: VoiceState }) {
+export function VoiceError({ voice }: { voice: VoiceState }) {
   if (!voice.error) return null;
   return (
     <p className="caddie-notice caddie-notice--error" role="alert">
@@ -117,7 +117,7 @@ function VoiceError({ voice }: { voice: VoiceState }) {
   );
 }
 
-interface OrbProps {
+export interface OrbProps {
   voice: VoiceState;
   /** The Caddie is working on the last thing said: the orb shimmers. */
   busy: boolean;
@@ -189,58 +189,5 @@ export function Wave({ level }: { level: number }) {
         <path className="caddie-wave__line" d={path} />
       </svg>
     </span>
-  );
-}
-
-/**
- * The same orb, shrunk to a pill, so the customer can keep talking while a
- * size, pack, outfit or basket panel fills the screen.
- */
-export function VoiceDock({ voice, busy }: OrbProps) {
-  const { recording, down, up, onKeyDown } = usePress(voice);
-  const state = orbState(voice, busy);
-  const level = state === 'listening' ? Math.min(Math.max(voice.level, 0), 1) : 0;
-  const label = voice.supported ? STATUS[state] : UNSUPPORTED;
-
-  return (
-    <div className="caddie-dock">
-      <VoiceError voice={voice} />
-      {/*
-       * The label sits OUTSIDE the bar. Inside it, the pill's glass surface
-       * read as part of the button, so "Tap to talk" looked like a caption
-       * printed on the control rather than a status line above it.
-       */}
-      <div className="caddie-dock__text">
-        <span className="caddie-dock__status" role="status" aria-live="polite">
-          {label}
-        </span>
-        {recording ? <Wave level={level} /> : null}
-      </div>
-
-      <div className="caddie-dock__bar">
-        <button
-          type="button"
-          className={`caddie-voiceorb caddie-voiceorb--pill caddie-voiceorb--${state}`}
-          style={{ '--caddie-level': level } as CSSProperties}
-          onPointerDown={down}
-          onPointerUp={up}
-          onPointerLeave={up}
-          onPointerCancel={() => voice.cancel()}
-          onKeyDown={onKeyDown}
-          disabled={!voice.supported || voice.status === 'sending'}
-          aria-pressed={recording}
-          aria-label={voice.supported ? orbHint(label, recording) : UNSUPPORTED}
-        >
-          <span className="caddie-voiceorb__bloom" aria-hidden="true" />
-          <span className="caddie-voiceorb__ring" aria-hidden="true" />
-          <span className="caddie-voiceorb__core" aria-hidden="true">
-            <span className="caddie-voiceorb__shimmer" />
-          </span>
-          <span className="caddie-voiceorb__glyph">{recording ? <StopIcon size={18} /> : <MicIcon size={20} />}</span>
-        </button>
-
-        <Takes voice={voice} />
-      </div>
-    </div>
   );
 }
