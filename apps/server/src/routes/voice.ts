@@ -8,8 +8,7 @@ import { log } from '../lib/logger.js';
 import { consumeShared, LIMITS } from '../lib/rateLimit.js';
 import { clientKey } from '../lib/request.js';
 import { publish } from '../session/bus.js';
-import { sessions, stateOf } from '../session/store.js';
-import { stateSchema } from '../session/stateSchema.js';
+import { sessions } from '../session/store.js';
 import { clientHash } from '../usage/identity.js';
 import { recordMessage } from '../usage/store.js';
 
@@ -35,35 +34,6 @@ import { recordMessage } from '../usage/store.js';
  */
 
 export const voiceRouter: Router = Router();
-
-/**
- * Reads conversation state out of the x-caddie-state header.
- *
- * **Base64, not raw JSON.** The state carries what was said, and what the
- * Caddie says is full of pound signs. A browser throws on a header value
- * outside Latin-1, so raw JSON here would work in testing and then fail the
- * first time a price was mentioned - which is every real conversation.
- *
- * Capped before it is decoded, because a header is the cheapest thing in the
- * world for a caller to make enormous. Anything that fails simply starts the
- * customer fresh: a spoken question deserves an answer more than it deserves
- * a 400 about a header they have never heard of.
- */
-const MAX_STATE_HEADER = 96_000;
-
-async function restoreFromHeader(sessionId: string, raw: string | undefined) {
-  if (!raw || raw.length > MAX_STATE_HEADER) return sessions.getOrCreate(sessionId);
-
-  try {
-    // Plain JSON is accepted too, so a curl by hand is not a puzzle.
-    const text = raw.trimStart().startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8');
-    const parsed = stateSchema.safeParse(JSON.parse(text));
-    if (!parsed.success) return sessions.getOrCreate(sessionId);
-    return await sessions.restore(sessionId, parsed.data);
-  } catch {
-    return sessions.getOrCreate(sessionId);
-  }
-}
 
 voiceRouter.post(
   '/',
@@ -109,14 +79,7 @@ voiceRouter.post(
         });
       }
 
-      /*
-       * The body is the recording, so the state travels in a header.
-       *
-       * Unparseable or oversized state is ignored rather than refused: a
-       * customer who has just spoken should get an answer, and the worst case
-       * is a Caddie that has forgotten them - not one that rejects them.
-       */
-      const session = await restoreFromHeader(sessionId, req.get('x-caddie-state'));
+      const session = await sessions.getOrCreate(sessionId);
 
       const verdict = await screen(transcript, {
         hasHistory: session.messages.length > 0,
@@ -126,12 +89,7 @@ voiceRouter.post(
       });
       if (!verdict.allow) {
         log.info('voice.declined', { sessionId, reason: verdict.reason });
-        return res.json({
-          sessionId,
-          transcript,
-          message: assistantMessage(verdict.reply),
-          state: stateOf(session),
-        });
+        return res.json({ sessionId, transcript, message: assistantMessage(verdict.reply) });
       }
 
       const reply = await converse(sessionId, transcript, { client });
@@ -153,8 +111,7 @@ voiceRouter.post(
         publish({ type: 'attachment', sessionId, attachment: answer.attachment });
       }
 
-      const finished = await sessions.getOrCreate(sessionId);
-      return res.json({ sessionId, transcript, message: answer, state: stateOf(finished) });
+      return res.json({ sessionId, transcript, message: answer });
     } catch (err) {
       return next(err);
     }

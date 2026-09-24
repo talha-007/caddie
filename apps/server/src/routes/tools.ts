@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { publish } from '../session/bus.js';
-import { sessions, stateOf } from '../session/store.js';
-import { stateSchema } from '../session/stateSchema.js';
+import { sessions } from '../session/store.js';
 import { runTool, toolDefinitionsForVapi, tools } from '../tools/index.js';
 
 /**
@@ -27,31 +26,14 @@ toolsRouter.get('/', (_req, res) => {
 toolsRouter.post('/:name', async (req, res, next) => {
   try {
     const sessionId = (req.body?.sessionId as string) || req.get('x-caddie-session') || randomUUID();
-
-    /*
-     * State travels here too, and it has to.
-     *
-     * This is the route the widget adds to the basket through, and add_to_cart
-     * needs the cart id the customer already has. On a stateless backend that
-     * id only exists in the state the client sends - without it every add
-     * lands on an instance that has never seen them and opens a second
-     * basket, so the customer watches their first item disappear.
-     */
-    const state = stateSchema.safeParse(req.body?.state);
-    const session = state.success
-      ? await sessions.restore(sessionId, state.data)
-      : await sessions.getOrCreate(sessionId);
-
+    const session = await sessions.getOrCreate(sessionId);
     const args = req.body?.args ?? req.body ?? {};
 
     const result = await runTool(req.params.name, args, { session });
     if (result.attachment) {
       publish({ type: 'attachment', sessionId, attachment: result.attachment });
     }
-
-    // Read back after the tool ran: add_to_cart writes the new cart id here.
-    const finished = await sessions.getOrCreate(sessionId);
-    res.json({ sessionId, ...result, state: stateOf(finished) });
+    res.json({ sessionId, ...result });
   } catch (err) {
     next(err);
   }

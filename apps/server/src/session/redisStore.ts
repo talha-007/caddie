@@ -1,4 +1,4 @@
-import type { CaddieMessage, CaddieState } from '@caddie/shared';
+import type { CaddieMessage } from '@caddie/shared';
 import type { CaddieSession, SessionStore } from './store.js';
 import { log } from '../lib/logger.js';
 import { redis } from '../lib/redis.js';
@@ -83,13 +83,6 @@ export class RedisSessionStore implements SessionStore {
    * another what is on screen - so in practice this is fine, and the
    * alternative is a lock held across a Shopify call.
    */
-  async restore(id: string, state: CaddieState): Promise<CaddieSession> {
-    const session = await this.getOrCreate(id);
-    Object.assign(session, state);
-    await this.save(session);
-    return session;
-  }
-
   async patch(id: string, patch: Partial<Omit<CaddieSession, 'id'>>): Promise<CaddieSession> {
     const session = await this.getOrCreate(id);
     const sizeProfile = { ...session.sizeProfile, ...defined(patch.sizeProfile ?? {}) };
