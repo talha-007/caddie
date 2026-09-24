@@ -2107,3 +2107,99 @@
 .caddie-composer .caddie-voice__takes {
   flex: 1 1 auto;
 }
+
+/* ---------- Short screens ---------- */
+/*
+ * Measured on a 360x640 Android and an iPhone SE: the hero orb plus the
+ * composer left the journey buttons below the fold, so the panel opened on a
+ * microphone and nothing else. The orb shrinks rather than the journeys
+ * scrolling out of sight.
+ */
+
+@media (max-height: 740px) {
+  .caddie-root {
+    --caddie-orb: 88px;
+  }
+
+  .caddie-home {
+    gap: 16px;
+  }
+
+  .caddie-home__hero {
+    gap: 10px;
+  }
+
+  .caddie-home__title {
+    font-size: 21px;
+  }
+
+  .caddie-voice__status {
+    margin-top: 6px;
+  }
+
+  /* The composer's placeholder already invites typing; this line repeats it. */
+  .caddie-home .caddie-voice__hint,
+  /* Garnish, and it costs a whole journey card on a 640px screen. */
+  .caddie-marks,
+  /* The orb itself shows it is listening; the composer draws the live wave. */
+  .caddie-home .caddie-wave {
+    display: none;
+  }
+}
+
+/* Landscape, and the shortest phones. */
+@media (max-height: 520px) {
+  .caddie-root {
+    --caddie-orb: 68px;
+  }
+
+  .caddie-home__title {
+    font-size: 19px;
+  }
+
+  /*
+   * Landscape leaves about 200px of body, and the hero orb filled all of it -
+   * the journeys were unreachable and "Tap to talk" sat under the composer.
+   * The composer's microphone is the same control, and it is always on screen,
+   * so the hero stands down here and the journeys share one wide row.
+   */
+  .caddie-home .caddie-voice {
+    display: none;
+  }
+
+  .caddie-journeys {
+    flex-direction: row;
+  }
+
+  .caddie-journey {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+/*
+ * In the footer the examples scroll sideways on a phone. Wrapped, three
+ * phrases stacked into three rows and the footer took 255px of a 640px
+ * screen - more than the conversation above it.
+ */
+@media (max-width: 767px) {
+  .caddie-footer .caddie-trysay__list {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 16px;
+    padding: 0 2px; /* room for the focus ring on the first and last chip */
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .caddie-footer .caddie-trysay__list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .caddie-footer .caddie-trysay__item {
+    flex: none;
+    white-space: nowrap;
+    scroll-snap-align: start;
+  }
+}
