@@ -11,7 +11,7 @@ assistant that sits on the Druids Shopify storefront. I own the widget UI;
 Talha owns the backend. Read `CLAUDE.md` and `docs/API.md` before writing
 anything — `docs/API.md` is the full API reference with real captured payloads.
 
-**Build in `apps/widget`. Do not edit `apps/server` or `apps/caddie-ui`.** If
+**Build in `apps/widget`. Do not edit `apps/server`.** If
 you need something the API does not do, tell me and I will ask Talha, rather
 than changing the server yourself. `packages/shared` holds the types both sides
 import — import from it instead of redeclaring shapes, and tell me before
@@ -87,11 +87,9 @@ load and buttons below the fold do not show up in a typecheck. Measure the
 thing you changed — for instance, that a whole product card fits the scroll
 pane with its Add button visible, at 390px wide as well as on desktop.
 
-There is a second, plainer UI at `apps/caddie-ui` that already does all of this
-against the same API. **Read it when you are unsure what an endpoint returns or
-how a flow hangs together** — it is a reference, not a design to copy. The
-styling there is deliberately plain; yours is the one that has to look like
-Druids.
+The widget is the only UI now - a second, plainer one used to exist for
+testing the backend and has been removed, so anything you break here is
+broken for everyone.
 
-Start by reading `CLAUDE.md`, `docs/API.md`, and `apps/caddie-ui/src/lib/api.ts`,
+Start by reading `CLAUDE.md`, `docs/API.md` and `docs/widget-update-prompt.md`,
 then tell me what you plan to build first.
