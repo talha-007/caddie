@@ -12,10 +12,10 @@ person has seen it work, and no placeholder data is left in that flow.
 
 ### Day 1 - Foundations
 **Talha**
-- [ ] Set up Vapi, assistant created, keys in `.env`
-- [ ] Connect the AI (`npm run sync:assistant`, ngrok pointing at the webhook)
-- [ ] Backend running (`npm run dev:server`, `/health` green)
-- [ ] One simple AI tool working end to end
+- [ ] Set up Vapi, assistant created, keys in `.env` - **blocked, needs keys**
+- [x] Connect the AI - done as our own OpenAI tool-calling loop rather than via Vapi
+- [x] Backend running (`npm run dev:server`, `/health` green)
+- [x] One simple AI tool working end to end - eight of them
 
 **Amir**
 - [ ] Caddie widget running (`npm run dev:widget`)
@@ -27,8 +27,8 @@ person has seen it work, and no placeholder data is left in that flow.
 ### Day 2 - Live products
 **Talha**
 - [x] Shopify Storefront MCP connected (UCP endpoint) - `GET /health/shopify` returns the tool list and real products
-- [ ] Product search returning real Druids products
-- [ ] Product details and variants verified (option names, stock flags)
+- [x] Product search returning real Druids products - off the local mirror, not UCP
+- [x] Product details and variants verified (option names, stock flags)
 
 **Amir**
 - [ ] UI wired to real product results
@@ -98,9 +98,9 @@ person has seen it work, and no placeholder data is left in that flow.
 
 ### Day 5 - Ambassador pack
 **Talha**
-- [ ] Pack recommendation live
-- [ ] Budget, colour and size preferences respected
-- [ ] Real Shopify products only
+- [x] Pack recommendation live
+- [x] Budget, colour and size preferences respected
+- [x] Real Shopify products only
 
 **Amir**
 - [ ] Pack UI, multiple products together
@@ -115,9 +115,9 @@ person has seen it work, and no placeholder data is left in that flow.
 
 ### Day 6 - Outfit builder
 **Talha**
-- [ ] Outfit recommendation live
-- [ ] Matching on style, colour and budget
-- [ ] Real products per slot
+- [x] Outfit recommendation live
+- [x] Matching on style, colour and budget
+- [x] Real products per slot
 
 **Amir**
 - [ ] Outfit display, complete look
@@ -125,9 +125,9 @@ person has seen it work, and no placeholder data is left in that flow.
 
 ### Day 7 - Conversation memory
 **Talha**
-- [ ] Conversation details saved across turns
-- [ ] "Cheaper", "different colour", "another product" all work
-- [ ] Conversation still feels natural, not interrogative
+- [x] Conversation details saved across turns - Redis-backed, so it survives more than one instance
+- [x] "Cheaper", "different colour", "another product" all work
+- [x] Conversation still feels natural, not interrogative
 
 **Amir**
 - [ ] UI updates when a recommendation changes
@@ -135,9 +135,10 @@ person has seen it work, and no placeholder data is left in that flow.
 
 ### Day 8 - Basket and cart
 **Talha**
-- [ ] Shopify cart connected
-- [ ] Add, remove, change quantity
-- [ ] Variants checked before adding
+- [x] Shopify cart connected - on the Storefront API, which buyer traffic is not rate limited on
+- [x] Add, remove, change quantity - verified end to end against the real store
+- [x] Variants checked before adding
+- [x] Off UCP. Adding a second item no longer clears the first.
 
 **Amir**
 - [ ] Basket UI: size, colour, quantity, total
@@ -145,9 +146,10 @@ person has seen it work, and no placeholder data is left in that flow.
 
 ### Day 9 - Voice quality
 **Talha**
-- [ ] Voice conversations improved
-- [ ] Interruptions handled
-- [ ] Short replies work: "yes", "no", "show another"
+- [x] Voice in, chat out - the mic works today through transcription
+- [ ] Interruptions handled - **needs Vapi**
+- [ ] Spoken replies - **needs Vapi**
+- [x] Short replies work: "yes", "no", "show another"
 
 **Amir**
 - [ ] Voice UI polished

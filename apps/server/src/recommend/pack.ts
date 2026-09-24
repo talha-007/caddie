@@ -1,6 +1,9 @@
 import type { Money, PackInput, PackRecommendation, Product } from '@caddie/shared';
 import { searchProducts } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
+import { isPack } from './packs.js';
+import { priceFor, totalFor } from './pricing.js';
+import { stockedInSize } from './sizeWords.js';
 
 /**
  * Day 5 - Ambassador Pack.
@@ -10,6 +13,22 @@ import { storeCurrency } from '../shopify/money.js';
  */
 
 const DEFAULT_ITEM_COUNT = 3;
+
+/**
+ * What to search when the customer's own words find nothing.
+ *
+ * The catalogue index matches literal words, so "a pack of basic clothing"
+ * came back with nothing at all - no product has "basic" in its name - and the
+ * customer was told we had nothing under their budget when we had plenty. It
+ * was intermittent because it depended on which words the model picked out of
+ * the conversation: "golf kit" found six products, "basic clothing" none.
+ *
+ * A pack does not actually need the phrasing to match. It needs garments
+ * inside a budget, and the query is a refinement rather than a requirement.
+ * These are the Druids range as stocked, the same list the outfit slots in
+ * `outfit.ts` are built from - re-check both when the real store lands.
+ */
+const RANGE_TERMS = 'polo shirt tee hoodie midlayer gilet jacket shorts trousers';
 
 function matchesColour(product: Product, colour?: string): boolean {
   if (!colour) return true;
@@ -24,29 +43,31 @@ function matchesColour(product: Product, colour?: string): boolean {
 }
 
 function hasSize(product: Product, size?: string): boolean {
-  if (!size) return true;
-  const needle = size.trim().toLowerCase();
-  // A search result carries no variants, so we cannot rule it out yet.
-  if (product.variants.length === 0) return true;
-  return product.variants.some(
-    (variant) =>
-      variant.available &&
-      Object.values(variant.options).some((value) => value.toLowerCase() === needle),
-  );
+  return stockedInSize(product.variants, size);
 }
 
-function sum(products: Product[]): Money {
-  return {
-    amount: Number(products.reduce((total, p) => total + p.price.amount, 0).toFixed(2)),
-    currency: products[0]?.price.currency ?? storeCurrency(),
-  };
+/**
+ * Priced at the size the customer is actually buying, not at the cheapest
+ * variant. `product.price` is Shopify's minimum, and adding minimums up gave
+ * a total that could not be checked out at.
+ */
+function sum(products: Product[], size?: string): Money & { exact: boolean } {
+  return totalFor(products, size, storeCurrency());
 }
 
 /**
  * Greedy fill: take the best-ranked candidates that keep us inside budget,
  * then top up with the cheapest remaining ones if we are short on items.
  */
-function fillWithinBudget(candidates: Product[], itemCount: number, budget?: Money): Product[] {
+function fillWithinBudget(
+  candidates: Product[],
+  itemCount: number,
+  budget?: Money,
+  size?: string,
+): Product[] {
+  // What this customer pays, at their size where we know it.
+  const cost = (product: Product) => priceFor(product, size).amount;
+
   if (!budget) return candidates.slice(0, itemCount);
 
   const chosen: Product[] = [];
@@ -54,21 +75,21 @@ function fillWithinBudget(candidates: Product[], itemCount: number, budget?: Mon
 
   for (const product of candidates) {
     if (chosen.length >= itemCount) break;
-    if (spend + product.price.amount <= budget.amount) {
+    if (spend + cost(product) <= budget.amount) {
       chosen.push(product);
-      spend += product.price.amount;
+      spend += cost(product);
     }
   }
 
   if (chosen.length < itemCount) {
     const cheapestFirst = candidates
       .filter((c) => !chosen.includes(c))
-      .sort((a, b) => a.price.amount - b.price.amount);
+      .sort((a, b) => cost(a) - cost(b));
     for (const product of cheapestFirst) {
       if (chosen.length >= itemCount) break;
-      if (spend + product.price.amount <= budget.amount) {
+      if (spend + cost(product) <= budget.amount) {
         chosen.push(product);
-        spend += product.price.amount;
+        spend += cost(product);
       }
     }
   }
@@ -78,32 +99,59 @@ function fillWithinBudget(candidates: Product[], itemCount: number, budget?: Mon
 
 export async function recommendPack(input: PackInput): Promise<PackRecommendation> {
   const itemCount = input.itemCount ?? DEFAULT_ITEM_COUNT;
-  const query = [input.query, input.colour].filter(Boolean).join(' ');
 
-  const results = await searchProducts({
-    query,
-    limit: Math.max(itemCount * 4, 12),
-    // Nothing in the pack can cost more than the whole budget.
-    ...(input.budget ? { maxPrice: input.budget.amount, currency: input.budget.currency } : {}),
-  });
+  /*
+   * What they asked for first, the range second. Their own words are the more
+   * relevant answer when they match anything at all, so the fallback only runs
+   * when the first search could not fill the pack.
+   */
+  const queries = [
+    [input.query, input.colour].filter(Boolean).join(' '),
+    [input.colour, RANGE_TERMS].filter(Boolean).join(' '),
+  ]
+    .map((query) => query.trim())
+    .filter((query, index, all) => query && all.indexOf(query) === index);
 
-  const available = results.filter((p) => p.price.amount > 0);
-  const preferred = available.filter((p) => matchesColour(p, input.colour) && hasSize(p, input.size));
-  const candidates = preferred.length >= itemCount ? preferred : available;
+  let items: Product[] = [];
 
-  const items = fillWithinBudget(candidates, itemCount, input.budget);
-  const total = sum(items);
+  for (const query of queries) {
+    const results = await searchProducts({
+      query,
+      limit: Math.max(itemCount * 4, 12),
+      // Nothing in the pack can cost more than the whole budget.
+      ...(input.budget ? { maxPrice: input.budget.amount, currency: input.budget.currency } : {}),
+    });
+
+    // A pack is a product too, and must not end up inside another pack.
+    const available = results.filter((p) => p.price.amount > 0 && !isPack(p));
+    const preferred = available.filter((p) => matchesColour(p, input.colour) && hasSize(p, input.size));
+    const candidates = preferred.length >= itemCount ? preferred : available;
+
+    const filled = fillWithinBudget(candidates, itemCount, input.budget, input.size);
+    // Keep the best attempt, so a fallback that finds less cannot lose us one
+    // the customer's own wording already found.
+    if (filled.length > items.length) items = filled;
+    if (items.length >= itemCount) break;
+  }
+
+  const total = sum(items, input.size);
   const overBudget = Boolean(input.budget && total.amount > input.budget.amount);
 
   return {
     items,
-    total,
+    total: { amount: total.amount, currency: total.currency },
     overBudget,
-    reason: buildReason(items.length, itemCount, input, overBudget),
+    reason: buildReason(items.length, itemCount, input, overBudget, total.exact),
   };
 }
 
-function buildReason(found: number, wanted: number, input: PackInput, overBudget: boolean): string {
+function buildReason(
+  found: number,
+  wanted: number,
+  input: PackInput,
+  overBudget: boolean,
+  exact = true,
+): string {
   if (found === 0) {
     return input.budget
       ? `I could not find anything matching that under ${input.budget.amount} ${input.budget.currency}.`
@@ -114,6 +162,8 @@ function buildReason(found: number, wanted: number, input: PackInput, overBudget
   if (input.budget && !overBudget) bits.push(`inside your ${input.budget.amount} ${input.budget.currency} budget`);
   let reason = `${bits.join(' ')}.`;
   if (found < wanted) reason += ` I could only fit ${found} of the ${wanted} you asked for at that budget.`;
+  // Said out loud, because a total built from "from" prices is not a total.
+  if (!exact) reason += ' That is a starting price - the final one depends on the sizes chosen.';
   if (overBudget) reason += ' This comes in slightly over budget - say the word and I will swap something out.';
   return reason;
 }

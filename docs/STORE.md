@@ -35,6 +35,53 @@ completed. These were created through the Admin API:
 | TOUR BEANIE - BLACK | HEADWEAR | 22 | One Size |
 | PERFORMANCE SOCKS - WHITE | SOCKS | 16 | S/M, L/XL |
 
+### The packs
+
+Druids sells bundles at a fixed price, and the store had none, so
+`recommend_pack` could only ever answer "what is the Ambassador Pack" by
+putting three products together to a budget and calling that a pack.
+
+| Product | Type | Price | Contents |
+| --- | --- | --- | --- |
+| GOLF AMBASSADOR PACK | PACKS | 99 | jacket, midlayer, polo, trouser, belt or cap, socks |
+| RAINSUIT SPECIAL | PACKS | 99 | jacket, trousers, beanie |
+| TOUR BELT - BLACK | BELTS | 22 | the Ambassador Pack's fifth slot had only a beanie to fill it |
+
+Created by `scripts/seedPacks.mjs`. Contents and prices are the real ones from
+druids.com.
+
+**Druids sells eleven more bundles and they are deliberately absent.** Their
+prices come from a bundle app and are rendered in the browser, so they appear
+in no product feed, no `products.json`, no collection JSON and no page we can
+fetch. A pack the Caddie cannot price is a pack it must not offer.
+
+They are still *named*, in `UNSTOCKED_BUNDLES`. Without that the budget
+assembler answered "what is in the Prestige Pack" with three unrelated
+garments and the reply "the Prestige Pack includes three items and costs £92" -
+a pack that is not in the store, at a price that is not its own. Named, the
+Caddie says it cannot check that one.
+
+Their slot structures *are* known, from the collections behind each builder
+page on druids.com:
+
+| Bundle | Slots |
+| --- | --- |
+| Prestige Pack | polo, hoodie or sweater, golf joggers |
+| Any 2 Trousers / Shorts / Joggers | two of that garment |
+| Any 3 Polos | three polos |
+| Players Bundle | not yet established |
+
+So each needs only a price to become real: add it to `seedPacks.mjs` and
+`NAMED_PACKS` together, and drop it from `UNSTOCKED_BUNDLES`.
+
+The ladies and kids packs need more than a price - **the store holds no ladies
+or kids stock at all**, so they would have nothing to fill them.
+
+Packs carry `PACKS` as their product type and a `druids-pack` tag, and
+`isPack` in `src/recommend/packs.ts` keeps them out of garment selection.
+Without it the Ambassador Pack can be chosen as an item to put inside another
+pack, or as the top half of an outfit.
+
 Two deliberate choices in there:
 
 - **TOUR SHORT - NAVY in waist 40 is out of stock on purpose.** Day 8 requires

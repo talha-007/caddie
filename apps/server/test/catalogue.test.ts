@@ -114,3 +114,32 @@ describe('local search', () => {
     expect(searchLocal({ query: 'tour short' })).toHaveLength(0);
   });
 });
+
+/**
+ * A bare numeric id is not an edge case: a Shopify theme prints
+ * `{{ product.id }}` as a plain number into the widget's page context, and the
+ * model drops the prefix often enough that a customer asking "does this come
+ * in a large" was answered with "I hit a problem checking the sizes".
+ */
+describe('finding a product by whichever form of its id turns up', () => {
+  beforeEach(() => {
+    setCatalogueForTests([product('111', 'Vento Polo')]);
+  });
+
+  it('finds it by the full GID', () => {
+    expect(productById('gid://shopify/Product/111')?.title).toBe('Vento Polo');
+  });
+
+  it('finds it by the bare numeric id a theme would give us', () => {
+    expect(productById('111')?.title).toBe('Vento Polo');
+  });
+
+  it('does not read a variant id as the product with that number', () => {
+    expect(productById('gid://shopify/ProductVariant/111')).toBeNull();
+  });
+
+  it('returns nothing for an id we do not hold', () => {
+    expect(productById('222')).toBeNull();
+    expect(productById('not-an-id')).toBeNull();
+  });
+});

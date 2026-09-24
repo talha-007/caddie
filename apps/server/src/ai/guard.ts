@@ -1,6 +1,8 @@
 import { env } from '../env.js';
 import { fetchWithTimeout } from '../lib/http.js';
 import { log } from '../lib/logger.js';
+import { costOfTokens } from '../usage/pricing.js';
+import { record } from '../usage/store.js';
 
 /**
  * Decides whether a message is worth answering before we spend anything on it.
@@ -21,6 +23,30 @@ import { log } from '../lib/logger.js';
  */
 
 export type Verdict = { allow: true } | { allow: false; reply: string; reason: string };
+
+/**
+ * Records a decision the local rules made without calling anything.
+ *
+ * Only declines. A free *allow* is the common case - most messages - and
+ * writing one per message would double the size of the usage store to say
+ * "this cost nothing". A refusal is rare and worth being able to count.
+ */
+function recordLocalDecline(reason: string, sessionId?: string, client?: string): void {
+  record({
+    at: Date.now(),
+    sessionId: sessionId ?? 'unknown',
+    kind: 'guard',
+    model: 'local-rules',
+    promptTokens: 0,
+    cachedTokens: 0,
+    completionTokens: 0,
+    audioSeconds: 0,
+    costUsd: 0,
+    ms: 0,
+    outcome: reason,
+    ...(client ? { client } : {}),
+  });
+}
 
 /** What the Caddie says when it will not engage. Friendly, and a way back. */
 const DECLINE = 'I only help with Druids kit, I am afraid. Can I help you find something?';
@@ -84,17 +110,23 @@ export interface Conversation {
   hasHistory: boolean;
   /** The last thing the Caddie said, so a reply can be read as a reply. */
   lastAssistant?: string;
+  /** For the usage dashboard only. The screen itself does not read these. */
+  sessionId?: string;
+  client?: string;
 }
 
 export async function screen(text: string, conversation: Conversation | boolean): Promise<Verdict> {
   // A bare boolean is accepted because most callers only know whether
   // the conversation has started; the tests use that form throughout.
-  const { hasHistory, lastAssistant } =
-    typeof conversation === 'boolean' ? { hasHistory: conversation, lastAssistant: undefined } : conversation;
+  const { hasHistory, lastAssistant, sessionId, client } =
+    typeof conversation === 'boolean'
+      ? { hasHistory: conversation, lastAssistant: undefined, sessionId: undefined, client: undefined }
+      : conversation;
 
   const trimmed = text.trim();
 
   if (trimmed.length > MAX_LENGTH) {
+    recordLocalDecline('too_long', sessionId, client);
     return {
       allow: false,
       reason: 'too_long',
@@ -103,6 +135,7 @@ export async function screen(text: string, conversation: Conversation | boolean)
   }
 
   if (INJECTION.test(trimmed)) {
+    recordLocalDecline('injection', sessionId, client);
     return { allow: false, reason: 'injection', reply: DECLINE };
   }
 
@@ -126,6 +159,7 @@ export async function screen(text: string, conversation: Conversation | boolean)
   if (!env.openai.apiKey) return { allow: true };
 
   try {
+    const startedAt = Date.now();
     const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       // One word in, one word out: if it is slow, let the customer through
@@ -161,13 +195,51 @@ export async function screen(text: string, conversation: Conversation | boolean)
       return { allow: true };
     }
 
-    const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const body = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
     const verdict = body.choices?.[0]?.message?.content?.trim().toLowerCase() ?? 'shop';
+
+    const promptTokens = body.usage?.prompt_tokens ?? 0;
+    const completionTokens = body.usage?.completion_tokens ?? 0;
+    record({
+      at: Date.now(),
+      sessionId: sessionId ?? 'unknown',
+      kind: 'guard',
+      model: env.openai.guardModel,
+      promptTokens,
+      // The guard sends a fresh short prompt each time, so nothing caches.
+      cachedTokens: 0,
+      completionTokens,
+      audioSeconds: 0,
+      costUsd: costOfTokens(env.openai.guardModel, promptTokens, 0, completionTokens),
+      ms: Date.now() - startedAt,
+      outcome: verdict.startsWith('abuse') ? 'abuse' : verdict.startsWith('off') ? 'off_topic' : 'allow',
+      ...(client ? { client } : {}),
+    });
 
     if (verdict.startsWith('abuse')) {
       return { allow: false, reason: 'abuse', reply: 'I will leave that there. Can I help you find something?' };
     }
+    /*
+     * Off-topic is a first-message judgement, not a running one.
+     *
+     * The guard exists to stop people using a retailer's assistant as a free
+     * chatbot. Someone four turns into buying an outfit is not that, whatever
+     * their next message looks like - and it can look like anything, because
+     * voice mangles it. "Captains Midlayer is missing" reached us as "Symptoms
+     * a bit layer is missing", the classifier read it as nonsense, and a
+     * customer mid-purchase was told "I only help with Druids kit".
+     *
+     * Abuse and injection still stop a conversation at any point. Being hard
+     * to understand does not.
+     */
     if (verdict.startsWith('off')) {
+      if (hasHistory) {
+        log.info('guard.off_topic_allowed', { reason: 'mid-conversation' });
+        return { allow: true };
+      }
       return { allow: false, reason: 'off_topic', reply: DECLINE };
     }
     return { allow: true };

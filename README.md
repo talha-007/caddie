@@ -46,7 +46,6 @@ curl http://localhost:8787/health/shopify
 ```
 apps/server     Node + TypeScript. Vapi webhook, Shopify UCP client, recommendations. (Talha)
 apps/widget     React + Vite. The Caddie widget, embeddable in the Shopify theme.      (Amir)
-apps/caddie-ui  React + Vite. Our own working UI, so the backend is never blocked.     (Talha)
 packages/shared TypeScript types both sides import. The contract between us.
 ```
 

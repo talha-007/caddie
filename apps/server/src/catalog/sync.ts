@@ -38,6 +38,17 @@ import { redis, redisSubscriber } from '../lib/redis.js';
 
 const PAGE_SIZE = 50;
 
+/**
+ * How far pagination may run before we assume something is wrong.
+ *
+ * It is a guard against a pagination bug looping forever against a live API,
+ * not a statement about catalogue size - so it has to sit far above the real
+ * one. It was 50 pages, which is 2,500 products, and the live Druids store
+ * holds about 2,400 active: one ordinary month of new stock from silently
+ * losing the newest products with nothing in the logs.
+ */
+const MAX_PAGES = 400;
+
 const QUERY = `
 query Catalogue($cursor: String, $query: String) {
   products(first: ${PAGE_SIZE}, after: $cursor, query: $query) {
@@ -160,6 +171,8 @@ let byId = new Map<string, Product>();
 /** inventoryItemId -> productId, so an inventory webhook can find its product. */
 let byInventoryItem = new Map<string, string>();
 let lastSyncedAt = 0;
+/** Every successful check, whether or not it found anything. */
+let lastCheckedAt = 0;
 let lastDeltaAt = 0;
 let syncing: Promise<void> | null = null;
 
@@ -189,15 +202,33 @@ export function productForInventoryItem(inventoryItemId: string): string | null 
 
 export interface CatalogueState {
   count: number;
+  /** When the mirror last actually changed. */
   lastSyncedAt: number;
   ageSeconds: number;
+  /** When we last confirmed with Shopify that it is current. */
+  lastCheckedAt: number;
+  checkedSecondsAgo: number;
 }
 
+/**
+ * Two different ages, because they answer two different questions.
+ *
+ * `ageSeconds` is how long since anything in the catalogue moved, and on a
+ * quiet store it is supposed to be large. `checkedSecondsAgo` is how long
+ * since we last asked Shopify, and it is the one that says whether the sync
+ * is alive - it should never exceed the delta interval by much.
+ *
+ * Reporting only the first read as though the sync had died: a store that had
+ * not changed for three hours showed an age of three hours, which is correct
+ * and looks exactly like a stalled job.
+ */
 export function catalogueState(): CatalogueState {
   return {
     count: products.length,
     lastSyncedAt,
     ageSeconds: lastSyncedAt ? Math.round((Date.now() - lastSyncedAt) / 1000) : -1,
+    lastCheckedAt,
+    checkedSecondsAgo: lastCheckedAt ? Math.round((Date.now() - lastCheckedAt) / 1000) : -1,
   };
 }
 
@@ -205,8 +236,24 @@ export function allProducts(): Product[] {
   return products;
 }
 
+/**
+ * Accepts a product id in either form it actually arrives in.
+ *
+ * The mirror is keyed by GID, but a bare numeric id reaches us from two
+ * directions: a Shopify theme prints `{{ product.id }}` as a plain number into
+ * the widget page context, and the model sometimes drops the prefix when it
+ * copies an id out of the conversation. Both used to fall through to UCP and
+ * come back "product not found".
+ *
+ * Only a purely numeric id is rebuilt. Pulling the digits out of any string
+ * would read gid://shopify/ProductVariant/123 as product 123, which is a
+ * different product rather than a miss.
+ */
 export function productById(id: string): Product | null {
-  return byId.get(id) ?? null;
+  const direct = byId.get(id);
+  if (direct) return direct;
+  if (!/^\d+$/.test(id)) return null;
+  return byId.get(`gid://shopify/Product/${id}`) ?? null;
 }
 
 export function catalogueReady(): boolean {
@@ -222,13 +269,29 @@ async function pull(): Promise<Product[]> {
   const collected: Product[] = [];
   let cursor: string | null = null;
 
-  // Bounded so a pagination bug cannot loop forever against a live API.
-  for (let page = 0; page < 50; page += 1) {
+  let truncated = false;
+
+  for (let page = 0; page < MAX_PAGES; page += 1) {
     const data: CataloguePage = await admin<CataloguePage>(QUERY, { cursor, query: filter });
 
     collected.push(...data.products.nodes.map(toProduct));
     if (!data.products.pageInfo.hasNextPage) break;
     cursor = data.products.pageInfo.endCursor;
+    truncated = page === MAX_PAGES - 1;
+  }
+
+  /*
+   * Loud, because the quiet version of this is the dangerous one: the
+   * catalogue simply stops at the cap, the newest products are missing, every
+   * search still works, and nothing anywhere says why the Caddie cannot find
+   * the thing that went live this morning.
+   */
+  if (truncated) {
+    log.error('catalogue.truncated', {
+      products: collected.length,
+      cap: MAX_PAGES * PAGE_SIZE,
+      fix: 'raise MAX_PAGES in src/catalog/sync.ts',
+    });
   }
 
   log.info('catalogue.pulled', { products: collected.length, ms: Date.now() - startedAt });
@@ -367,6 +430,7 @@ export async function syncCatalogue(): Promise<CatalogueState> {
         byId = new Map(fresh.map((product) => [product.id, product]));
         rebuildInventoryIndex();
         lastSyncedAt = Date.now();
+        lastCheckedAt = Date.now();
         lastDeltaAt = Date.now();
         version += 1;
       } else {
@@ -411,6 +475,8 @@ async function runDelta(): Promise<number> {
   // timestamp from just before it.
   const changed = await pullChangedSince(new Date(lastDeltaAt - 60_000));
   lastDeltaAt = Date.now();
+  // A delta that found nothing still proves the sync is alive.
+  lastCheckedAt = Date.now();
   return applyChanges(changed);
 }
 

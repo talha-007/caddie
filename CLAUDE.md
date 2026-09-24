@@ -12,7 +12,6 @@ size, builds a pack or an outfit, and fills a real Shopify basket.
 | --- | --- | --- |
 | `apps/server` | Talha | AI, Vapi, Shopify, recommendations, cart |
 | `apps/widget` | Amir | The storefront widget |
-| `apps/caddie-ui` | Talha | A second, plainer UI that keeps the backend unblocked |
 | `packages/shared` | both | The contract. Change it here first, then tell the other person. |
 
 **Work in your own app.** If a change on one side forces a change on the other,
@@ -24,7 +23,7 @@ say so rather than editing across the line.
 npm install
 cp .env.example .env                    # SHOPIFY_STORE_DOMAIN at minimum
 npm run dev:server                      # :8787
-npm run dev --workspace=@caddie/ui      # :5174  (or @caddie/widget on :5173)
+npm run dev --workspace=@caddie/widget  # :5173
 ```
 
 `GET /health` says which model is answering, whether voice is on, and whether
@@ -61,6 +60,13 @@ when the customer has chosen nothing, so a size picker built from `variants`
 silently adds whichever size came back first. Build the picker from `options`;
 use `variants` only for availability.
 
+**Product ids arrive in two forms.** The mirror is keyed by GID, but a theme's
+`{{ product.id }}` and `ShopifyAnalytics.meta` both give a bare number, and the
+model drops the prefix often enough to matter. `productById` in
+`apps/server/src/catalog/sync.ts` takes either - go through it rather than
+reading `byId`. A miss there falls through to throttled UCP and comes back
+"product not found", which reads like a broken catalogue rather than an id.
+
 **Money is already in major units.** `{ amount: 42, currency: 'GBP' }` is
 £42.00. The Shopify payloads use minor units; the conversion happens once, in
 `apps/server/src/shopify/money.ts`, and nothing downstream deals in pence.
@@ -71,6 +77,74 @@ price or a product name out of the text — it is written by a model.
 **Cart updates replace rather than merge.** Shopify's `update_cart` sets the
 cart's lines to exactly what you send, so sending one line deletes the rest.
 Go through `addToCart` / `setLineQuantity` in `apps/server/src/shopify/catalog.ts`.
+
+**Sizes come on two scales, and in words.** Tops are lettered (S-4XL), bottoms
+carry waist numbers (32, 34). They are not one scale: a customer who says
+"medium" has told you nothing about which trousers fit. Filtering trousers by
+"M" silently dropped every pair, so an outfit arrived with nothing to wear
+below the waist. Customers and the model both say "Medium" where the catalogue
+says "M", and an exact string match empties the whole result. Everything that
+compares a size goes through `src/recommend/sizeWords.ts`, which normalises the
+word, ignores a size it cannot read rather than filtering on it, and only
+applies a size to products sized on that same scale.
+
+**Search matches literal words, so a recommendation cannot depend on the
+customer's phrasing.** "A pack of basic clothing" returns nothing - no product
+has "basic" in its name - and the customer hears that we have nothing in their
+budget. Both `recommend_pack` and `recommend_outfit` search garment words first
+and fall back to the customer's own wording, never the other way round.
+
+**A pack has a price of its own, and it is not the sum of its pieces.** The
+Ambassador Pack is £99 for six garments that add up to more. `recommend_pack`
+returns the pack's Shopify price as `total` and the pieces as `items`; adding
+the items up quotes a different number to the one on the product page. Packs
+are products, so `isPack` in `src/recommend/packs.ts` keeps them out of
+garment selection - otherwise a pack ends up inside a pack, or worn as a top.
+
+**A product on the Online Store is not necessarily buyable.** The Storefront
+API, which the basket runs on, reads its own publication. Seed a product and
+publish it with REST `published_scope: 'web'` and it is searchable, renders
+fine, and fails at the basket with *"The merchandise with id ... does not
+exist"* - the one error that looks like a bug in our code and is not. The seed
+scripts publish to the headless publication as well; if you add products any
+other way, check `resourcePublications` before assuming the cart is broken.
+
+**A price is per variant, not per product.** `product.price` is Shopify's
+`minVariantPrice`. Adding those up gave a pack total a customer buying at 2XL
+could not check out at, and let garments past a budget filter they could not
+afford. Everything that prices a recommendation goes through
+`src/recommend/pricing.ts`, which uses the variant for the size being bought
+and marks the figure inexact when the variant is not pinned yet - and the
+Caddie then says "that is a starting price" rather than quoting it as settled.
+
+**Push to talk loses words in three places.** `getUserMedia` on the button
+press means the first word goes into a device that has not started - keep the
+stream open between turns instead. `autoGainControl: false` gives a truer
+level reading and a worse recording, so leave it on. And stopping the recorder
+on the release takes the tail of the last word with it, so keep going for
+about 200ms. All three, and the two that follow from keeping the microphone
+open, are written up in `docs/widget-update-prompt.md` - they were found in a
+test UI that no longer exists, and the widget has not had them applied yet.
+
+**Never send silence to the transcriber.** Given a clip with no speech in it,
+a transcription model does not return nothing - it invents, out of whatever
+vocabulary the prompt gave it. Ours listed garments and sizes, and a customer
+who tapped the mic and said nothing had "I need a medium polo, a large
+midlayer, and an extra-large gilet" appear as their own message. The prompt in
+`src/ai/transcribe.ts` is now the brand name and nothing else; do not put
+garments or sizes back into it. Short clips are refused and a transcript
+claiming more words than the clip could hold is dropped - but the real guard
+is in the browser, which knows whether the microphone heard anything at all.
+Any UI that records audio needs that check.
+
+**Cart writes must not run alongside each other.** The model issues one
+`add_to_cart` per garment, and the tool batch used to run in parallel - so
+four adds all read an empty `session.cartId`, all four opened a *separate*
+basket, and the customer was told four items had gone in at £100 while seeing
+one at £58. `writesToCart` in `src/ai/openai.ts` keeps those calls sequential,
+each re-reading the session so the second add finds the first one's basket.
+Searches still run together. Add a third cart-writing tool and name it there,
+or `test/cartOrder.test.ts` will fail.
 
 **Outfit slots can be missing.** If nothing in stock fits a slot we leave it
 out rather than pad the outfit. Do not assume four pieces.
@@ -190,6 +264,30 @@ Abuse and off-topic messages are screened by `src/ai/guard.ts` before the
 expensive loop, on the cheapest model available, and obvious cases are caught
 by local rules for nothing at all. `src/lib/rateLimit.ts` caps what one session
 or address can spend.
+
+### Seeing where it goes
+
+`GET /admin` is the usage dashboard: spend by model and by kind of call, cost
+per thousand conversations, cache hit rate, which conversations cost what, and
+what was said in them. Set `ADMIN_TOKEN` to open it - without one the route
+404s rather than 401s, because the server is reachable through a public tunnel
+and a 401 is an invitation.
+
+Three things it will not tell you honestly unless you know them:
+
+- **The money is our arithmetic, not OpenAI's.** Rates live in
+  `src/usage/pricing.ts` and are maintained by hand. A model with no rate in
+  that table reads as zero, so the dashboard names it rather than hiding it.
+- **Voice minutes are estimated from audio size.** The `gpt-4o-*-transcribe`
+  models only return `json` or `text`; `verbose_json`, the response format
+  carrying a real duration, is whisper-1 only.
+- **`prompt_tokens` already includes the cached ones.** Billing both at the
+  full input rate overstates a cached turn about fourfold, which at our hit
+  rate is most of them. `test/usage.test.ts` pins this down.
+
+Conversations are kept for seven days and then expire. Client labels are a
+salted hash of the address rather than the address, salted with `ADMIN_TOKEN`
+so every instance derives the same label.
 
 ## Running under load
 

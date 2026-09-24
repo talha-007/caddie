@@ -22,9 +22,28 @@ export type CaddieAttachment =
   | { kind: 'outfit'; recommendation: OutfitRecommendation }
   | { kind: 'cart'; cart: Cart };
 
+/**
+ * What the storefront page the widget sits on knows about itself.
+ *
+ * The theme passes it as data attributes, so it arrives by way of the browser.
+ * Treat it as a pointer, never a fact: the ids say which product to look up,
+ * and the Caddie still fetches it from Shopify before describing or pricing it.
+ */
+export interface PageContext {
+  pageType: 'product' | 'collection' | 'cart' | 'other';
+  /** Shopify product GID, the same id MCP uses, e.g. gid://shopify/Product/123. */
+  productId?: string;
+  productHandle?: string;
+  productTitle?: string;
+  /** The variant currently selected on the product page, as a GID. */
+  variantId?: string;
+}
+
 export interface ChatRequest {
   sessionId: string;
   text: string;
+  /** Where the customer is standing in the shop, if the theme tells us. */
+  context?: PageContext;
 }
 
 export interface ChatResponse {

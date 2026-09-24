@@ -70,6 +70,22 @@ export interface PackRecommendation {
   /** True when we could not fill the pack inside budget. */
   overBudget: boolean;
   reason: string;
+  /**
+   * Set when this is one of the packs Druids actually sells, rather than a
+   * selection we put together to a budget.
+   *
+   * `total` is then the pack's own price from Shopify, not the sum of the
+   * items - that is the whole point of a pack, and adding the pieces up would
+   * quote the customer a different number to the one on the product page.
+   * `items` are the real garments filling it, each sizeable on its own.
+   */
+  pack?: {
+    productId: string;
+    title: string;
+    price: Money;
+    /** What the pack is meant to contain, in order, whether filled or not. */
+    slots: Array<{ slot: string; productId: string | null }>;
+  };
 }
 
 /* ---------------- Outfit ---------------- */

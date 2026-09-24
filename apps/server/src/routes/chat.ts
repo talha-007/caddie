@@ -9,9 +9,11 @@ import { sessions } from '../session/store.js';
 import { runTool } from '../tools/index.js';
 import { route } from '../ai/devRouter.js';
 import { screen } from '../ai/guard.js';
-import { converse, openaiEnabled } from '../ai/openai.js';
+import { converse, openaiEnabled, type TurnMeta } from '../ai/openai.js';
 import { consumeShared, LIMITS } from '../lib/rateLimit.js';
 import { clientKey } from '../lib/request.js';
+import { clientHash } from '../usage/identity.js';
+import { recordMessage } from '../usage/store.js';
 
 /**
  * Text chat for the widget.
@@ -31,9 +33,23 @@ import { clientKey } from '../lib/request.js';
 
 export const chatRouter: Router = Router();
 
+/*
+ * Validated rather than trusted. It comes from data attributes on a page we do
+ * not control, so every field is bounded - an unbounded productTitle would go
+ * straight into a prompt we pay for by the token.
+ */
+const contextSchema = z.object({
+  pageType: z.enum(['product', 'collection', 'cart', 'other']),
+  productId: z.string().max(200).optional(),
+  productHandle: z.string().max(200).optional(),
+  productTitle: z.string().max(200).optional(),
+  variantId: z.string().max(200).optional(),
+});
+
 const bodySchema = z.object({
   sessionId: z.string().min(1).max(100).optional(),
   text: z.string().min(1).max(2000),
+  context: contextSchema.optional(),
 });
 
 function message(role: CaddieMessage['role'], text: string, attachment?: CaddieMessage['attachment']): CaddieMessage {
@@ -81,6 +97,13 @@ chatRouter.post('/', async (req, res, next) => {
   }
 
   const session = await sessions.getOrCreate(sessionId);
+
+  // Written before the model runs, and kept on the session so a spoken
+  // follow-up - which carries no context of its own - still knows the page.
+  if (parsed.data.context) {
+    await sessions.patch(sessionId, { page: parsed.data.context });
+  }
+
   const userMessage = message('user', parsed.data.text);
 
   try {
@@ -89,9 +112,13 @@ chatRouter.post('/', async (req, res, next) => {
      * prompt and tool schemas before it reads a word, so an essay request that
      * gets this far has already cost us.
      */
+    const client = clientHash(clientKey(req));
+
     const verdict = await screen(parsed.data.text, {
       hasHistory: session.messages.length > 0,
       lastAssistant: lastAssistantMessage(session),
+      sessionId,
+      client,
     });
     if (!verdict.allow) {
       log.info('chat.declined', { sessionId, reason: verdict.reason });
@@ -101,7 +128,7 @@ chatRouter.post('/', async (req, res, next) => {
     }
 
     const reply = openaiEnabled()
-      ? await viaOpenai(sessionId, parsed.data.text)
+      ? await viaOpenai(sessionId, parsed.data.text, { client })
       : vapiEnabled()
         ? await viaVapi(sessionId, parsed.data.text)
         : await viaDevRouter(sessionId, parsed.data.text);
@@ -109,6 +136,8 @@ chatRouter.post('/', async (req, res, next) => {
     // Appended rather than saved: the tools have been writing to this session
     // throughout the turn, and saving the copy read at the start would undo it.
     await sessions.append(sessionId, [userMessage, reply]);
+    recordMessage(sessionId, 'user', parsed.data.text);
+    recordMessage(sessionId, 'assistant', reply.text);
 
     if (reply.attachment) {
       publish({ type: 'attachment', sessionId, attachment: reply.attachment });
@@ -122,8 +151,8 @@ chatRouter.post('/', async (req, res, next) => {
 
 /* ---------------- OpenAI ---------------- */
 
-async function viaOpenai(sessionId: string, text: string): Promise<CaddieMessage> {
-  const reply = await converse(sessionId, text);
+async function viaOpenai(sessionId: string, text: string, meta?: TurnMeta): Promise<CaddieMessage> {
+  const reply = await converse(sessionId, text, meta);
   return message('assistant', reply.text, reply.attachment);
 }
 

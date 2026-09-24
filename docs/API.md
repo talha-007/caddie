@@ -40,6 +40,36 @@ POST /api/chat
 → { "sessionId": "abc", "message": { ... } }
 ```
 
+### Telling the Caddie which page they are on
+
+`context` is optional and the server now uses it, so a customer on a product
+page can say "does this come in a large" without naming anything:
+
+```jsonc
+{
+  "sessionId": "abc",
+  "text": "does this come in a large?",
+  "context": {
+    "pageType": "product",          // product | collection | cart | other
+    "productId": "gid://shopify/Product/9713581359329",
+    "productTitle": "VENTO POLO - WHITE/ ORANGE",   // optional
+    "productHandle": "vento-polo",                  // optional
+    "variantId": "gid://shopify/ProductVariant/..." // optional
+  }
+}
+```
+
+Send it on every message; it is remembered on the session, so a **voice** turn
+- which carries no context of its own - still knows the page.
+
+A bare numeric id (`"9713581359329"`) is accepted as well as a GID, because
+that is what a theme's `{{ product.id }}` gives you.
+
+Only `productId` does any work. The title and handle are a convenience for the
+logs and the prompt - the Caddie always loads the product from Shopify before
+it describes, prices or adds it, so nothing you put in `context` can make it
+quote a price that is not real.
+
 The `message` is a `CaddieMessage`:
 
 ```jsonc

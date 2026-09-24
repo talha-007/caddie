@@ -2,6 +2,8 @@ import type { Product } from '@caddie/shared';
 import { z } from 'zod';
 import { recommendOutfit } from '../recommend/outfit.js';
 import { recommendPack } from '../recommend/pack.js';
+import { findNamedPack, findUnstockedBundle, recommendNamedPack } from '../recommend/packs.js';
+import { priceFor, priceRange } from '../recommend/pricing.js';
 import { recommendSize } from '../recommend/size.js';
 import { addToCart, getCart, getProductDetails, searchProducts, setLineQuantity } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
@@ -51,7 +53,22 @@ function listFacts(products: Product[]): string {
     .map((product) => {
       const range = audienceOf([product]);
       const label = range ? ` (${range === 'men' ? 'mens' : 'womens'})` : '';
-      return `- ${product.title}${label} - ${money(product.price.amount, product.price.currency)} [${product.id}]`;
+      /*
+       * "from" where the price moves with the size.
+       *
+       * product.price is Shopify's cheapest variant, and this list is what
+       * the model reads before it answers. Stating that minimum flatly is why
+       * "how much is the Tour Polo" came back "it is £42" for a garment that
+       * runs to £52 - fixing the product detail path alone left this one
+       * still saying it.
+       */
+      const span = priceRange(product);
+      const shown =
+        span.min === span.max
+          ? money(span.min, span.currency)
+          : `${money(span.min, span.currency)} to ${money(span.max, span.currency)} depending on size`;
+
+      return `- ${product.title}${label} - ${shown} [${product.id}]`;
     })
     .join('\n');
 }
@@ -140,8 +157,6 @@ const detailsTool = defineTool({
     const product = await getProductDetails(args.productId, args.options);
     if (!product) return { speech: 'I could not load that product.' };
 
-    const price = money(product.price.amount, product.price.currency);
-
     /*
      * Shopify returns a default variant even when nothing was selected, so the
      * variant count says nothing about whether the customer has chosen. What
@@ -153,17 +168,35 @@ const detailsTool = defineTool({
     const chosen = hasSelection || nothingToChoose ? product.variants[0] : null;
 
     if (chosen) {
+      // The variant's own price, not the product's cheapest - they differ on
+      // anything priced by size, and this one is a specific garment.
+      const chosenPrice = money(chosen.price.amount, chosen.price.currency);
       return {
         speech: chosen.available
-          ? `${product.title} in ${Object.values(chosen.options).join(', ')} is ${price} and in stock.`
+          ? `${product.title} in ${Object.values(chosen.options).join(', ')} is ${chosenPrice} and in stock.`
           : `${product.title} in ${Object.values(chosen.options).join(', ')} is out of stock.`,
         attachment: { kind: 'products', products: [product] },
       };
     }
 
+    /*
+     * Nothing chosen yet, so there may be no single price to give.
+     *
+     * product.price is Shopify's cheapest variant. Reading it out as "it
+     * costs £42" on a polo that runs £42 to £52 by size is the same fault the
+     * packs had, in the path customers hit most: asking what something costs.
+     */
+    const effective = priceFor(product);
+    const price = money(effective.amount, effective.currency);
     const choices = product.options.map((option) => `${option.name}: ${option.values.join(', ')}`).join('. ');
+
     return {
-      speech: `${product.title} is ${price}.${choices ? ` ${choices}.` : ''}`,
+      speech: effective.exact
+        ? `${product.title} is ${price}.${choices ? ` ${choices}.` : ''}`
+        : `${product.title} starts at ${price} and the price depends on the size.${choices ? ` ${choices}.` : ''}`,
+      facts: effective.exact
+        ? undefined
+        : `${product.title} is priced per variant, from ${price}. Do not quote a single price until a size is chosen.`,
       attachment: { kind: 'products', products: [product] },
     };
   },
@@ -249,7 +282,7 @@ const packSchema = z.object({
 const packTool = defineTool({
   name: 'recommend_pack',
   description:
-    'Build a multi-item pack of real Druids products for a budget. Use when the customer asks for several things at once, or mentions a total spend.',
+    'Build a pack of real Druids products. Pass the words the customer used as the query: if they name a pack Druids sells - the Ambassador Pack, the Rainsuit Special - that pack comes back at its real price. Otherwise a selection is put together for their budget.',
   schema: packSchema,
   parameters: {
     type: 'object',
@@ -266,6 +299,61 @@ const packTool = defineTool({
   async run(args, ctx): Promise<ToolResult> {
     const currency = args.currency ?? ctx.session.preferences.currency ?? storeCurrency();
     const budgetAmount = args.budgetAmount ?? ctx.session.preferences.budgetAmount;
+
+    /*
+     * A pack Druids actually sells is a different answer to a selection put
+     * together for a budget. "What is in the Ambassador Pack" is a question
+     * about a real product with a real price, so it is answered from that
+     * product rather than by assembling something that costs about the same.
+     */
+    /*
+     * A bundle Druids sells that this store does not carry. Checked first,
+     * because otherwise the budget assembler answers it: "the Prestige Pack
+     * includes three items and costs £92" was a real reply, about a pack that
+     * is not in the store, at a price that is not its own.
+     */
+    const unstocked = findUnstockedBundle(args.query);
+    if (unstocked) {
+      return {
+        speech: `I cannot pull up the ${unstocked.name} - I do not have its contents or its price to hand, so I would rather not guess at them. The team on the website can tell you. Shall I show you what we do have instead?`,
+        facts: `${unstocked.name} is a real Druids bundle, but it is not in this catalogue and we hold no price for it. Do not describe it, price it, or offer a substitute as though it were that pack.`,
+      };
+    }
+
+    const named = findNamedPack(args.query);
+    if (named) {
+      const real = await recommendNamedPack(named, {
+        colour: args.colour ?? ctx.session.preferences.colour,
+        size: args.size ?? ctx.session.sizeProfile.usualSize,
+      });
+
+      if (real?.pack) {
+        await sessions.patch(ctx.session.id, {
+          lastShown: {
+            kind: 'pack',
+            // The pack itself first, so "add it" means the pack and not the polo.
+            items: [
+              { id: real.pack.productId, title: real.pack.title },
+              ...real.items.map((p) => ({ id: p.id, title: p.title })),
+            ],
+            query: args.query,
+            colour: args.colour,
+          },
+          preferences: { colour: args.colour, currency },
+        });
+
+        return {
+          speech: real.reason,
+          facts: `${real.pack.title} [${real.pack.productId}] - ${money(
+            real.pack.price.amount,
+            real.pack.price.currency,
+          )}, the price of the pack and not the sum of its pieces.
+Filling it from stock:
+${listFacts(real.items)}`,
+          attachment: { kind: 'pack', recommendation: real },
+        };
+      }
+    }
 
     const recommendation = await recommendPack({
       query: args.query,
@@ -405,15 +493,43 @@ const addToCartTool = defineTool({
       return { speech: 'I could not find that product. Let me search again rather than guess.' };
     }
 
-    // More than one value still open on any option means nothing was chosen.
-    const undecided = product.options.filter((option) => option.values.length > 1);
-    const chosenCount = Object.keys(args.options ?? {}).length;
-    if (undecided.length > 0 && chosenCount === 0) {
+    /*
+     * Which choices are still open - measured against what they actually
+     * named, not against how many things they named.
+     *
+     * Counting was the bug. A customer who says "large" on a polo that comes
+     * in six colours has chosen one of two things, and the old check saw a
+     * non-zero count and went ahead; variants[0] then picked their colour for
+     * them. The test store hides this completely - colour is baked into the
+     * product title there and every product carries a single option - but the
+     * real store has Size and Colour on nearly everything.
+     */
+    const named = new Set(Object.keys(args.options ?? {}).map((key) => key.toLowerCase()));
+    const stillOpen = product.options.filter(
+      (option) => option.values.length > 1 && !named.has(option.name.toLowerCase()),
+    );
+
+    if (stillOpen.length > 0) {
       return {
-        speech: `Which ${undecided.map((option) => option.name.toLowerCase()).join(' and ')} would you like for the ${product.title}?`,
-        facts: `${product.title} needs a choice:\n${undecided
+        speech: `Which ${stillOpen.map((option) => option.name.toLowerCase()).join(' and ')} would you like for the ${product.title}?`,
+        facts: `${product.title} needs a choice:\n${stillOpen
           .map((option) => `- ${option.name}: ${option.values.join(', ')}`)
           .join('\n')}`,
+      };
+    }
+
+    /*
+     * Every option named and more than one garment still matching means the
+     * choices did not identify one. Ask again rather than take the first: a
+     * wrong colour in the basket is a return, and the customer does not find
+     * out until it arrives.
+     */
+    if (product.variants.length > 1) {
+      return {
+        speech: `I want to be certain which ${product.title} you mean before I add it - could you confirm the ${product.options
+          .map((option) => option.name.toLowerCase())
+          .join(' and ')}?`,
+        facts: `${product.variants.length} variants still match for ${product.title}. Do not choose one for them.`,
       };
     }
 
