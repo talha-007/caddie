@@ -177,6 +177,17 @@ function history(session: CaddieSession): ChatMessage[] {
   }));
 }
 
+/**
+ * Tools that change the basket, and so must never run alongside each other.
+ *
+ * Exported so it can be checked against the tool registry: adding a third
+ * cart-writing tool and forgetting to name it here brings back the bug where
+ * four adds became four separate baskets.
+ */
+export function writesToCart(name: string): boolean {
+  return name === 'add_to_cart' || name === 'update_cart_item';
+}
+
 export interface Reply {
   text: string;
   attachment?: CaddieAttachment;
@@ -246,40 +257,67 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
     messages.push({ role: 'assistant', content: choice.message.content, tool_calls: calls });
 
     /*
-     * Run the batch together rather than one after another.
+     * Searches run together; anything that writes to the basket runs alone.
      *
-     * Each tool is a round trip to Shopify, so three in sequence is three
-     * times the wait for no reason - an outfit asking for a top, a bottom and
-     * a layer was paying that every time. They are independent: each reads the
-     * session and any session writes are merged rather than replacing it.
+     * Each tool is a round trip to Shopify, so three searches in sequence is
+     * three times the wait for no reason - an outfit asking for a top, a
+     * bottom and a layer was paying that every time.
+     *
+     * Cart writes are not like that, and treating them as independent cost a
+     * customer their order. Asked to add four garments, the model issues four
+     * add_to_cart calls in one batch. Run together, all four read
+     * `session.cartId` before any of them has finished, all four find it
+     * empty, and all four create a *separate* basket. Four carts exist, the
+     * session keeps whichever wrote last, and the customer - told "all four
+     * items have been added, totalling £100" - sees one item at £58.
+     *
+     * So they go one at a time, and each re-reads the session first, which is
+     * how the second add finds the basket the first one opened.
      */
-    const results = await Promise.all(
-      calls.map(async (call) => {
-        let args: unknown = {};
-        try {
-          args = JSON.parse(call.function.arguments || '{}');
-        } catch {
-          args = {};
-        }
+    const execute = async (call: (typeof calls)[number]) => {
+      let args: unknown = {};
+      try {
+        args = JSON.parse(call.function.arguments || '{}');
+      } catch {
+        args = {};
+      }
 
-        try {
-          const current = await sessions.getOrCreate(sessionId);
-          const result = await runTool(call.function.name, args, { session: current });
-          log.info('openai.tool', { tool: call.function.name, sessionId });
-          return { call, result };
-        } catch (err) {
-          // Log the arguments and the upstream detail: "create_cart failed" on
-          // its own tells you nothing about which variant the model invented.
-          log.error('openai.tool.failed', {
-            tool: call.function.name,
-            args,
-            err: String(err),
-            detail: err instanceof UpstreamError ? err.detail : undefined,
-          });
-          return { call, failed: true as const };
-        }
+      try {
+        // Read fresh: a cart write earlier in this same batch may have opened
+        // the basket this call needs to add to.
+        const current = await sessions.getOrCreate(sessionId);
+        const result = await runTool(call.function.name, args, { session: current });
+        log.info('openai.tool', { tool: call.function.name, sessionId });
+        return { call, result };
+      } catch (err) {
+        // Log the arguments and the upstream detail: "create_cart failed" on
+        // its own tells you nothing about which variant the model invented.
+        log.error('openai.tool.failed', {
+          tool: call.function.name,
+          args,
+          err: String(err),
+          detail: err instanceof UpstreamError ? err.detail : undefined,
+        });
+        return { call, failed: true as const };
+      }
+    };
+
+    type Outcome = Awaited<ReturnType<typeof execute>>;
+    const results: Outcome[] = new Array(calls.length);
+
+    // Everything that only reads, together.
+    await Promise.all(
+      calls.map(async (call, index) => {
+        if (writesToCart(call.function.name)) return;
+        results[index] = await execute(call);
       }),
     );
+
+    // Then the basket, in the order the model asked for it.
+    for (const [index, call] of calls.entries()) {
+      if (!writesToCart(call.function.name)) continue;
+      results[index] = await execute(call);
+    }
 
     // Appended in call order, so the transcript stays deterministic.
     for (const entry of results) {
