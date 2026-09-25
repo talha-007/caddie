@@ -74,6 +74,15 @@ reading `byId`. A miss there falls through to throttled UCP and comes back
 **`message.text` is for reading, `attachment` is for rendering.** Never parse a
 price or a product name out of the text — it is written by a model.
 
+**A bundle deal is not a product.** The Ambassador Pack and the other deals are
+priced at checkout by a discount (SupaEasy) that matches properties the theme's
+bundle builder writes on each cart line. `buildBundleCartItems` in
+`packages/shared/src/bundleCart.ts` reproduces those lines exactly, and
+`test/bundleCart.test.ts` checks it against a copy of the theme's own code. If
+Druids' developers change `snippets/bundle-builder-script-v4.liquid`, update both,
+then check the pack price at checkout on the preview theme. Never add pack
+pieces one by one, and never remove one piece alone - either loses the price.
+
 **Cart updates replace rather than merge.** Shopify's `update_cart` sets the
 cart's lines to exactly what you send, so sending one line deletes the rest.
 Go through `addToCart` / `setLineQuantity` in `apps/server/src/shopify/catalog.ts`.
@@ -178,7 +187,9 @@ So nothing customer-facing calls it.
 | --- | --- | --- |
 | Search, product detail | **local mirror**, `src/catalog/` | Unlimited and instant. Kept current by webhooks, not polling. |
 | The catalogue pull | Admin API | A background job, not buyer traffic. Its own generous quota. |
-| The basket | **Storefront API**, `src/shopify/storefrontCart.ts` | Cannot be mirrored - it is live and per customer. Shopify does not rate-limit buyer traffic here. |
+| The basket, on the store | **The theme's own cart**, changed by the widget (`apps/widget/src/lib/themeCart.ts`) | One basket - the one the cart icon shows and the bundle discounts apply to. The server decides the change and hands the widget a `CartAction`. |
+| The basket, dev harness | **Storefront API**, `src/shopify/storefrontCart.ts` | Used only where there is no theme cart (localhost). |
+| Bundle deals | **Live theme**, read by `src/catalog/bundles.ts` | Recipes and prices come from the deal pages' bundle-builder settings; only the handles in `SHOPIFY_BUNDLE_DEALS` are sold. |
 | UCP | fallback only | Still wired up, still throttled. Not a path to rely on. |
 
 `GET /health` reports the catalogue size and age, and which cart path is live.
