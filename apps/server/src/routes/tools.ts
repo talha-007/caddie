@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
+import { noteCartMode } from '../lib/request.js';
 import { runTool, toolDefinitionsForVapi, tools } from '../tools/index.js';
 
 /**
@@ -26,7 +27,7 @@ toolsRouter.get('/', (_req, res) => {
 toolsRouter.post('/:name', async (req, res, next) => {
   try {
     const sessionId = (req.body?.sessionId as string) || req.get('x-caddie-session') || randomUUID();
-    const session = await sessions.getOrCreate(sessionId);
+    const session = await noteCartMode(req, await sessions.getOrCreate(sessionId), (id, change) => sessions.patch(id, change));
     const args = req.body?.args ?? req.body ?? {};
 
     const result = await runTool(req.params.name, args, { session });

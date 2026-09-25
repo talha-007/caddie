@@ -1,12 +1,15 @@
 import type { Cart, CartLine, Product, ProductOption, ProductVariant } from '@caddie/shared';
 import { env } from '../env.js';
+import { inRange, parseRange } from '../catalog/audience.js';
+import { colourMatch, parseColours } from '../catalog/colour.js';
 import { searchLocal } from '../catalog/search.js';
-import { catalogueReady, productById } from '../catalog/sync.js';
+import { catalogueReady, productById, productByTitle } from '../catalog/sync.js';
 import { cached, CATALOG_TTL_MS, clearCatalogCache } from './cache.js';
 import * as storefrontCart from './storefrontCart.js';
 import { addMoney, readMoney, storeCurrency, toMinorUnits } from './money.js';
 import { log } from '../lib/logger.js';
 import { buyerContext, callUcpTool } from './ucpClient.js';
+import { optionValueMatches } from '../recommend/sizeWords.js';
 
 /**
  * Normalisers between the UCP payloads and our own types.
@@ -117,6 +120,8 @@ export interface SearchOptions {
   currency?: string;
   /** Default true - only things that can actually be bought. */
   available?: boolean;
+  /** The range they are known to be shopping. See catalog/audience.ts. */
+  known?: 'men' | 'women';
 }
 
 interface SearchPayload {
@@ -152,6 +157,7 @@ export async function searchProducts(opts: SearchOptions): Promise<Product[]> {
       ...(opts.maxPrice !== undefined ? { maxPrice: opts.maxPrice } : {}),
       ...(opts.minPrice !== undefined ? { minPrice: opts.minPrice } : {}),
       ...(opts.available !== undefined ? { available: opts.available } : {}),
+      ...(opts.known ? { known: opts.known } : {}),
     }).filter(isBrandProduct);
   }
 
@@ -176,7 +182,20 @@ export async function searchProducts(opts: SearchOptions): Promise<Product[]> {
   );
 
   const products = (payload.products ?? []).map(toProduct).filter((product) => product.id);
-  return products.filter(isBrandProduct).slice(0, wanted);
+  // The same colour rule as the mirror: semantic search returns neighbours,
+  // and an orange polo is a neighbour of "blue polo".
+  const { colours, plain } = parseColours(opts.query);
+  const { range: asked } = parseRange(opts.query);
+  return products
+    .filter(isBrandProduct)
+    .filter((product) => colourMatch(product, colours, opts.available !== false, plain) > 0)
+    .filter((product) => inRange(product, asked, opts.known))
+    .slice(0, wanted);
+}
+
+/** A Shopify GID or a bare numeric id - anything else is a name. */
+function looksLikeId(ref: string): boolean {
+  return /^gid:\/\/shopify\//.test(ref) || /^\d+$/.test(ref);
 }
 
 export async function getProductDetails(
@@ -203,13 +222,47 @@ export async function getProductDetails(
         Object.entries(variant.options).map(([name, value]) => [name.toLowerCase(), value]),
       );
       return Object.entries(selected).every(
-        ([name, value]) => byName.get(name.toLowerCase())?.toLowerCase() === value.toLowerCase(),
+        ([name, value]) => {
+          const held = byName.get(name.toLowerCase());
+          // "medium" is M, and half of "M/L" - see optionValueMatches.
+          return held !== undefined && optionValueMatches(held, value);
+        },
       );
     });
     return { ...mirrored, variants };
   }
 
-  log.warn('catalogue.miss', { productId });
+  /*
+   * A name where an id belongs. The model only has ids for what it has been
+   * shown this conversation; asked to "put the VENTO POLO - NAVY/ WHITE in
+   * instead" before it had seen one, it passed the title. That went to UCP as
+   * an id, failed, and the customer heard "I hit a problem". An exact title
+   * from the mirror is as good as an id, and anything else is a miss - never a
+   * throttled network call.
+   */
+  if (!looksLikeId(productId)) {
+    const byTitle = productByTitle(productId);
+    if (!byTitle) {
+      log.warn('catalogue.miss', { productId, reason: 'not an id, and no product has that title' });
+      return null;
+    }
+    return getProductDetails(byTitle.id, selected);
+  }
+
+  /*
+   * An id the loaded mirror does not have is not a product. The mirror is the
+   * whole catalogue, kept current by webhooks; the ids that miss it are ones
+   * the model made up - it passed 9742692698425 for a polo whose id is
+   * 9713581621473, UCP threw, and the customer heard "I hit a problem" instead
+   * of the model being told to look the product up. So: a miss, answered
+   * locally, and the throttled endpoint is left for before the mirror lands.
+   */
+  if (catalogueReady()) {
+    log.warn('catalogue.miss', { productId, reason: 'not in the catalogue - likely an invented id' });
+    return null;
+  }
+
+  log.warn('catalogue.miss', { productId, reason: 'catalogue not loaded yet' });
   const request = {
     catalog: {
       id: productId,
@@ -220,9 +273,16 @@ export async function getProductDetails(
     },
   };
 
-  const payload = await cached(`product:${JSON.stringify(request)}`, CATALOG_TTL_MS, () =>
-    callUcpTool<Record<string, unknown>>('get_product', request),
-  );
+  let payload: Record<string, unknown>;
+  try {
+    payload = await cached(`product:${JSON.stringify(request)}`, CATALOG_TTL_MS, () =>
+      callUcpTool<Record<string, unknown>>('get_product', request),
+    );
+  } catch (err) {
+    // Unknown or throttled, the honest answer is the same: we could not find it.
+    log.warn('catalogue.lookup_failed', { productId, err: String(err) });
+    return null;
+  }
 
   const raw = (payload.product ?? payload) as Record<string, unknown>;
   if (!raw?.id) return null;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normaliseSize, sameSize, stockedInSize } from '../src/recommend/sizeWords.js';
+import { normaliseSize, sameSize, stockedInSize, optionValueMatches } from '../src/recommend/sizeWords.js';
 
 function variant(size: string, available = true) {
   return { available, options: { Size: size } };
@@ -82,5 +82,28 @@ describe('whether a product is stocked in a size', () => {
 
   it('ignores a size it cannot read rather than emptying the result', () => {
     expect(stockedInSize([variant('S'), variant('M')], 'whatever fits')).toBe(true);
+  });
+});
+
+describe('optionValueMatches', () => {
+  // On the live store "medium" was read as no size at all, and the belt's
+  // combined sizes as neither - sizes on the shelf reported out of stock.
+  it('reads size words as the store writes them', () => {
+    expect(optionValueMatches('M', 'medium')).toBe(true);
+    expect(optionValueMatches('L', 'Large')).toBe(true);
+    expect(optionValueMatches('XL', 'extra large')).toBe(true);
+    expect(optionValueMatches('32', '32')).toBe(true);
+  });
+
+  it('matches half of a combined size', () => {
+    expect(optionValueMatches('M/L', 'medium')).toBe(true);
+    expect(optionValueMatches('L/XL', 'large')).toBe(true);
+    expect(optionValueMatches('M/L', 'large')).toBe(true);
+    expect(optionValueMatches('L/XL', 'medium')).toBe(false);
+  });
+
+  it('does not match a different size', () => {
+    expect(optionValueMatches('M', 'large')).toBe(false);
+    expect(optionValueMatches('30', '32')).toBe(false);
   });
 });

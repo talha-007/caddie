@@ -55,7 +55,8 @@ describe('building a pack when the wording finds nothing', () => {
 
     await recommendPack({ query: 'basic clothing', budget: { amount: 100, currency: 'GBP' } });
 
-    expect(search.mock.calls[0]?.[0]?.query).toBe('basic clothing');
+    // Led by the range, so a pack is never kids unless asked (see catalog/audience.ts).
+    expect(search.mock.calls[0]?.[0]?.query).toBe('mens basic clothing');
     expect(search.mock.calls[1]?.[0]?.query).toContain('polo');
   });
 

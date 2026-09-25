@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { catalogueReady, catalogueState } from '../catalog/sync.js';
+import { dealsState } from '../catalog/bundles.js';
 import { modelLoad } from '../ai/openai.js';
 import { storefrontCartEnabled } from '../shopify/storefrontCart.js';
 import { env, envFile } from '../env.js';
@@ -31,6 +32,8 @@ healthRouter.get('/', (_req, res) => {
     voice: env.openai.apiKey ? `transcribe:${env.openai.transcribeModel}` : 'unavailable',
     // Everything customer-facing searches this rather than Shopify.
     catalogue: catalogueState(),
+    // The store's bundle deals, read from the live theme.
+    deals: dealsState(),
     // Queued means customers are waiting on the model, not on us.
     model: modelLoad(),
     // UCP is throttled; the Storefront API is not rate-limited for buyers.

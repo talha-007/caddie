@@ -1,4 +1,6 @@
 import type { Product } from '@caddie/shared';
+import { inRange, parseRange, rangeOf } from './audience.js';
+import { colourMatch, parseColours } from './colour.js';
 import { allProducts, catalogueVersion } from './sync.js';
 
 /**
@@ -26,6 +28,16 @@ const STOP_WORDS = new Set([
   'about', 'under', 'over', 'that', 'this', 'it', 'be', 'at', 'new', 'good', 'best', 'nice',
 ]);
 
+/**
+ * Words that describe the whole shop rather than any product in it.
+ *
+ * Everything here is golf, and Druids, and clothing: "golf polo" means a polo,
+ * and counting "golf" filled the results with hoodies and a pack. Dropped from
+ * queries only - they stay in the index, so a product called GOLF TEE POLO is
+ * still found by its name.
+ */
+const SHOP_WORDS = new Set(['golf', 'druids', 'clothes', 'clothing', 'kit', 'gear', 'apparel', 'stuff', 'items', 'products', 'range', 'wear']);
+
 /** Plural and spelling variations we should not miss over. */
 const SYNONYMS: Record<string, string[]> = {
   tshirt: ['t-shirt', 'tee'],
@@ -52,13 +64,14 @@ function expand(word: string, into: Set<string>): void {
   for (const synonym of SYNONYMS[word] ?? []) into.add(synonym);
 }
 
-function tokenise(text: string, dropStopWords = true): string[] {
+function tokenise(text: string, dropStopWords = true, expandWords = true): string[] {
   const words = text
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, ' ')
     .split(/\s+/)
     .filter((word) => word.length > 1 && (!dropStopWords || !STOP_WORDS.has(word)));
 
+  if (!expandWords) return [...new Set(words)];
   const expanded = new Set<string>();
   for (const word of words) expand(word, expanded);
   return [...expanded];
@@ -140,35 +153,94 @@ export interface LocalSearchOptions {
   maxPrice?: number;
   minPrice?: number;
   available?: boolean;
+  /**
+   * The range the customer is known to be shopping, from earlier in the
+   * conversation. A range named in the query itself always wins.
+   */
+  known?: 'men' | 'women';
 }
+
+/** A colour match is worth more than any one word. Only that colour beats that colour in a mix. */
+const COLOUR_WEIGHT: Record<number, number> = { 3: 25, 2: 20, 1: 10 };
 
 export function searchLocal(opts: LocalSearchOptions): Product[] {
   ensureIndex();
 
-  const tokens = tokenise(opts.query);
+  /*
+   * Colour is taken out of the words and applied as its own test - see
+   * colour.ts. Left in, "blue" matched a campaign tag on an orange polo, and
+   * a product failing the colour still came back on "polo".
+   */
+  const { colours, rest: uncoloured, plain } = parseColours(opts.query);
+  // Mens, ladies or kids: taken out of the words like colour, and applied as a filter.
+  const { range: asked, rest } = parseRange(uncoloured);
+  /*
+   * Scored per word the customer said, not per spelling of it. Counting
+   * "polos", "polo", "trousers", "trouser", "pant" and "pants" as six words
+   * meant a polo matched "two of six" and lost to a rainsuit pack whose
+   * description happened to mention both - "polos and trousers" came back
+   * with no polos in it. Each word now counts once, at its best spelling.
+   */
+  const said = tokenise(rest, true, false);
+  const specific = said.filter((word) => !SHOP_WORDS.has(word));
+  /*
+   * "Show me some golf clothes" names nothing in particular: a browse of the
+   * whole shop, never "we do not stock that" - which is what an empty result
+   * becomes by the time the model says it.
+   */
+  const browsing = specific.length === 0 && said.length > 0;
+  const words = specific.map((word) => {
+    const spellings = new Set<string>();
+    expand(word, spellings);
+    return [...spellings];
+  });
   const limit = opts.limit ?? 10;
-  if (tokens.length === 0) return [];
+  if (words.length === 0 && colours.length === 0 && !browsing && !plain) return [];
 
   // Only products carrying at least one of the words are ever looked at.
-  const scores = new Map<number, { score: number; matched: number }>();
+  const scores = new Map<number, { score: number; matched: number; lead: number; leadWeight: number }>();
 
-  for (const token of tokens) {
-    const postings = index.get(token);
-    if (!postings) continue;
-    for (const [position, weight] of postings) {
+  // "Something navy" names no garment: every product is a candidate, and the
+  // colour decides.
+  if (words.length === 0) {
+    indexed.forEach((_, position) => scores.set(position, { score: 0, matched: 0, lead: -1, leadWeight: 0 }));
+  }
+
+  for (const [wordIndex, spellings] of words.entries()) {
+    // This word's best field in each product, across its spellings.
+    const best = new Map<number, number>();
+    for (const spelling of spellings) {
+      for (const [position, weight] of index.get(spelling) ?? []) {
+        if (weight > (best.get(position) ?? 0)) best.set(position, weight);
+      }
+    }
+    /*
+     * A passing mention is not a match when real ones exist. A belt whose
+     * description says "wear it with the Tech Trouser" is not a trouser, and
+     * with it counted, "polos and trousers" showed a belt, a rainsuit and a
+     * pack. A word only ever found in descriptions ("waterproof") still is.
+     */
+    const named = [...best.values()].some((weight) => weight > FIELD_WEIGHT.description);
+    for (const [position, weight] of best) {
+      if (named && weight <= FIELD_WEIGHT.description) continue;
       const current = scores.get(position);
       if (current) {
         current.score += weight;
         current.matched += 1;
+        if (weight > current.leadWeight) {
+          current.lead = wordIndex;
+          current.leadWeight = weight;
+        }
       } else {
-        scores.set(position, { score: weight, matched: 1 });
+        scores.set(position, { score: weight, matched: 1, lead: wordIndex, leadWeight: weight });
       }
     }
   }
+  const tokens = words;
 
-  const hits: Array<{ product: Product; score: number }> = [];
+  const hits: Array<{ product: Product; score: number; matched: number; lead: number }> = [];
 
-  for (const [position, { score, matched }] of scores) {
+  for (const [position, { score, matched, lead }] of scores) {
     const product = indexed[position];
     if (!product) continue;
 
@@ -176,13 +248,68 @@ export function searchLocal(opts: LocalSearchOptions): Product[] {
     if (opts.minPrice !== undefined && product.price.amount < opts.minPrice) continue;
     if (opts.available !== false && !product.variants.some((variant) => variant.available)) continue;
 
+    // Never a child's polo for an adult, never the other range once we know theirs.
+    if (!inRange(product, asked, opts.known)) continue;
+
+    // Not the colour asked for is not a result, however well the rest matches.
+    const colour = colourMatch(product, colours, opts.available !== false, plain);
+    if (colour === 0) continue;
+    const colourScore = colours.length === 0 && !plain ? 0 : (COLOUR_WEIGHT[colour] ?? 0);
+
     // Matching more of what they said beats matching one word loudly: "navy
     // polo" should put a navy polo above every other polo.
-    hits.push({ product, score: score * (matched / tokens.length) });
+    const wordScore = tokens.length ? score * (matched / tokens.length) : 0;
+    hits.push({ product, score: wordScore + colourScore, matched, lead });
   }
 
-  hits.sort((a, b) => b.score - a.score || a.product.price.amount - b.product.price.amount);
-  return hits.slice(0, limit).map((hit) => hit.product);
+  /*
+   * Equal matches: what they can actually buy first. Cheapest-first was the
+   * tie-break, and on the live store the cheapest is clearance with one size
+   * left - an outfit came back a £5 polo in S only and a £2 cap. So: stocked
+   * in more sizes, then the main range when no range was asked for (the
+   * ladies joggers were cheaper and filled "trousers"), and price last.
+   */
+  // Worked out once per hit, not once per comparison.
+  const keyed = hits.map((hit) => ({
+    ...hit,
+    stock: Math.min(hit.product.variants.filter((variant) => variant.available).length, 4),
+    main: asked || opts.known ? 0 : rangeOf(hit.product) === 'men' ? 0 : 1,
+  }));
+  keyed.sort(
+    (a, b) =>
+      b.score - a.score || b.stock - a.stock || a.main - b.main || a.product.price.amount - b.product.price.amount,
+  );
+  return takeTurns(keyed).slice(0, limit).map((hit) => hit.product);
+}
+
+/**
+ * Several garments named, results take turns.
+ *
+ * "Polos and trousers" is two requests. Ranked straight, eight polos filled
+ * the screen and the trousers never appeared. Products that match more of
+ * what was said still come first; among those that match equally, they
+ * alternate by which word they matched best - polo, trouser, polo, trouser.
+ */
+function takeTurns<T extends { matched: number; lead: number }>(hits: T[]): T[] {
+  const out: T[] = [];
+  const tiers = [...new Set(hits.map((hit) => hit.matched))].sort((a, b) => b - a);
+  for (const tier of tiers) {
+    const groups = new Map<number, T[]>();
+    for (const hit of hits) {
+      if (hit.matched !== tier) continue;
+      const group = groups.get(hit.lead) ?? [];
+      group.push(hit);
+      groups.set(hit.lead, group);
+    }
+    const queues = [...groups.values()];
+    while (queues.some((queue) => queue.length)) {
+      for (const queue of queues) {
+        const next = queue.shift();
+        if (next) out.push(next);
+      }
+    }
+  }
+  return out;
 }
 
 /** Exposed for the tests, which check the ranking rather than the plumbing. */

@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto';
 import express, { Router } from 'express';
 import type { CaddieMessage } from '@caddie/shared';
 import { screen } from '../ai/guard.js';
+import { parseLanguageList } from '../ai/language.js';
 import { converse, openaiEnabled } from '../ai/openai.js';
 import { MAX_AUDIO_BYTES, transcribe, transcribeEnabled } from '../ai/transcribe.js';
 import { log } from '../lib/logger.js';
 import { consumeShared, LIMITS } from '../lib/rateLimit.js';
-import { clientKey } from '../lib/request.js';
+import { clientKey, noteCartMode } from '../lib/request.js';
 import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
 import { clientHash } from '../usage/identity.js';
@@ -68,7 +69,20 @@ voiceRouter.post(
     const client = clientHash(clientKey(req));
 
     try {
-      const transcript = await transcribe(req.body as Buffer, mimeType, { sessionId, client });
+      const session = await noteCartMode(req, await sessions.getOrCreate(sessionId), (id, change) => sessions.patch(id, change));
+
+      /*
+       * What we know of the customer's language, for checking the detected one:
+       * the storefront page's own language first (a Shopify store selling in
+       * several languages sets it per shopper), then the browser's, then
+       * whatever they have already typed or said here.
+       */
+      const hints = {
+        languages: [...parseLanguageList(req.query.lang), ...parseLanguageList(req.get('accept-language'))],
+        earlier: session.messages.filter((m) => m.role === 'user' && m.text).slice(-6).map((m) => m.text),
+      };
+
+      const transcript = await transcribe(req.body as Buffer, mimeType, { sessionId, client, hints });
 
       // Nothing intelligible. Say so rather than sending silence to the model.
       if (!transcript) {
@@ -78,8 +92,6 @@ voiceRouter.post(
           message: assistantMessage('I did not catch that - could you say it again?'),
         });
       }
-
-      const session = await sessions.getOrCreate(sessionId);
 
       const verdict = await screen(transcript, {
         hasHistory: session.messages.length > 0,
@@ -102,7 +114,7 @@ voiceRouter.post(
         text: transcript,
         createdAt: new Date().toISOString(),
       };
-      const answer = assistantMessage(reply.text, reply.attachment);
+      const answer = { ...assistantMessage(reply.text, reply.attachment), ...(reply.actions ? { actions: reply.actions } : {}) };
 
       // Appended, not saved: see the note in chat.ts.
       await sessions.append(sessionId, [heard, answer]);

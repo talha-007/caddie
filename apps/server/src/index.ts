@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import { loadDeals } from './catalog/bundles.js';
 import { startCatalogueSync, stopCatalogueSync, syncCatalogue } from './catalog/sync.js';
 import { verifyEnvironment } from './startupCheck.js';
 import { env } from './env.js';
@@ -10,6 +11,7 @@ import { adminRouter } from './routes/admin.js';
 import { chatRouter } from './routes/chat.js';
 import { eventsRouter } from './routes/events.js';
 import { healthRouter } from './routes/health.js';
+import { sessionRouter } from './routes/session.js';
 import { toolsRouter } from './routes/tools.js';
 import { shopifyWebhookRouter } from './routes/shopifyWebhook.js';
 import { ucpRouter } from './routes/ucp.js';
@@ -46,6 +48,7 @@ export function createApp() {
   app.use('/health', healthRouter);
   app.use('/api/chat', chatRouter);
   app.use('/api/events', eventsRouter);
+  app.use('/api/session', sessionRouter);
   app.use('/api/tools', toolsRouter);
   app.use('/api/voice', voiceRouter);
   app.use('/api/vapi', vapiRouter);
@@ -127,6 +130,12 @@ if (isEntrypoint) {
     }
 
     startCatalogueSync();
+
+    // The store's bundle deals, from the live theme. Not worth failing boot
+    // over: without them the Caddie still sells single items.
+    const refreshDeals = () => loadDeals().catch((err) => log.warn('deals.load_failed', { err: String(err) }));
+    await refreshDeals();
+    setInterval(refreshDeals, env.shopify.catalogueReconcileMs).unref?.();
 
     const server = createApp().listen(env.port, () => {
       log.info('caddie.server.listening', {

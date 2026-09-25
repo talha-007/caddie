@@ -1,9 +1,8 @@
-import type { CaddieAttachment } from '@caddie/shared';
+import type { CaddieAttachment, CartAction } from '@caddie/shared';
 import { env } from '../env.js';
 import { UpstreamError } from '../lib/errors.js';
 import { fetchWithTimeout, Semaphore } from '../lib/http.js';
 import { log } from '../lib/logger.js';
-import { publish } from '../session/bus.js';
 import { sessions, type CaddieSession } from '../session/store.js';
 import { runTool, toolDefinitionsForVapi } from '../tools/index.js';
 import { costOfTokens } from '../usage/pricing.js';
@@ -161,13 +160,37 @@ function screenContext(session: CaddieSession): ChatMessage | null {
   if (shown.query) bits.push(`They asked for: "${shown.query}".`);
   if (shown.colour) bits.push(`Colour preference: ${shown.colour}.`);
   if (shown.budgetAmount) bits.push(`Budget: ${shown.budgetAmount}.`);
-  if (session.cartId) bits.push('They already have a basket open.');
   bits.push(
     'On screen right now:\n' +
       shown.items.map((item) => `- ${item.title} [${item.id}]`).join('\n'),
   );
 
   return { role: 'system', content: bits.join(' ') };
+}
+
+/**
+ * What is in their basket, with the ids that change it.
+ *
+ * Separate from what is on screen: the basket outlives every search. It used
+ * to be one line - "they already have a basket open" - and asked to swap the
+ * orange polo in it, the model could not see an orange polo anywhere and added
+ * the new one beside it. A handful of short lines; cheap next to a wrong order.
+ */
+function basketContext(session: CaddieSession): ChatMessage | null {
+  const lines = session.basket ?? [];
+  // Theme-cart shoppers have no cart id of ours: the basket is what the widget reported.
+  if ((!session.cartId && session.cartMode !== 'theme') || lines.length === 0) return null;
+  return {
+    role: 'system',
+    content:
+      'In their basket now:\n' +
+      lines
+        .map(
+          (line) =>
+            `- ${line.title}${line.variantTitle ? ` (${line.variantTitle})` : ''} x${line.quantity}${line.bundle ? " [part of a pack]" : ""} [product ${line.productId}] [line ${line.lineId}]`,
+        )
+        .join('\n'),
+  };
 }
 
 function history(session: CaddieSession): ChatMessage[] {
@@ -185,12 +208,59 @@ function history(session: CaddieSession): ChatMessage[] {
  * four adds became four separate baskets.
  */
 export function writesToCart(name: string): boolean {
-  return name === 'add_to_cart' || name === 'update_cart_item';
+  return name === 'add_to_cart' || name === 'update_cart_item' || name === 'add_pack_to_cart';
+}
+
+/**
+ * How much a card matters, when a turn produces several and only one is shown.
+ *
+ * Last-one-wins lost things. The model built an outfit and then, in the same
+ * turn, asked the size tool whether the customer wanted mens or womens - and
+ * the size tool's empty card replaced the outfit, so the customer never saw
+ * what they asked for. So:
+ *
+ *   a basket just changed      the outcome of the turn
+ *   an outfit or a pack        what they asked to be shown
+ *   products, a basket read    the answer to a question
+ *   a size with a size in it   a result, but it is in the words as well
+ *   a size still being asked   a question, and the words carry it
+ */
+export function cardWeight(card: CaddieAttachment, wroteToCart: boolean): number {
+  switch (card.kind) {
+    case 'cart':
+      return wroteToCart ? 5 : 3;
+    case 'outfit':
+    case 'pack':
+      return 4;
+    case 'products':
+      return 3;
+    case 'size':
+      return card.recommendation.size ? 2 : 1;
+    default:
+      return 2;
+  }
+}
+
+/** Two result lists as one, alternating, without repeats, capped so the card stays readable. */
+export function interleave<T extends { id: string }>(first: T[], second: T[], cap = 12): T[] {
+  const out: T[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; out.length < cap && (i < first.length || i < second.length); i++) {
+    for (const item of [first[i], second[i]]) {
+      if (item && !seen.has(item.id) && out.length < cap) {
+        seen.add(item.id);
+        out.push(item);
+      }
+    }
+  }
+  return out;
 }
 
 export interface Reply {
   text: string;
   attachment?: CaddieAttachment;
+  /** Store-cart changes the tools decided on, in order, for the widget to make. */
+  actions?: CartAction[];
 }
 
 /** Who the turn belongs to, for the usage dashboard. Never used for anything else. */
@@ -204,12 +274,16 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
 
   const messages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
-    ...([pageContext(session), screenContext(session)].filter(Boolean) as ChatMessage[]),
+    ...([pageContext(session), screenContext(session), basketContext(session)].filter(Boolean) as ChatMessage[]),
     ...history(session),
     { role: 'user', content: userText },
   ];
 
   let attachment: CaddieAttachment | undefined;
+  const actions: CartAction[] = [];
+  let attachmentWeight = -1;
+  /** Set when searches were merged, so "on screen" is updated to match. */
+  let merged = false;
 
   // Tracked so cost per conversation is a measurement rather than a guess.
   let promptTokens = 0;
@@ -251,7 +325,22 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
         steps: step + 1,
         ...(meta?.client ? { client: meta.client } : {}),
       });
-      return { text: choice.message.content?.trim() || 'Sorry, I did not catch that.', attachment };
+      // Each search recorded only its own results; the screen shows them together.
+      if (merged && attachment?.kind === 'products') {
+        const current = await sessions.getOrCreate(sessionId);
+        await sessions.patch(sessionId, {
+          lastShown: {
+            ...(current.lastShown ?? { kind: 'products' as const }),
+            kind: 'products',
+            items: attachment.products.map((product) => ({ id: product.id, title: product.title })),
+          },
+        });
+      }
+      return {
+        text: choice.message.content?.trim() || 'Sorry, I did not catch that.',
+        attachment,
+        ...(actions.length ? { actions } : {}),
+      };
     }
 
     messages.push({ role: 'assistant', content: choice.message.content, tool_calls: calls });
@@ -286,7 +375,7 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
         // Read fresh: a cart write earlier in this same batch may have opened
         // the basket this call needs to add to.
         const current = await sessions.getOrCreate(sessionId);
-        const result = await runTool(call.function.name, args, { session: current });
+        const result = await runTool(call.function.name, args, { session: current, utterance: userText, pendingActions: actions.length });
         log.info('openai.tool', { tool: call.function.name, sessionId });
         return { call, result };
       } catch (err) {
@@ -331,10 +420,35 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
         continue;
       }
 
+      /*
+       * One card per turn, handed back rather than published here.
+       *
+       * Every tool's card used to go to the screen as it ran. "Add all of
+       * these" is a product lookup and an add_to_cart per item, so the
+       * customer watched each product appear on its own and a basket after
+       * every add - five items, ten cards - before the one answer they asked
+       * for. The route publishes the turn's card once the model has finished.
+       *
+       * Which card wins is by what it is, not by which came last - see
+       * cardWeight. A later card of the same weight replaces an earlier one.
+       */
       const { result } = entry;
+      if (result.actions) actions.push(...result.actions);
       if (result.attachment) {
-        attachment = result.attachment;
-        publish({ type: 'attachment', sessionId, attachment: result.attachment });
+        const weight = cardWeight(result.attachment, writesToCart(entry.call.function.name));
+        /*
+         * Two searches in one turn are one answer. Asked for "polos and
+         * jackets", the model searched for each; the jackets card replaced
+         * the polos card, and the customer was told about six polos they
+         * could not see. The products are merged, taking turns, instead.
+         */
+        if (attachment?.kind === 'products' && result.attachment.kind === 'products') {
+          attachment = { kind: 'products', products: interleave(attachment.products, result.attachment.products) };
+          merged = true;
+        } else if (weight >= attachmentWeight) {
+          attachment = result.attachment;
+          attachmentWeight = weight;
+        }
       }
 
       messages.push({
@@ -349,5 +463,6 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
   return {
     text: 'I am having trouble pulling that together right now. Could you try asking a different way?',
     attachment,
+    ...(actions.length ? { actions } : {}),
   };
 }

@@ -5,6 +5,7 @@ import { fetchWithTimeout } from '../lib/http.js';
 import { log } from '../lib/logger.js';
 import { costOfAudio } from '../usage/pricing.js';
 import { record } from '../usage/store.js';
+import { languageToRetry, type LanguageHints } from './language.js';
 
 /**
  * Speech to text.
@@ -81,10 +82,12 @@ export function transcribeEnabled(): boolean {
  */
 const NOMINAL_BYTES_PER_SECOND = 4000;
 
-/** Who the clip belongs to, for the usage dashboard. */
+/** Who the clip belongs to, and what we know of the language they speak. */
 export interface TranscribeMeta {
   sessionId?: string;
   client?: string;
+  /** Storefront and browser languages, and what they have already said. See ai/language.ts. */
+  hints?: LanguageHints;
 }
 
 /**
@@ -115,9 +118,79 @@ export async function transcribe(audio: Buffer, mimeType: string, meta?: Transcr
     throw new CaddieError('That recording is too long - keep it under 25MB.', 413, 'audio_too_large');
   }
 
+  /*
+   * Detected first, then checked. A single-market deployment can still force
+   * one language with OPENAI_TRANSCRIBE_LANGUAGE; otherwise the model hears
+   * the customer's own language, and a result in a script nothing about the
+   * customer points to is heard again in the one they are expected to speak.
+   */
+  const forced = env.openai.transcribeLanguage || undefined;
+  let text = await hear(audio, mimeType, meta, forced);
+
+  const retry = forced || !meta?.hints ? null : languageToRetry(text, meta.hints);
+  if (retry) {
+    const again = await hear(audio, mimeType, meta, retry);
+    log.warn('voice.language_retry', {
+      sessionId: meta?.sessionId,
+      expected: retry,
+      detected: text.slice(0, 120),
+      retried: again.slice(0, 120),
+    });
+    // Named-language transcription of genuinely foreign speech can come back
+    // empty; then the detected text is still the better of the two.
+    if (/[\p{L}\p{N}]/u.test(again)) text = again;
+  }
+
+  const seconds = audio.byteLength / NOMINAL_BYTES_PER_SECOND;
+
+  /*
+   * Last line of defence against a transcript nobody spoke.
+   *
+   * The clip is short, the model had a word list and nothing else to go on,
+   * and it returned a fluent sentence. Counting words against the length of
+   * the audio catches that without ever refusing a real customer: nobody says
+   * twelve words in one second, whatever they are saying.
+   *
+   * Dropped rather than raised, because the honest outcome is the same one a
+   * genuinely silent clip gets - "I did not catch that" - and the customer
+   * simply speaks again.
+   */
+  /*
+   * Nothing but punctuation is not speech.
+   *
+   * With no prompt to echo, a silent clip usually comes back empty - but
+   * sometimes as "." or "...", which is truthy and would be sent to the model
+   * as though the customer had said something.
+   */
+  if (text && !/[\p{L}\p{N}]/u.test(text)) {
+    log.warn('voice.transcript_rejected', { reason: 'no words in it', text: text.slice(0, 40) });
+    return '';
+  }
+
+  if (impossibleSpeechRate(text, seconds)) {
+    log.warn('voice.transcript_rejected', {
+      reason: 'impossible speech rate',
+      words: text.split(/\s+/).filter(Boolean).length,
+      seconds: Number(seconds.toFixed(2)),
+      text: text.slice(0, 120),
+    });
+    return '';
+  }
+
+  return text;
+}
+
+/**
+ * One transcription call, in the given language or in whatever the model
+ * detects. Each call is billed, so each one is recorded.
+ */
+async function hear(audio: Buffer, mimeType: string, meta: TranscribeMeta | undefined, language?: string): Promise<string> {
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array(audio)], { type: mimeType }), `speech.${extensionFor(mimeType)}`);
   form.append('model', env.openai.transcribeModel);
+  // A language code, not a prompt: it names what to write in and gives the
+  // model no words to repeat back.
+  if (language) form.append('language', language);
   /*
    * No prompt at all.
    *
@@ -165,6 +238,7 @@ export async function transcribe(audio: Buffer, mimeType: string, meta?: Transcr
     ms: Date.now() - startedAt,
     bytes: audio.byteLength,
     mimeType,
+    language: language ?? 'detected',
     chars: text.length,
     text: text.slice(0, 200),
   });
@@ -201,40 +275,6 @@ export async function transcribe(audio: Buffer, mimeType: string, meta?: Transcr
     ms: Date.now() - startedAt,
     ...(meta?.client ? { client: meta.client } : {}),
   });
-
-  /*
-   * Last line of defence against a transcript nobody spoke.
-   *
-   * The clip is short, the model had a word list and nothing else to go on,
-   * and it returned a fluent sentence. Counting words against the length of
-   * the audio catches that without ever refusing a real customer: nobody says
-   * twelve words in one second, whatever they are saying.
-   *
-   * Dropped rather than raised, because the honest outcome is the same one a
-   * genuinely silent clip gets - "I did not catch that" - and the customer
-   * simply speaks again.
-   */
-  /*
-   * Nothing but punctuation is not speech.
-   *
-   * With no prompt to echo, a silent clip usually comes back empty - but
-   * sometimes as "." or "...", which is truthy and would be sent to the model
-   * as though the customer had said something.
-   */
-  if (text && !/[\p{L}\p{N}]/u.test(text)) {
-    log.warn('voice.transcript_rejected', { reason: 'no words in it', text: text.slice(0, 40) });
-    return '';
-  }
-
-  if (impossibleSpeechRate(text, seconds)) {
-    log.warn('voice.transcript_rejected', {
-      reason: 'impossible speech rate',
-      words: text.split(/\s+/).filter(Boolean).length,
-      seconds: Number(seconds.toFixed(2)),
-      text: text.slice(0, 120),
-    });
-    return '';
-  }
 
   return text;
 }

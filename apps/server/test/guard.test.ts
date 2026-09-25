@@ -63,6 +63,13 @@ describe('screening', () => {
     }
   });
 
+  it('lets the store names through, however voice mangled the rest', async () => {
+    // The widget's first tile, as it arrived by voice. Refused once as off-topic.
+    for (const text of ['chose my Ambassador back', 'the Prestige one', 'Choose My Ambassador Pack']) {
+      expect((await screen(text, false)).allow).toBe(true);
+    }
+  });
+
   it('lets terse follow-ups through', async () => {
     for (const text of ['cheaper', 'yes', 'go on', 'another']) {
       expect((await screen(text, true)).allow).toBe(true);

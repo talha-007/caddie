@@ -67,6 +67,23 @@ export function sameSize(variantValue: string, wanted: string): boolean {
 }
 
 /**
+ * Whether an option value is the one a customer (or the model) asked for.
+ *
+ * Exact text failed real customers on the live store: "medium" is the
+ * store's M, and the Tour Pro Belt comes in "M/L" and "L/XL", so "medium"
+ * matched nothing and the Caddie reported sizes that were on the shelf as
+ * out of stock. Same text, same size by name, or one half of a combined size.
+ * "Large" on that belt matches both halves - a real choice, for the caller to
+ * ask about, not to guess.
+ */
+export function optionValueMatches(value: string, wanted: string): boolean {
+  if (value.trim().toLowerCase() === wanted.trim().toLowerCase()) return true;
+  if (sameSize(value, wanted)) return true;
+  const parts = value.split('/').map((part) => part.trim()).filter(Boolean);
+  return parts.length > 1 && parts.some((part) => sameSize(part, wanted));
+}
+
+/**
  * Which scale a size is measured on.
  *
  * Druids sizes tops by letter and bottoms by waist, so "M" and "32" are not

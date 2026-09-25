@@ -105,6 +105,21 @@ export const env = {
      * cargo pants as golf kit. Leave empty on a store that sells only Druids.
      */
     brandTag: optional('SHOPIFY_BRAND_TAG'),
+    /**
+     * The bundle deals the Caddie may sell, as page handles. An allow-list,
+     * not everything the theme has: it also holds years of old campaign,
+     * test and EUR pages, and a deal whose discount no longer runs is one
+     * the customer would pay full price for. These six are the ones in the
+     * store's navigation; their steps and prices are read live from the
+     * theme. Empty turns bundles off.
+     */
+    bundleDeals: optional(
+      'SHOPIFY_BUNDLE_DEALS',
+      'golf-ambassador-pack,ladies-ambassador-pack,kids-ambassador,prestige-pack,any-rainsuit,players-bundle',
+    )
+      .split(',')
+      .map((handle) => handle.trim())
+      .filter(Boolean),
     /** Admin API token, used to mirror the catalogue. Not per-customer traffic. */
     adminToken: optional('DUMMY_STORE_ACCESS_TOKEN') || optional('SHOPIFY_ADMIN_TOKEN'),
     /**
@@ -145,6 +160,13 @@ export const env = {
     model: optional('OPENAI_MODEL', 'gpt-4.1-mini'),
     /** Speech to text for the widget's mic, until Vapi handles voice. */
     transcribeModel: optional('OPENAI_TRANSCRIBE_MODEL', 'gpt-4o-mini-transcribe'),
+    /**
+     * Forces one language (ISO-639-1) for every clip. Empty by default: the
+     * language is detected and checked against the customer's page, browser
+     * and conversation instead - see ai/language.ts. Only set this for a store
+     * that sells in exactly one language.
+     */
+    transcribeLanguage: optional('OPENAI_TRANSCRIBE_LANGUAGE', ''),
     /**
      * Screens the first message of a conversation. One word in, one word out,
      * so the cheapest model is the right one - it costs a fraction of letting

@@ -16,6 +16,30 @@ export interface CaddieSession {
   updatedAt: number;
   /** Shopify cart id, once the customer adds anything. */
   cartId?: string;
+  /**
+   * Where the basket lives. 'theme': the store's own cart, in the shopper's
+   * browser, changed by the widget - the one the bundle discounts apply to
+   * and the theme's cart icon shows. Anything else: our Storefront API cart
+   * (the dev harness). Set from the widget's x-caddie-cart header.
+   */
+  cartMode?: 'theme' | 'storefront';
+  /**
+   * What is in that basket, as of the last time any tool read or changed it.
+   * The model is shown this each turn so "swap the orange polo" can find it.
+   */
+  basket?: Array<{
+    lineId: string;
+    productId: string;
+    title: string;
+    variantTitle: string;
+    quantity: number;
+    /** The pack this line belongs to (its bundle id), when it is part of one. */
+    bundle?: string;
+    /** Which deal that pack is, by page handle. */
+    bundleName?: string;
+  }>;
+  /** Packs the Caddie has put in the store cart, so a change replaces one rather than adding another. */
+  packsAdded?: Array<{ handle: string; bundleId: string }>;
   /** Everything we have learned about fit. */
   sizeProfile: SizeInput;
   /**
@@ -27,7 +51,12 @@ export interface CaddieSession {
    */
   lastShown?: {
     kind: 'products' | 'pack' | 'outfit';
-    items: Array<{ id: string; title: string }>;
+    /** `slot` is set for an outfit, so a swap knows which one to rebuild. */
+    items: Array<{ id: string; title: string; slot?: string }>;
+    /** Outfit pieces already swapped out, so "another" never offers them again. */
+    swappedOut?: string[];
+    /** Set when the pack on screen is one of the store's bundle deals: its page handle. */
+    bundle?: string;
     query?: string;
     budgetAmount?: number;
     colour?: string;

@@ -49,14 +49,59 @@ const CASES = [
     id: 'colour-claim',
     why: 'Called six mixed-colour polos "six black polos"',
     turns: ['show me a black polo'],
-    check: (text) => !/(\d+|six|five|four|three)\s+black\s+polo/i.test(text),
+    // Judged by what was shown, so it holds on any catalogue: calling them
+    // black is only wrong if some of them are not.
+    check: (text, shown) => {
+      const titles = shown?.kind === 'products' ? shown.products.map((p) => p.title) : [];
+      const claims = /(\d+|six|five|four|three|two)\s+black\s+polo/i.test(text);
+      return !claims || (titles.length > 0 && titles.every((title) => /BLACK/i.test(title)));
+    },
+  },
+  {
+    id: 'colour-shown',
+    why: 'Asked in Spanish for a blue polo, was shown an orange one first',
+    turns: ['Quiero un polo azul'],
+    // Every card is a blue shade - or there is no card and it says so.
+    check: (text, shown) => {
+      const titles = shown?.kind === 'products' ? shown.products.map((p) => p.title) : [];
+      const blue = /NAVY|BLUE|TEAL|ROYAL|SKY|COBALT|TOUR POLO/i;
+      return titles.length ? titles.every((title) => blue.test(title)) : /\bno\b|not/i.test(text);
+    },
+  },
+  {
+    id: 'colour-plain',
+    why: 'Asked for a plain white polo, was swapped into the white-and-orange one',
+    turns: ['Show me a plain white polo'],
+    // Every card is white and only white - no "WHITE/ ORANGE".
+    check: (text, shown) => {
+      const titles = shown?.kind === 'products' ? shown.products.map((p) => p.title) : [];
+      return titles.length > 0 && titles.every((title) => /- WHITE$/i.test(title.trim()));
+    },
+  },
+  {
+    id: 'colour-missing',
+    why: 'Must say we do not have it, never offer another colour as that one',
+    // A colour hardly anyone makes a golf polo in, so on most catalogues the
+    // honest answer is "we do not have that" - and if a store does stock it,
+    // everything shown must really be that colour.
+    turns: ['Do you have a gold polo?'],
+    check: (text, shown) => {
+      const titles = shown?.kind === 'products' ? shown.products.map((p) => p.title) : [];
+      if (titles.length) return titles.every((title) => /GOLD|MUSTARD|YELLOW|OCHRE/i.test(title));
+      return /(do not|don't|not stock|no gold|not have|none)/i.test(text);
+    },
   },
   {
     id: 'womens-in-mens-store',
     why: 'Called mens polos womens',
     turns: ['I need a womens polo, my chest is 100cm'],
-    check: (text) =>
-      /(do not|don't|don't stock|no womens|no women's|not .*stock|only .*mens|only .*men's|mens range|men's range)/i.test(text),
+    // Either ladies polos are shown - every one of them ladies - or it says the
+    // store has none. Never mens polos passed off as womens.
+    check: (text, shown) => {
+      const titles = shown?.kind === 'products' ? shown.products.map((p) => p.title) : [];
+      if (titles.length) return titles.every((title) => /LADIES|WOMEN/i.test(title));
+      return /(do not|don't|not .*stock|no womens|no women's|only .*men)/i.test(text);
+    },
   },
   {
     id: 'size-from-chest',
@@ -99,8 +144,8 @@ async function send(sessionId, text) {
     body: JSON.stringify({ sessionId, text }),
   });
   const body = await res.json();
-  if (!res.ok) return `ERROR ${res.status}: ${JSON.stringify(body).slice(0, 120)}`;
-  return body.message?.text ?? '';
+  if (!res.ok) return { text: `ERROR ${res.status}: ${JSON.stringify(body).slice(0, 120)}` };
+  return { text: body.message?.text ?? '', attachment: body.message?.attachment };
 }
 
 const results = [];
@@ -108,16 +153,18 @@ const timings = [];
 for (const testCase of CASES) {
   const sessionId = `${MODEL}-${testCase.id}-${Date.now()}`;
   let last = '';
+  // The card, for checks about what was shown rather than what was said.
+  let shown;
   const startedAt = Date.now();
   try {
-    for (const turn of testCase.turns) last = await send(sessionId, turn);
+    for (const turn of testCase.turns) ({ text: last, attachment: shown } = await send(sessionId, turn));
   } catch (err) {
     last = `ERROR ${String(err)}`;
   }
   const ms = Date.now() - startedAt;
   timings.push(ms / testCase.turns.length);
   const clean = normalise(last);
-  const pass = !clean.startsWith('ERROR') && testCase.check(clean);
+  const pass = !clean.startsWith('ERROR') && testCase.check(clean, shown);
   results.push({ id: testCase.id, pass, text: clean });
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${testCase.id.padEnd(22)} ${clean.replace(/\s+/g, ' ').slice(0, 115)}`);
 }

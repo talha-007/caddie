@@ -11,7 +11,7 @@ import { route } from '../ai/devRouter.js';
 import { screen } from '../ai/guard.js';
 import { converse, openaiEnabled, type TurnMeta } from '../ai/openai.js';
 import { consumeShared, LIMITS } from '../lib/rateLimit.js';
-import { clientKey } from '../lib/request.js';
+import { clientKey, noteCartMode } from '../lib/request.js';
 import { clientHash } from '../usage/identity.js';
 import { recordMessage } from '../usage/store.js';
 
@@ -96,7 +96,7 @@ chatRouter.post('/', async (req, res, next) => {
     });
   }
 
-  const session = await sessions.getOrCreate(sessionId);
+  const session = await noteCartMode(req, await sessions.getOrCreate(sessionId), (id, change) => sessions.patch(id, change));
 
   // Written before the model runs, and kept on the session so a spoken
   // follow-up - which carries no context of its own - still knows the page.
@@ -153,7 +153,7 @@ chatRouter.post('/', async (req, res, next) => {
 
 async function viaOpenai(sessionId: string, text: string, meta?: TurnMeta): Promise<CaddieMessage> {
   const reply = await converse(sessionId, text, meta);
-  return message('assistant', reply.text, reply.attachment);
+  return { ...message('assistant', reply.text, reply.attachment), ...(reply.actions ? { actions: reply.actions } : {}) };
 }
 
 /* ---------------- Vapi Chat API ---------------- */

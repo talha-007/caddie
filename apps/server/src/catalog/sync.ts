@@ -138,7 +138,7 @@ function toProduct(raw: AdminProduct): Product {
   };
 }
 
-async function admin<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+export async function admin<T>(query: string, variables: Record<string, unknown>): Promise<T> {
   const res = await fetchWithTimeout(`https://${env.shopify.storeDomain}/admin/api/2025-07/graphql.json`, {
     method: 'POST',
     timeoutMs: 30_000,
@@ -254,6 +254,20 @@ export function productById(id: string): Product | null {
   if (direct) return direct;
   if (!/^\d+$/.test(id)) return null;
   return byId.get(`gid://shopify/Product/${id}`) ?? null;
+}
+
+/**
+ * A product by its exact name, for when the model has a title and no id.
+ *
+ * Exact, give or take case and spacing ("VENTO POLO - NAVY/WHITE" is the same
+ * name as "Vento Polo - Navy/ White"). Never a closest match: a near-miss here
+ * would put a different garment in the basket.
+ */
+export function productByTitle(title: string): Product | null {
+  const key = (text: string) => text.toLowerCase().replace(/\s+/g, '');
+  const wanted = key(title);
+  if (!wanted) return null;
+  return products.find((product) => key(product.title) === wanted) ?? null;
 }
 
 export function catalogueReady(): boolean {

@@ -1,4 +1,6 @@
 import type { Money, PackInput, PackRecommendation, Product } from '@caddie/shared';
+import { parseRange } from '../catalog/audience.js';
+import { matchesColourText } from '../catalog/colour.js';
 import { searchProducts } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
 import { isPack } from './packs.js';
@@ -30,16 +32,13 @@ const DEFAULT_ITEM_COUNT = 3;
  */
 const RANGE_TERMS = 'polo shirt tee hoodie midlayer gilet jacket shorts trousers';
 
+/*
+ * Through colour.ts, which reads the title and Colour option only. This used
+ * to search tags and descriptions, where the store's "blue" campaign tag sits
+ * on orange polos and descriptions name other garments' colours.
+ */
 function matchesColour(product: Product, colour?: string): boolean {
-  if (!colour) return true;
-  const needle = colour.toLowerCase();
-  const haystack = [product.title, ...product.tags, product.description ?? '']
-    .join(' ')
-    .toLowerCase();
-  if (haystack.includes(needle)) return true;
-  return product.variants.some((variant) =>
-    Object.values(variant.options).some((value) => value.toLowerCase().includes(needle)),
-  );
+  return matchesColourText(product, colour) > 0;
 }
 
 function hasSize(product: Product, size?: string): boolean {
@@ -97,8 +96,11 @@ function fillWithinBudget(
   return chosen;
 }
 
-export async function recommendPack(input: PackInput): Promise<PackRecommendation> {
+export async function recommendPack(input: PackInput, known?: 'men' | 'women'): Promise<PackRecommendation> {
   const itemCount = input.itemCount ?? DEFAULT_ITEM_COUNT;
+  // One range for the whole pack, as for outfits - never kids unless asked.
+  const range = parseRange(input.query).range ?? known ?? 'men';
+  const rangeWord = range === 'women' ? 'ladies' : range === 'kids' ? 'kids' : 'mens';
 
   /*
    * What they asked for first, the range second. Their own words are the more
@@ -106,8 +108,8 @@ export async function recommendPack(input: PackInput): Promise<PackRecommendatio
    * when the first search could not fill the pack.
    */
   const queries = [
-    [input.query, input.colour].filter(Boolean).join(' '),
-    [input.colour, RANGE_TERMS].filter(Boolean).join(' '),
+    [rangeWord, input.query, input.colour].filter(Boolean).join(' '),
+    [rangeWord, input.colour, RANGE_TERMS].filter(Boolean).join(' '),
   ]
     .map((query) => query.trim())
     .filter((query, index, all) => query && all.indexOf(query) === index);
