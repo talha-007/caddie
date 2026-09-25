@@ -166,6 +166,36 @@ always returns its nearest guesses — asking for something we do not stock stil
 comes back full. The store also holds generic demo products, filtered out by
 `SHOPIFY_BRAND_TAG`, so an empty result can be correct.
 
+## The sales brain
+
+The model runs the conversation; code decides what is true and what is best.
+
+| | Where | What it does |
+| --- | --- | --- |
+| **Shopper profile** | `src/shopper/` | Budget (max / around / ideal, per item or total), colours (required or preferred), avoided colours, fit, layering, usual size, weather, features, liked and turned-down products, "just the jacket". Read from every message by code (`readIntent`), and by the model through `note_shopper` for what needs interpreting. Shown to the model each turn. |
+| **Verified attributes** | `src/catalog/attributes.ts` | Waterproof, breathable, stretch, cut, fabric - read from Shopify's own title and description only. |
+| **Taxonomy** | `src/catalog/taxonomy.ts` | "Rain top" searches jackets and requires waterproof; "jumper" searches midlayers. Every other word is kept. |
+| **Ranking** | `src/recommend/rank.ts` | Each result is exact, strong or partial against the profile, with a reason made only of verified facts. |
+| **Named products** | `src/catalog/lookup.ts` | Checks a name against every title in the mirror. The only thing allowed to say "we do not stock that". |
+| **Sizing** | `src/recommend/size.ts` | Chart first, then fit: a loose fit, layering or a close-cut garment only moves the size in the top half of the band; otherwise it is the alternative, with its reason. Confidence is high, medium or estimate. |
+| **Next step** | `src/recommend/nextStep.ts` | One cross-sell that completes the purpose, or a deal saving with both prices from Shopify. None after "just the jacket". |
+
+**A colour or feature for this request is not a standing rule.** "Show me blue
+polos" filters that search; "only navy" filters every later one; "I'd prefer
+navy" only ranks. `standingPart` decides what is remembered - remembering
+every colour turned later jackets blue.
+
+**Never call a product something its description does not say.** A title
+containing "RAINSUIT" is not evidence of waterproofing. If a feature matters
+and the data does not state it, the answer is "I can't confirm that", and the
+fix is in the catalogue, not the prompt.
+
+**What the catalogue does not hold.** No metafields for fit, fabric weight or
+weather, no garment measurements and no per-product size charts - every
+product in a category shares Druids' one chart. Colour tags are campaign labels
+(a grey polo is tagged "blue"), so colour comes from titles and options only.
+Richer merchandising data in Shopify would make every one of the above better.
+
 ## The store
 
 `qqfeqi-xb.myshopify.com` is a test store, priced in GBP. It holds 24 real
