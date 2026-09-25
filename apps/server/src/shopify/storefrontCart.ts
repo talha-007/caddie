@@ -216,3 +216,40 @@ export async function setLineQuantity(cartId: string, lineId: string, quantity: 
 export function logMode(): void {
   log.info('cart.mode', { via: storefrontCartEnabled() ? 'storefront-api' : 'ucp' });
 }
+
+/**
+ * What checkout would charge for these lines, from a throwaway cart.
+ *
+ * A pack's price is applied at checkout by a discount Function that looks
+ * for the pack's trigger property. A trigger the Function has not been set up
+ * for is silently ignored: the Mixed Conditions and Cool & Wet packs went into
+ * a test cart at £117 and £114 - the sum of their pieces - against quoted
+ * pack prices of £99.99 and £159.99. This asks Shopify rather than trusting
+ * the theme's word. The cart is never checked out; Shopify expires it.
+ */
+export async function checkoutTotal(
+  lines: Array<{ variantId: string; properties: Array<[string, string]> }>,
+  countryCode = 'GB',
+): Promise<number> {
+  const data = await storefront<{
+    cartCreate?: { cart?: { cost: { totalAmount: { amount: string } } }; userErrors?: Array<{ message?: string }> };
+  }>(
+    `mutation($lines: [CartLineInput!]!, $country: CountryCode!) {
+       cartCreate(input: { lines: $lines, buyerIdentity: { countryCode: $country } }) {
+         cart { cost { totalAmount { amount } } }
+         userErrors { message }
+       }
+     }`,
+    {
+      country: countryCode,
+      lines: lines.map((line) => ({
+        merchandiseId: line.variantId.startsWith('gid://') ? line.variantId : `gid://shopify/ProductVariant/${line.variantId}`,
+        quantity: 1,
+        attributes: line.properties.map(([key, value]) => ({ key, value })),
+      })),
+    },
+  );
+  const cart = data.cartCreate?.cart;
+  if (!cart) throw new UpstreamError(data.cartCreate?.userErrors?.[0]?.message ?? 'Could not price the pack');
+  return Number(cart.cost.totalAmount.amount);
+}

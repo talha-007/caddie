@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import { loadBestSellers } from './catalog/bestSellers.js';
 import { loadDeals } from './catalog/bundles.js';
 import { startCatalogueSync, stopCatalogueSync, syncCatalogue } from './catalog/sync.js';
 import { verifyEnvironment } from './startupCheck.js';
@@ -136,6 +137,11 @@ if (isEntrypoint) {
     const refreshDeals = () => loadDeals().catch((err) => log.warn('deals.load_failed', { err: String(err) }));
     await refreshDeals();
     setInterval(refreshDeals, env.shopify.catalogueReconcileMs).unref?.();
+
+    // Best sellers, for "best picks". Sales rank moves slowly: every six hours, not per customer.
+    const refreshBestSellers = () => loadBestSellers().catch((err) => log.warn('bestsellers.load_failed', { err: String(err) }));
+    void refreshBestSellers();
+    setInterval(refreshBestSellers, 6 * 60 * 60 * 1000).unref?.();
 
     const server = createApp().listen(env.port, () => {
       log.info('caddie.server.listening', {

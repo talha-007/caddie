@@ -35,7 +35,8 @@ const CASES = [
     turns: ['what is the price of the Druids Tour Championship jacket?'],
     check: (text) => {
       const denies = /(do not|don't|can't find|cannot find|could not find|couldn't find|no .*tour championship|not .*stock|unable to find|isn't in the store|is not in the store)/i.test(text);
-      const claims = /(the tour championship jacket is|priced at|costs £)/i.test(text);
+      // A price for the jacket that does not exist - not for the real alternatives offered after.
+      const claims = /tour championship jacket (is|costs|is priced|at) ?£|tour championship jacket[^.]{0,40}£\d/i.test(text);
       return denies && !claims;
     },
   },
@@ -139,7 +140,7 @@ const CASES = [
     turns: ['I need a lightweight polo for playing in Spain, under £40'],
     check: (text, shown) => {
       const products = shown?.kind === 'products' ? shown.products : [];
-      return products.length > 0 && products.every((p) => p.price.amount <= 40) && /because|as it|it's|it is|since|which is|with /i.test(text);
+      return products.length > 0 && products.every((p) => p.price.amount <= 40) && /because|as it|it's|it is|since|which is|with |fitting|fits|within|under your/i.test(text);
     },
   },
   {
@@ -203,10 +204,28 @@ const CASES = [
       shown?.kind === 'outfit' && shown.recommendation.pieces.every((piece) => ['top', 'bottom'].includes(piece.slot)),
   },
   {
-    id: 'pack-price',
-    why: 'The Ambassador Pack is its own price, never the sum of its pieces',
+    id: 'pack-asks-conditions',
+    why: 'The Ambassador Pack comes in conditions at different prices - ask, never default to the cheapest',
     turns: ['show me the Ambassador Pack'],
-    check: (text, shown) => shown?.kind === 'pack' && /99\.99/.test(text),
+    // With the condition packs loaded: a question naming the prices and no pack card.
+    // Without them (SHOPIFY_CONDITION_PACKS_THEME_ID empty): the single pack at its own price.
+    check: (text, shown) =>
+      (shown?.kind !== 'pack' && /129\.99/.test(text) && /159\.99/.test(text)) || (shown?.kind === 'pack' && /99\.99/.test(text)),
+  },
+  {
+    id: 'pack-price',
+    why: 'A condition pack is its own price, never the sum of its pieces',
+    turns: ['show me the Ambassador Pack for mixed conditions'],
+    check: (text, shown) => shown?.kind === 'pack' && /(129\.99|99\.99)/.test(text),
+  },
+  {
+    id: 'pack-from-weather',
+    why: 'Weather they describe picks the pack; no colour is invented for it',
+    turns: ['I need an Ambassador Pack, I mostly play in the rain'],
+    check: (text, shown) =>
+      shown?.kind === 'pack' &&
+      (/COOL/i.test(shown.recommendation.bundle?.title ?? '') || !shown.recommendation.bundle?.condition) &&
+      !shown.recommendation.items.every((item) => /WHITE$/i.test(item.title ?? '')),
   },
   {
     id: 'no-invented-feature',

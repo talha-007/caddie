@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { catalogueReady, catalogueState } from '../catalog/sync.js';
+import { bestSellersState } from '../catalog/bestSellers.js';
 import { dealsState } from '../catalog/bundles.js';
 import { modelLoad } from '../ai/openai.js';
 import { storefrontCartEnabled } from '../shopify/storefrontCart.js';
@@ -34,6 +35,7 @@ healthRouter.get('/', (_req, res) => {
     catalogue: catalogueState(),
     // The store's bundle deals, read from the live theme.
     deals: dealsState(),
+    bestSellers: bestSellersState(),
     // Queued means customers are waiting on the model, not on us.
     model: modelLoad(),
     // UCP is throttled; the Storefront API is not rate-limited for buyers.

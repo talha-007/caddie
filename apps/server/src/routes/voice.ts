@@ -10,6 +10,7 @@ import { consumeShared, LIMITS } from '../lib/rateLimit.js';
 import { clientKey, noteCartMode } from '../lib/request.js';
 import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
+import { shopperSizes } from '../shopper/remember.js';
 import { clientHash } from '../usage/identity.js';
 import { recordMessage } from '../usage/store.js';
 
@@ -114,7 +115,12 @@ voiceRouter.post(
         text: transcript,
         createdAt: new Date().toISOString(),
       };
-      const answer = { ...assistantMessage(reply.text, reply.attachment), ...(reply.actions ? { actions: reply.actions } : {}) };
+      const shopper = shopperSizes(await sessions.getOrCreate(sessionId));
+      const answer = {
+        ...assistantMessage(reply.text, reply.attachment),
+        ...(reply.actions ? { actions: reply.actions } : {}),
+        ...(shopper ? { shopper } : {}),
+      };
 
       // Appended, not saved: see the note in chat.ts.
       await sessions.append(sessionId, [heard, answer]);

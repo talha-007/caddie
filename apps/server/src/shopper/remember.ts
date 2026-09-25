@@ -1,3 +1,4 @@
+import type { ShopperSizes } from '@caddie/shared';
 import type { Feature } from '../catalog/attributes.js';
 import type { RankRequest } from '../recommend/rank.js';
 import { sessions, type CaddieSession } from '../session/store.js';
@@ -56,8 +57,28 @@ export function rankRequestFor(
     ...((turn.weather ?? profile.weather)?.length ? { weather: turn.weather ?? profile.weather } : {}),
     ...((turn.budget ?? profile.budget) ? { budget: turn.budget ?? profile.budget } : {}),
     ...(size ? { size } : {}),
+    ...(profile.waist ? { waist: profile.waist } : {}),
     ...(fit ? { fit } : {}),
     ...(profile.rejected?.length ? { rejected: profile.rejected } : {}),
     ...(extra.currency ? { currency: extra.currency } : {}),
   };
+}
+
+/**
+ * Their range and sizes, for the widget: every size picker opens on them.
+ *
+ * find_my_size writes its answer here too, so a size worked out from their
+ * chest replaces the one they guessed. The range they browse counts when they
+ * never named one.
+ */
+export function shopperSizes(session: CaddieSession): ShopperSizes | undefined {
+  const profile = session.shopper ?? {};
+  const range = profile.range ?? session.sizeProfile.audience ?? session.preferences.audience;
+  const size = profile.usualSize ?? session.sizeProfile.usualSize;
+  const out: ShopperSizes = {
+    ...(range ? { range } : {}),
+    ...(size ? { size } : {}),
+    ...(profile.waist ? { waist: profile.waist } : {}),
+  };
+  return Object.keys(out).length ? out : undefined;
 }

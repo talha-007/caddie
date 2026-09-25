@@ -120,6 +120,14 @@ export const env = {
       .split(',')
       .map((handle) => handle.trim())
       .filter(Boolean),
+    /**
+     * The Ambassador Pack by conditions - Warm Rounds, Mixed Conditions, Cool &
+     * Wet - built with the theme's sport-bundle sections. Read from this theme
+     * (by numeric id) and page, because they are not in the published theme
+     * yet. Empty: off, and the older single Ambassador Pack is sold instead.
+     */
+    conditionPacksThemeId: optional('SHOPIFY_CONDITION_PACKS_THEME_ID'),
+    conditionPacksPage: optional('SHOPIFY_CONDITION_PACKS_PAGE', 'choose-ambassador-pack-temp'),
     /** Admin API token, used to mirror the catalogue. Not per-customer traffic. */
     adminToken: optional('DUMMY_STORE_ACCESS_TOKEN') || optional('SHOPIFY_ADMIN_TOKEN'),
     /**

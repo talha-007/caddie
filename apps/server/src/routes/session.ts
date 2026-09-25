@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import type { BasketSync, SessionRestartResponse } from '@caddie/shared';
+import type { BasketSync, ProfileRequest, SessionRestartResponse } from '@caddie/shared';
+import { rememberShopper } from '../shopper/remember.js';
 import { log } from '../lib/logger.js';
 import { productById } from '../catalog/sync.js';
 import { sessions } from '../session/store.js';
@@ -42,6 +43,19 @@ sessionRouter.post('/:id/restart', async (req, res, next) => {
       updatedAt: now,
       sizeProfile: existing.sizeProfile,
       preferences: existing.preferences.audience ? { audience: existing.preferences.audience } : {},
+      // Who they shop for and their sizes are about them, not the old chat.
+      ...(existing.shopper
+        ? {
+            shopper: Object.fromEntries(
+              Object.entries({
+                range: existing.shopper.range,
+                usualSize: existing.shopper.usualSize,
+                waist: existing.shopper.waist,
+                fit: existing.shopper.fit,
+              }).filter(([, value]) => value !== undefined),
+            ),
+          }
+        : {}),
       messages: [],
       ...(existing.cartId ? { cartId: existing.cartId } : {}),
     };
@@ -63,6 +77,36 @@ sessionRouter.post('/:id/restart', async (req, res, next) => {
     return res.json(body);
   } catch (err) {
     return next(err);
+  }
+});
+
+/**
+ * POST /api/session/:id/profile - who they are shopping for, and their sizes.
+ *
+ * The widget's quick start asks these first, so the first thing shown is
+ * already their range in their size, and every size picker opens on it. Held
+ * like anything they say in chat: a later "actually I'm an XL" replaces it.
+ * Checked against what the store sells rather than taken as given - the body
+ * comes from a browser.
+ */
+sessionRouter.post('/:id/profile', async (req, res, next) => {
+  try {
+    const body = (req.body ?? {}) as Partial<ProfileRequest>;
+    const range = body.range === 'men' || body.range === 'women' || body.range === 'kids' ? body.range : undefined;
+    // Letter sizes, ladies' 6-22, kids' age bands ("8/10", "9-10") - nothing longer, nothing stranger.
+    const clean = (value: unknown) =>
+      typeof value === 'string' && /^[A-Za-z0-9/ -]{1,12}$/.test(value.trim()) ? value.trim().toUpperCase() : undefined;
+    const size = clean(body.size);
+    const waist = typeof body.waist === 'string' && /^\d{2}$/.test(body.waist.trim()) ? body.waist.trim() : undefined;
+    await sessions.getOrCreate(req.params.id);
+    const shopper = await rememberShopper(req.params.id, {
+      ...(range ? { range } : {}),
+      ...(size ? { usualSize: size } : {}),
+      ...(waist ? { waist } : {}),
+    });
+    res.json({ ok: true, shopper: { range: shopper.range, size: shopper.usualSize, waist: shopper.waist } });
+  } catch (err) {
+    next(err);
   }
 });
 

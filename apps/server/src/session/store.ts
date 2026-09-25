@@ -68,6 +68,13 @@ export interface CaddieSession {
    */
   lastOutfit?: CaddieSession['lastShown'];
   /**
+   * Every bundle deal shown this session, as it was last shown, by handle. So
+   * "the mixed conditions pack" is the one they saw, not a fresh pick, and
+   * "change the polo in the mixed pack" changes that pack even when Warm
+   * Rounds is the one on screen.
+   */
+  packsShown?: Record<string, { items: Array<{ id: string; title: string }>; colour?: string }>;
+  /**
    * The storefront page the customer is on, from the last message that told
    * us. Held on the session because voice carries no context of its own - a
    * spoken "what size am I in this" arrives with nothing attached.

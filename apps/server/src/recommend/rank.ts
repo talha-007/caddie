@@ -37,6 +37,8 @@ export interface RankRequest {
   budget?: Budget;
   /** The size they are buying in, when known. */
   size?: string;
+  /** Their waist size, for anything sized by the waist. */
+  waist?: string;
   fit?: 'tight' | 'regular' | 'relaxed';
   rejected?: string[];
   currency?: string;
@@ -146,8 +148,9 @@ export function rankProducts(products: Product[], request: RankRequest): Ranked[
       }
     }
 
-    const size = request.size;
-    if (size && sizedOnSameScale(product, size)) {
+    // Their top size for tops, their waist for trousers - whichever this product is sized in.
+    const size = [request.size, request.waist].find((candidate) => candidate && sizedOnSameScale(product, candidate));
+    if (size) {
       if (stockedInSize(product.variants, size)) {
         matched.push(`${normaliseSize(size) ?? size} in stock`);
         reasons.push(`${normaliseSize(size) ?? size} is in stock`);
@@ -237,6 +240,7 @@ export function hasSignals(request: RankRequest): boolean {
       request.weather?.length ||
       request.budget ||
       request.size ||
+      request.waist ||
       request.fit ||
       request.rejected?.length ||
       request.range,

@@ -1,18 +1,21 @@
 import type { Cart, OutfitPiece, Product } from '@caddie/shared';
 import { z } from 'zod';
-import { FEATURE_LABEL, attributesOf, type Feature } from '../catalog/attributes.js';
+import { FEATURE_LABEL, attributesOf, type Feature, type Weather } from '../catalog/attributes.js';
 import { parseRange, rangeOf, type Range } from '../catalog/audience.js';
 import { lookupProductName, unknownNameIn } from '../catalog/lookup.js';
 import { normaliseQuery } from '../catalog/taxonomy.js';
 import { nextStep } from '../recommend/nextStep.js';
 import { hasSignals, rankFacts, rankProducts } from '../recommend/rank.js';
 import { describeProfile, readIntent, type Budget } from '../shopper/profile.js';
-import { rankRequestFor, rememberShopper } from '../shopper/remember.js';
+import { rankRequestFor, rememberShopper, shopperSizes } from '../shopper/remember.js';
+import { bestPicks, kindsNamed } from '../recommend/bestPicks.js';
 import { colourMatch, coloursOffered, matchesColourText, parseColours } from '../catalog/colour.js';
 import { allDeals, type DealRecipe } from '../catalog/bundles.js';
+import { log } from '../lib/logger.js';
+import { checkoutTotal, storefrontCartEnabled } from '../shopify/storefrontCart.js';
 import { colourwayName, garmentName, otherColourways } from '../catalog/colourways.js';
 import { allProducts, productById } from '../catalog/sync.js';
-import { asksForDeals, dealRecommendation, fillDeal, findDeal, toBundleDeal } from '../recommend/deals.js';
+import { asksForDeals, chooseDeal, dealRecommendation, fillDeal, findDeal, toBundleDeal } from '../recommend/deals.js';
 import { DEFAULT_SLOTS, fitsSlot, namedSlots, recommendOutfit, slotsFor } from '../recommend/outfit.js';
 import { recommendPack } from '../recommend/pack.js';
 import { findNamedPack, findUnstockedBundle, recommendNamedPack } from '../recommend/packs.js';
@@ -73,6 +76,102 @@ function knownRange(ctx: ToolContext): 'men' | 'women' | undefined {
  */
 function dealRange(ctx: ToolContext): Range | undefined {
   return parseRange(ctx.utterance ?? '').range ?? knownRange(ctx);
+}
+
+/**
+ * Whether checkout really charges a condition pack its pack price - see
+ * add_pack_to_cart. Remembered per pack for a few minutes: whether the
+ * discount knows a trigger is a store setting, not something that changes
+ * per customer, and a throwaway cart per add would be wasteful.
+ */
+const packChecks = new Map<string, { verdict: 'ok' | 'wrong'; at: number }>();
+const PACK_CHECK_MS = 10 * 60 * 1000;
+
+/** What the chosen variants cost on their own - the most checkout can ever charge for them. */
+function piecesTotal(variantIds: string[]): number {
+  let total = 0;
+  for (const id of variantIds) {
+    const variant = allProducts()
+      .flatMap((product) => product.variants)
+      .find((entry) => entry.id === id);
+    total += variant?.price.amount ?? 0;
+  }
+  return Number(total.toFixed(2));
+}
+
+/**
+ * 'cheaper': the pieces chosen cost less than the pack price, so checkout
+ * charges their own total. Nothing is wrong - the customer pays less - but the
+ * pack price is not what they pay, so the Caddie says the real figure.
+ *
+ * Only a verdict about the pack itself is remembered. Mixed Conditions was
+ * checked once with pieces under £129.99, came back at their own total, and
+ * that was remembered as "checkout does not apply it" - blocking the pack for
+ * everyone for ten minutes, though it priced correctly with dearer pieces.
+ */
+async function packPriceHolds(deal: DealRecipe, variantIds: string[]): Promise<'ok' | 'cheaper' | 'wrong' | 'unknown'> {
+  const expected = deal.prices.GBP ?? NaN;
+  const own = piecesTotal(variantIds);
+  if (own > 0 && own < expected) return 'cheaper';
+  const cached = packChecks.get(deal.handle);
+  if (cached && Date.now() - cached.at < PACK_CHECK_MS) return cached.verdict;
+  if (!storefrontCartEnabled()) return 'unknown';
+  try {
+    const lines = buildPlusBundleLines(deal, variantIds);
+    const total = await checkoutTotal(lines);
+    const verdict = Math.abs(total - expected) < 0.01 ? 'ok' : 'wrong';
+    packChecks.set(deal.handle, { verdict, at: Date.now() });
+    if (verdict === 'wrong') log.warn('deals.pack_price_not_applied', { handle: deal.handle, expected, total });
+    return verdict;
+  } catch (err) {
+    log.warn('deals.pack_price_check_failed', { handle: deal.handle, err: String(err) });
+    return 'unknown';
+  }
+}
+
+/** The lines the widget will write for a 'plus' pack, for pricing - see buildPlusBundleItems in shared. */
+function buildPlusBundleLines(deal: DealRecipe, variantIds: string[]): Array<{ variantId: string; properties: Array<[string, string]> }> {
+  return variantIds.map((variantId) => ({
+    variantId,
+    properties: [
+      ['__Localization', 'GB'],
+      ['_data_bundle_id', 'caddie-price-check'],
+      ...Object.entries(deal.trigger ?? {}),
+    ],
+  }));
+}
+
+/**
+ * The pack step their words name - "the polo", "a different jacket" - or -1.
+ * The step titles are the store's ("JACKET / GILET", "BELT / CAP"), so each
+ * kind of garment is matched against the step that holds it.
+ */
+const STEP_WORDS: Array<[RegExp, RegExp]> = [
+  [/\b(polo|polos|shirt|tee)\b/i, /polo|shirt|tee/i],
+  [/\b(jacket|gilet|coat|vest)\b/i, /jacket|gilet/i],
+  [/\b(midlayer|mid-layer|hoodie|jumper|sweater|quarter zip)\b/i, /midlayer|hoodie|sweat/i],
+  [/\b(trousers?|shorts|joggers?|pants|bottoms)\b/i, /trouser|short|jogger|pant|bottom/i],
+  [/\b(belt|cap|hat|beanie)\b/i, /belt|cap|hat/i],
+  [/\b(socks?)\b/i, /sock/i],
+];
+
+function stepNamed(deal: DealRecipe, text: string): number {
+  for (const [said, step] of STEP_WORDS) {
+    if (!said.test(text)) continue;
+    const index = deal.steps.findIndex((entry) => step.test(entry.title));
+    if (index >= 0) return index;
+  }
+  return -1;
+}
+
+/** "COOL & WET" -> "Cool & Wet", for speaking a store label aloud. */
+function titleCaseWords(text: string): string {
+  return text.toLowerCase().replace(/(^|[\s-])([a-z])/g, (_, gap: string, letter: string) => gap + letter.toUpperCase());
+}
+
+/** "Ladies " / "Kids " / "" - how the range prefixes a pack's name. */
+function rangeLabel(range: Range): string {
+  return range === 'women' ? 'Ladies ' : range === 'kids' ? 'Kids ' : '';
 }
 
 /** The products on the customer's screen, read back from the mirror. */
@@ -671,6 +770,17 @@ const sizeTool = defineTool({
     const { category: _category, ...remembered } = profile;
     await sessions.patch(ctx.session.id, { sizeProfile: args.category ? profile : remembered });
     if (layering !== undefined) await rememberShopper(ctx.session.id, { layering });
+    /*
+     * The size worked out becomes their size, so every picker opens on it.
+     * A waist size for bottoms, a top size for everything else - separate scales.
+     */
+    if (recommendation.size && recommendation.basis !== 'none') {
+      const bySize = /^\d{2}$/.test(recommendation.size) && /short|trouser|skort/.test(category ?? '');
+      await rememberShopper(ctx.session.id, {
+        ...(bySize ? { waist: recommendation.size } : { usualSize: recommendation.size }),
+        ...(audience ? { range: audience } : {}),
+      });
+    }
 
     if (!recommendation.size) {
       return { speech: recommendation.reason, attachment: { kind: 'size', recommendation } };
@@ -735,25 +845,88 @@ async function dealAnswer(
   const onScreen =
     shown?.kind === 'pack' && shown.bundle ? allDeals().find((deal) => deal.handle === shown.bundle) : undefined;
 
-  // Swapping one piece of the deal on screen: the rest stays, one step is re-picked.
-  if (onScreen && (args.swap || args.swapWith)) {
-    const current = (shown?.items ?? []).map((item) => (item.id ? productById(item.id) : null));
+  /*
+   * "Change the colour of every product" with no colour named is a question,
+   * not a swap. The model swapped the jacket alone and said the pack had
+   * "limited colour options" - it had not looked. The colours the whole pack
+   * can come in are counted from its steps, so what is offered is real.
+   */
+  const said = ctx.utterance ?? '';
+  const wholePack = /\b(colou?rs?)\b/i.test(said) && /\b(every|all|whole|each|everything|entire)\b/i.test(said);
+  if (onScreen && wholePack && !parseColours(said).colours.length) {
+    const perStep = onScreen.steps.map((step) =>
+      new Set(
+        coloursOffered(
+          [...step.productIds].map((id) => productById(id)).filter((p): p is Product => !!p && p.variants.some((v) => v.available)),
+        ).map((colour) => colour.toLowerCase()),
+      ),
+    );
+    const counts = new Map<string, number>();
+    for (const colours of perStep) for (const colour of colours) counts.set(colour, (counts.get(colour) ?? 0) + 1);
+    // Colours that nearly every step has, most complete first.
+    const options = [...counts.entries()]
+      .filter(([, count]) => count >= Math.max(3, onScreen.steps.length - 1))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([colour]) => colour);
+    return {
+      speech: options.length
+        ? `Which colour would you like the whole pack in? It comes together well in ${options.slice(0, -1).join(', ')}${options.length > 1 ? ' or ' : ''}${options[options.length - 1]}.`
+        : 'Which colour would you like the whole pack in?',
+      facts: `Ask which colour, then call recommend_pack again with that colour: it rebuilds every piece in new designs. Colours nearly every step comes in: ${options.join(', ') || 'mixed'}.`,
+    };
+  }
+  /*
+   * Which pack, and for the Ambassador Pack which conditions: their words
+   * this turn (the model paraphrases, so the utterance too), then the weather
+   * they have told us about. Nothing to go on is a question, not a default.
+   */
+  const weather = readIntent(said).weather ?? ctx.session.shopper?.weather;
+  const choice = chooseDeal(`${args.query} ${said}`, dealRange(ctx), weather);
+  const namedDeal = choice && 'deal' in choice ? choice.deal : undefined;
+  const remembered = ctx.session.packsShown ?? {};
+
+  /*
+   * The pack a change is for: the one they name, when they have seen it -
+   * otherwise the one on screen. "Change the polo in the mixed conditions
+   * pack" with Warm Rounds on screen changed Warm Rounds, and then told them
+   * no mixed pack was showing.
+   */
+  const target = namedDeal && remembered[namedDeal.handle] ? namedDeal : onScreen;
+  const fromScreen = !!target && target === onScreen && shown?.kind === 'pack';
+  const targetItems = target ? ((fromScreen ? shown!.items : remembered[target.handle]?.items) ?? []) : [];
+  const targetColour = target ? (fromScreen ? shown?.colour : remembered[target.handle]?.colour) : undefined;
+  // A change keeps the colour that pack was built in, unless they name another.
+  if (!colour && targetColour) colour = targetColour;
+
+  // One piece named with a change word is a swap, whether or not the model called it one.
+  const slotIndex = target ? stepNamed(target, said) : -1;
+  const changeWords = /\b(swap|change|different|another|replace|other|new|else|design|style)\b/i.test(said);
+  const wantsSwap = !!(args.swap || args.swapWith) || (changeWords && slotIndex >= 0 && !wholePack);
+
+  // Swapping one piece of that pack: the rest stays, one step is re-picked.
+  if (target && wantsSwap) {
+    const current = targetItems.map((item) => (item.id ? productById(item.id) : null));
     const stepIndex = current.findIndex((product) => !!product && !!args.swap && sameProduct(product.id, args.swap));
     const chosen = args.swapWith ? await getProductDetails(args.swapWith) : null;
     const index =
-      stepIndex >= 0 ? stepIndex : chosen ? onScreen.steps.findIndex((step) => step.productIds.has(chosen.id)) : -1;
+      stepIndex >= 0
+        ? stepIndex
+        : chosen
+          ? target.steps.findIndex((step) => step.productIds.has(chosen.id))
+          : slotIndex;
     if (index < 0) {
       return {
         speech: 'Which piece of the pack would you like to change?',
-        facts: `Pack pieces: ${onScreen.steps
+        facts: `Pack pieces: ${target.steps
           .map((step, i) => `${step.title}: ${current[i]?.title ?? 'none'} [${current[i]?.id ?? ''}]`)
           .join('; ')}`,
       };
     }
-    const step = onScreen.steps[index]!;
+    const step = target.steps[index]!;
     if (chosen && !step.productIds.has(chosen.id)) {
       return {
-        speech: `The ${chosen.title} is not one of the ${step.title.toLowerCase()} choices for the ${onScreen.title}.`,
+        speech: `The ${chosen.title} is not one of the ${step.title.toLowerCase()} choices for the ${target.title}.`,
         facts: `Only products from that step's collection count towards the pack price. Offer to add it separately instead.`,
       };
     }
@@ -765,12 +938,71 @@ async function dealAnswer(
     const outgoing = current[index];
     if (outgoing) await rememberShopper(ctx.session.id, { rejected: [outgoing.id], ...(chosen ? { liked: [chosen.id] } : {}) });
     const turnedDown = ctx.session.shopper?.rejected ?? [];
-    const pieces = fillDeal(onScreen, { size, colour, keep, exclude: [...(outgoing ? [outgoing.id] : []), ...turnedDown] });
-    return showDeal(onScreen, pieces, ctx, currency, args.query);
+    // A swap is a different piece, not the same one in another colour: "change the design of the polo".
+    const pieces = fillDeal(target, {
+      size,
+      colour,
+      keep,
+      exclude: [...(outgoing ? [outgoing.id] : []), ...turnedDown],
+      ...(outgoing ? { avoidDesigns: new Set([garmentName(outgoing.title)]) } : {}),
+    });
+    return showDeal(target, pieces, ctx, currency, args.query, { ...(size ? { size } : {}), ...(colour ? { colour } : {}) });
   }
 
-  const deal = findDeal(args.query, dealRange(ctx));
-  if (deal) return showDeal(deal, fillDeal(deal, { size, colour }), ctx, currency, args.query);
+  if (namedDeal) {
+    // Pieces suited to their weather, or to the conditions the pack is for.
+    const suits = weather ?? (namedDeal.condition ? CONDITION_WEATHER[namedDeal.condition] : undefined);
+    const before = remembered[namedDeal.handle];
+    /*
+     * A change to a pack they have seen: new designs, not the same pieces
+     * recoloured. "Change the colour of every product" brought back the same
+     * polo, midlayer and trousers in white. A new colour counts as a change -
+     * "white", answering "which colour?".
+     */
+    const recoloured = !!colour && colour.toLowerCase() !== (before?.colour ?? '').toLowerCase();
+    const changing = !!before && (recoloured || changeWords || wholePack);
+    const fill = { ...(size ? { size } : {}), ...(colour ? { colour } : {}), ...(suits ? { weather: suits } : {}) };
+
+    // Back to a pack they have already seen, unchanged: the pieces they saw.
+    if (before && !changing) {
+      const again = before.items.map((item) => (item.id ? productById(item.id) : null));
+      if (again.every((piece) => piece && piece.variants.some((variant) => variant.available))) {
+        return showDeal(namedDeal, again, ctx, currency, args.query, fill);
+      }
+    }
+
+    /*
+     * Variety across packs: each one leads with designs they have not seen in
+     * the others. Every pack came back the same Hectar Midlayer, Golf Tee Polo
+     * and Clima Trousers, and the customer asked why nothing changed.
+     */
+    const seenElsewhere = Object.entries(remembered)
+      .filter(([handle]) => handle !== namedDeal.handle)
+      .flatMap(([, pack]) => pack.items.filter((item) => item.title).map((item) => garmentName(item.title)));
+    const own = changing && before ? before.items.filter((item) => item.title).map((item) => garmentName(item.title)) : [];
+    const avoidDesigns = new Set([...own, ...seenElsewhere]);
+    return showDeal(
+      namedDeal,
+      fillDeal(namedDeal, { ...fill, ...(avoidDesigns.size ? { avoidDesigns } : {}) }),
+      ctx,
+      currency,
+      args.query,
+      fill,
+    );
+  }
+  if (choice && 'ask' in choice) {
+    const options = choice.ask;
+    const named = options.map((d) => `${titleCaseWords(d.conditionTitle ?? d.title)} at £${d.prices.GBP}`);
+    const spoken = named.length > 1 ? `${named.slice(0, -1).join(', ')} or ${named[named.length - 1]}` : named[0];
+    return {
+      speech: `The ${rangeLabel(options[0]!.range)}Ambassador Pack comes in ${options.length}, depending on the conditions you play in: ${spoken}. Which suits you best?`,
+      facts:
+        `The Ambassador Pack by conditions - ask which, never pick one for them:\n${options
+          .map((d) => `- ${d.title}: ${d.steps.length} pieces for £${d.prices.GBP} (${d.steps.map((s) => s.title.toLowerCase()).join(', ')})`)
+          .join('\n')}\n` +
+        'When they answer (or describe their weather: sun and heat is warm, changeable is mixed, cold or rain is cool & wet), call recommend_pack with "Ambassador Pack" and the condition, e.g. "Ambassador Pack cool and wet".',
+    };
+  }
 
   // "Any bundles?" - the deals themselves, for them to choose from.
   if (asksForDeals(args.query)) {
@@ -780,13 +1012,44 @@ async function dealAnswer(
     const list = deals.map(
       (d) => `- ${d.title}: ${d.steps.length} pieces for £${d.prices.GBP} (${d.steps.map((s) => s.title.toLowerCase()).join(', ')})`,
     );
-    const lead = deals.find((d) => /ambassador/.test(d.handle)) ?? deals[0]!;
+    // Led by the main range when none is known: "nine versions" counted mens, ladies and kids together.
+    const allAmbassadors = deals.filter((d) => /ambassador/.test(d.handle));
+    const ambassadors = allAmbassadors.filter((d) => d.range === (range ?? 'men'));
+    const lead = ambassadors[0] ?? allAmbassadors[0] ?? deals[0]!;
+    const cheapest = Math.min(...ambassadors.map((d) => d.prices.GBP ?? Infinity));
+    const leadLine =
+      ambassadors.length > 1 && ambassadors.every((d) => d.condition)
+        ? `the ${rangeLabel(lead.range)}Ambassador Pack comes in ${ambassadors.length} versions for different conditions, from £${cheapest}`
+        : `the ${lead.title} is ${lead.steps.length} pieces for £${lead.prices.GBP}`;
     return {
-      speech: `We have ${deals.length} bundle deals - the ${lead.title} is ${lead.steps.length} pieces for £${lead.prices.GBP}. Which would you like to see?`,
+      speech: `We have ${deals.length} bundle deals - ${leadLine}. Which would you like to see?`,
       facts: `The store's bundle deals, at fixed prices:\n${list.join('\n')}\nWhen they choose one, call recommend_pack with its name to build it.`,
     };
   }
   return null;
+}
+
+/** The weather each Ambassador condition is for - what its pieces should suit. */
+const CONDITION_WEATHER: Record<NonNullable<DealRecipe['condition']>, Weather[]> = {
+  warm: ['hot'],
+  mixed: ['windy', 'wet'],
+  coolwet: ['wet', 'cold'],
+};
+
+/**
+ * Why a pack cannot be bought right now, or undefined when it can - decided
+ * before anything is shown. A Cool & Wet pack with an empty jacket step, at a
+ * price checkout would not apply, was put on screen as "Pack price £159.99"
+ * with a warning box underneath: an error, as far as the customer could tell.
+ */
+async function whyNotBuyable(deal: DealRecipe, pieces: Array<Product | null>): Promise<string | undefined> {
+  const empty = deal.steps.filter((_, index) => !pieces[index]).map((step) => step.title.toLowerCase());
+  if (empty.length) return `no ${empty.join(' or ')} can be picked for it`;
+  if (deal.format === 'plus') {
+    const variants = pieces.map((piece) => piece!.variants.find((variant) => variant.available)?.id ?? piece!.variants[0]?.id ?? '');
+    if ((await packPriceHolds(deal, variants)) === 'wrong') return 'the checkout does not apply its pack price yet';
+  }
+  return undefined;
 }
 
 async function showDeal(
@@ -795,8 +1058,58 @@ async function showDeal(
   ctx: ToolContext,
   currency: string,
   query: string,
+  fill: { size?: string; colour?: string; weather?: Weather[] } = {},
 ): Promise<ToolResult> {
+  const blocked = await whyNotBuyable(deal, pieces);
+
+  /*
+   * The one they asked for cannot be bought yet: show the one that can,
+   * filled for the weather they asked about, and say so in a line - never a
+   * card that cannot be bought, and never a warning. What is true, said
+   * lightly: that version is not available yet, and here is one that is.
+   */
+  if (blocked && /ambassador/.test(deal.handle)) {
+    // The nearest condition that can be bought: Cool & Wet falls back to Mixed, then Warm Rounds.
+    const nearest: Array<NonNullable<DealRecipe['condition']>> = deal.condition === 'coolwet' ? ['mixed', 'warm'] : ['warm', 'mixed'];
+    const weather = [...new Set([...(fill.weather ?? []), ...(deal.condition ? CONDITION_WEATHER[deal.condition] : [])])];
+    for (const condition of nearest) {
+      const stand = allDeals().find(
+        (d) => d.range === deal.range && d.handle !== deal.handle && /ambassador/.test(d.handle) && d.condition === condition,
+      );
+      if (!stand) continue;
+      const standPieces = fillDeal(stand, { ...(fill.size ? { size: fill.size } : {}), ...(fill.colour ? { colour: fill.colour } : {}), weather });
+      if (!(await whyNotBuyable(stand, standPieces))) {
+        const shown = await showDeal(stand, standPieces, ctx, currency, query, fill);
+        const asked = titleCaseWords(deal.conditionTitle ?? deal.title);
+        const suited = deal.condition === 'coolwet' || deal.condition === 'mixed' ? ", with pieces picked for wetter, cooler rounds where I could" : '';
+        return {
+          ...shown,
+          speech: `The ${asked} version isn't available just yet, so here's the ${titleCaseWords(stand.conditionTitle ?? 'Ambassador')} pack at £${stand.prices.GBP}${suited}.`,
+          facts:
+            `They asked for ${deal.title}; it cannot be bought yet (${blocked}). Shown instead: ${stand.title}, which can. ` +
+            'Say this lightly, in one line, with no apology or error wording, and move on to their size. Never say anything is out of stock.\n' +
+            (shown.facts ?? ''),
+        };
+      }
+    }
+  }
+
   const recommendation = dealRecommendation(deal, pieces, currency);
+  if (blocked && recommendation.bundle) recommendation.bundle.blocked = `The ${titleCaseWords(deal.conditionTitle ?? deal.title)} version isn't available just yet.`;
+  /*
+   * Pieces that cost less on their own than the pack price are charged at
+   * their own total - a discount never raises a price. Quoting £129.99 for
+   * pieces the customer will pay £118 for is still a wrong quote.
+   */
+  let cheaperNote = '';
+  if (!blocked && deal.format === 'plus' && pieces.every(Boolean)) {
+    const own = piecesTotal(pieces.map((piece) => piece!.variants.find((variant) => variant.available)?.id ?? piece!.variants[0]?.id ?? ''));
+    const packPrice = deal.prices.GBP ?? 0;
+    if (own > 0 && own < packPrice) {
+      recommendation.total = { amount: own, currency: recommendation.total.currency };
+      cheaperNote = ` These pieces come to £${own.toFixed(2)} on their own - less than the £${packPrice} pack price - so that is what you would pay.`;
+    }
+  }
   await sessions.patch(ctx.session.id, {
     lastShown: {
       kind: 'pack',
@@ -804,16 +1117,36 @@ async function showDeal(
       items: pieces.map((piece, index) => ({ id: piece?.id ?? '', title: piece?.title ?? '', slot: deal.steps[index]!.title })),
       query,
       bundle: deal.handle,
+      // The colour it was built in, so a later swap of one piece keeps it.
+      ...(fill.colour ? { colour: fill.colour } : {}),
+    },
+    // Remembered by pack, so going back to it - or changing it from another pack - finds this one.
+    packsShown: {
+      ...((await sessions.getOrCreate(ctx.session.id)).packsShown ?? {}),
+      [deal.handle]: {
+        items: pieces.map((piece) => ({ id: piece?.id ?? '', title: piece?.title ?? '' })),
+        ...(fill.colour ? { colour: fill.colour } : {}),
+      },
     },
     ...(deal.range !== 'kids' ? { preferences: { audience: deal.range } } : {}),
   });
   const lines = deal.steps
-    .map((step, i) => `- ${step.title}: ${pieces[i] ? `${pieces[i]!.title} [${pieces[i]!.id}]` : 'nothing in stock fits'}`)
+    .map((step, i) => `- ${step.title}: ${pieces[i] ? `${pieces[i]!.title} [${pieces[i]!.id}]` : 'none picked'}`)
     .join('\n');
+
   return {
-    speech: recommendation.reason,
+    speech: blocked
+      ? `The ${deal.title} isn't available just yet.`
+      : cheaperNote
+        ? `The ${deal.title} is ${deal.steps.length} pieces, one from each step.${cheaperNote}`
+        : recommendation.reason,
     facts:
-      `${deal.title} - £${deal.prices.GBP}, a fixed price for the whole pack (not the sum of the pieces).\n` +
+      (blocked
+        ? `Not available to buy yet (${blocked}). Say so lightly in one line - no apology, no error wording, never "out of stock" - and offer another pack. Never present its price as one they can pay or offer to add it.\n`
+        : '') +
+      (cheaperNote
+        ? `${deal.title}: its pack price is £${deal.prices.GBP}, but these pieces cost £${recommendation.total.amount.toFixed(2)} on their own, so that is what they pay. Quote £${recommendation.total.amount.toFixed(2)}; never say £${deal.prices.GBP} is what they pay, and never call it a saving.\n`
+        : `${deal.title} - £${deal.prices.GBP}, a fixed price for the whole pack (not the sum of the pieces).\n`) +
       `Pieces, one per step:\n${lines}\n` +
       'To change one piece call recommend_pack with swap (and swapWith if they chose it). ' +
       'To buy it, call add_pack_to_cart once they have given sizes - never add the pieces one by one, or the pack price is lost.',
@@ -824,7 +1157,7 @@ async function showDeal(
 const packTool = defineTool({
   name: 'recommend_pack',
   description:
-    'Build a pack of real Druids products. Pass the words the customer used as the query: if they name a pack Druids sells - the Ambassador Pack, the Rainsuit Special - that pack comes back at its real price. Otherwise a selection is put together for their budget.',
+    'Build a pack of real Druids products. Pass the words the customer used as the query, including any weather or trip they mention: if they name a pack Druids sells - the Ambassador Pack, the Rainsuit Special - that pack comes back at its real price, or the question of which version. Call it straight away for a named pack; never ask for a budget first. Only with no pack named is a selection put together for their budget.',
   schema: packSchema,
   parameters: {
     type: 'object',
@@ -1662,8 +1995,17 @@ const addPackTool = defineTool({
      * thing to say, and it used to go nowhere. Named, and not the one on
      * screen, the pack is built here - one piece per step, in their size.
      */
-    const named = args.pack ? findDeal(args.pack, dealRange(ctx)) : null;
+    // An Ambassador Pack named without its conditions is the one on screen, never a guess at one.
+    const weather = readIntent(ctx.utterance ?? '').weather ?? ctx.session.shopper?.weather;
+    const choice = args.pack ? chooseDeal(`${args.pack} ${ctx.utterance ?? ''}`, dealRange(ctx), weather) : null;
+    const named = choice && 'deal' in choice ? choice.deal : null;
     const deal = named && named.handle !== onScreen?.handle ? named : onScreen;
+    if (!deal && choice && 'ask' in choice) {
+      return {
+        speech: `Which conditions is the Ambassador Pack for - ${choice.ask.map((d) => `${titleCaseWords(d.conditionTitle ?? d.title)} (£${d.prices.GBP})`).join(', ')}?`,
+        facts: 'Ask which, then call recommend_pack with the condition to build it before adding.',
+      };
+    }
     if (!deal) return { speech: 'Which pack would you like - the Ambassador Pack, the Prestige Pack or another?' };
     const built = deal === onScreen && shown ? null : fillDeal(deal, { size: args.size ?? ctx.session.sizeProfile.usualSize });
     if (built) await showDeal(deal, built, ctx, storeCurrency(), args.pack ?? deal.title);
@@ -1743,6 +2085,31 @@ const addPackTool = defineTool({
     const bundle = toBundleDeal(deal, pieces.map((piece) => piece.product));
 
     /*
+     * A condition pack is only added once checkout has been seen to charge its
+     * pack price. Its price comes from a discount Function keyed on the pack's
+     * trigger, and the theme ships triggers before the Function knows them:
+     * Mixed Conditions and Cool & Wet priced at the sum of their pieces in a
+     * test cart. Adding them would charge the customer something other than
+     * what the Caddie just quoted.
+     */
+    // What they will actually pay: the pack price, or the pieces' own total when that is lower.
+    let charge = deal.prices.GBP ?? 0;
+    if (deal.format === 'plus') {
+      const verdict = await packPriceHolds(deal, pieces.map((piece) => piece.variant.id));
+      if (verdict === 'cheaper') charge = piecesTotal(pieces.map((piece) => piece.variant.id));
+      if (verdict !== 'ok' && verdict !== 'cheaper') {
+        const warm = allDeals().find((d) => d.range === deal.range && d.condition === 'warm' && d.handle !== deal.handle);
+        return {
+          speech:
+            verdict === 'wrong'
+              ? `I can't add the ${deal.title} at its £${deal.prices.GBP} pack price yet - the checkout isn't applying it.${warm ? ` I can add the ${warm.conditionTitle ? titleCaseWords(warm.conditionTitle) : warm.title} pack instead, or you can build it on the pack page.` : ' You can build it on the pack page.'}`
+              : `I can't confirm the ${deal.title} price at checkout right now, so I would rather not add it. You can build it on the pack page.`,
+          facts: `Checkout ${verdict === 'wrong' ? 'did not apply the pack price' : 'could not be checked'} for ${deal.title}. Nothing was added. Never say it was. Pack page: ${deal.url}`,
+        };
+      }
+    }
+
+    /*
      * The same pack again is a change to it, not a second one. Asked "L/XL for
      * the belt" after the pack had gone in, the Caddie added the whole
      * Ambassador Pack a second time. The old one is replaced - found both
@@ -1764,8 +2131,8 @@ const addPackTool = defineTool({
 
     return {
       speech: earlier.size
-        ? `Updating your ${deal.title} with those choices - still ${pieces.length} pieces for £${deal.prices.GBP}.`
-        : `Adding the ${deal.title} to your basket - ${pieces.length} pieces for £${deal.prices.GBP}.`,
+        ? `Updating your ${deal.title} with those choices - still ${pieces.length} pieces for £${charge.toFixed(2)}.`
+        : `Adding the ${deal.title} to your basket - ${pieces.length} pieces for £${charge.toFixed(2)}${charge < (deal.prices.GBP ?? 0) ? ` - less than the £${deal.prices.GBP} pack price, as these pieces come to less on their own` : ""}.`,
       facts: earlier.size
         ? 'This replaces the pack already in their basket - there is still only one. The widget makes the change once you answer.'
         : 'The widget adds the pack to the store cart as one bundle and shows the basket once it has.',
@@ -1780,6 +2147,8 @@ const addPackTool = defineTool({
             productId: numericId(piece.product.id),
             price: piece.variant.price.amount,
             compareAtPrice: null,
+            // The condition packs write the product handle on each line, as the theme does.
+            handle: /\/products\/([^/?#]+)/.exec(piece.product.url)?.[1] ?? '',
           })),
         },
       ],
@@ -1814,6 +2183,68 @@ const viewCartTool = defineTool({
       }, ${money(cart.subtotal.amount, cart.subtotal.currency)} in total.`,
       facts: cartFacts(cart),
       attachment: { kind: 'cart', cart },
+    };
+  },
+});
+
+/* ---------------- best_picks ---------------- */
+
+const picksSchema = z.object({
+  garments: z.string().optional().describe('Kinds to cover, if they named any: "polos and trousers"'),
+  limit: z.number().int().min(1).max(12).optional(),
+});
+
+const bestPicksTool = defineTool({
+  name: 'best_picks',
+  description:
+    "The shop's best sellers for this customer: their range, in stock in their size, across polos, bottoms, midlayers and jackets (or only the kinds they name). Use it for \"best picks\", \"what's popular\", \"best sellers\", \"what do you recommend\" with nothing more specific - and straight after they tell you who they shop for and their size.",
+  schema: picksSchema,
+  parameters: {
+    type: 'object',
+    properties: {
+      garments: { type: 'string', description: 'Only these kinds, if they named any: "polos and trousers"' },
+      limit: { type: 'integer', minimum: 1, maximum: 12 },
+    },
+    required: [],
+  },
+  async run(args, ctx): Promise<ToolResult> {
+    const sizes = shopperSizes(ctx.session);
+    const range: Range = parseRange(ctx.utterance ?? '').range ?? sizes?.range ?? 'men';
+    /*
+     * The kinds their own words name. Asked only for "your best picks", the
+     * model passed a garment list of its own and a limit of 12, and the screen
+     * filled with polos and trousers - no midlayer, no jacket. Its list counts
+     * only when their words (in another language, say) named nothing we read.
+     */
+    const said = ctx.utterance ?? '';
+    const named = kindsNamed(said);
+    const kinds = named.length || /\b(best|popular|recommend|sellers?|picks?)\b/i.test(said) ? named : kindsNamed(args.garments ?? '');
+    const limit = Math.min(args.limit ?? 6, /\b(more|all)\b/i.test(said) ? 12 : 6);
+    const request = rankRequestFor(ctx.session, readIntent(ctx.utterance ?? ''), { currency: storeCurrency() });
+    const products = bestPicks(allProducts(), {
+      range,
+      ...(sizes?.size ? { size: sizes.size } : {}),
+      ...(sizes?.waist ? { waist: sizes.waist } : {}),
+      ...(kinds.length ? { kinds } : {}),
+      limit,
+      rank: request,
+    });
+
+    await sessions.patch(ctx.session.id, {
+      lastShown: { kind: 'products', items: products.map((p) => ({ id: p.id, title: p.title })), query: 'best picks' },
+    });
+    if (products.length === 0) {
+      return { speech: `I could not find best sellers in stock in your size right now.`, facts: 'Offer to search for something specific instead.' };
+    }
+    const sizeWords = [sizes?.size, sizes?.waist ? `${sizes.waist} waist` : ''].filter(Boolean).join(' and ');
+    return {
+      speech: `Here are our best sellers${sizeWords ? ` in stock in ${sizeWords}` : ''} - they are on screen now.`,
+      facts:
+        `Best picks: the store's own best sellers (Shopify sales rank), ${range === 'women' ? 'ladies' : range === 'kids' ? 'kids' : 'mens'} range, one colour of each garment${
+          sizeWords ? `, every one in stock in ${sizeWords}` : ''
+        }:\n${listFacts(products)}\n` +
+        'Lead with one and say in a few words why - it is a best seller, and anything the description states. Their size is already chosen on each card; they can change it there.',
+      attachment: { kind: 'products', products },
     };
   },
 });
@@ -1927,6 +2358,7 @@ export const tools: CaddieTool[] = [
   updateCartTool,
   viewCartTool,
   noteShopperTool,
+  bestPicksTool,
 ] as CaddieTool[];
 
 const byName = new Map(tools.map((tool) => [tool.name, tool]));

@@ -39,6 +39,8 @@ export interface Budget {
 export interface ShopperProfile {
   range?: Range;
   usualSize?: string;
+  /** Trousers and shorts: the waist size, "34". Tops and bottoms are separate scales. */
+  waist?: string;
   fit?: 'tight' | 'regular' | 'relaxed';
   /** Wants room to wear something underneath. */
   layering?: boolean;
@@ -182,6 +184,11 @@ export function readIntent(text: string): Intent {
   const size = usual ? normaliseSize(usual.replace(/^x-?large$/, 'xl')) : null;
   if (size) out.usualSize = size;
 
+  // "a 34 waist", "waist size 34", "34 inch waist" - trouser sizes run 26 to 46.
+  const waist = /\b(\d{2})\s?(?:"|in|inch|inches)?\s?waist\b|\bwaist\s?(?:size\s?)?(?:is\s|of\s)?(\d{2})\b(?!\s?cm)/.exec(lower);
+  const waistSize = Number(waist?.[1] ?? waist?.[2]);
+  if (waistSize >= 26 && waistSize <= 46) out.waist = String(waistSize);
+
   const asked = featuresAsked(lower);
   if (asked.length) {
     const soft = PREFER.test(lower) && !REQUIRE.test(lower);
@@ -254,6 +261,7 @@ export function describeProfile(profile: ShopperProfile | undefined, currency = 
   const bits: string[] = [];
   if (profile.range) bits.push(`range: ${profile.range === 'women' ? 'ladies' : profile.range === 'men' ? 'mens' : 'kids'}`);
   if (profile.usualSize) bits.push(`usually wears ${profile.usualSize}`);
+  if (profile.waist) bits.push(`waist ${profile.waist}`);
   if (profile.fit) bits.push(`likes a ${profile.fit === 'tight' ? 'close' : profile.fit} fit`);
   if (profile.layering) bits.push('wants room to layer underneath');
   if (profile.colours) bits.push(`colour: ${profile.colours.words.join(' or ')} (${profile.colours.strength})`);

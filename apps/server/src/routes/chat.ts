@@ -6,6 +6,7 @@ import { env } from '../env.js';
 import { log } from '../lib/logger.js';
 import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
+import { shopperSizes } from '../shopper/remember.js';
 import { runTool } from '../tools/index.js';
 import { route } from '../ai/devRouter.js';
 import { screen } from '../ai/guard.js';
@@ -153,7 +154,13 @@ chatRouter.post('/', async (req, res, next) => {
 
 async function viaOpenai(sessionId: string, text: string, meta?: TurnMeta): Promise<CaddieMessage> {
   const reply = await converse(sessionId, text, meta);
-  return { ...message('assistant', reply.text, reply.attachment), ...(reply.actions ? { actions: reply.actions } : {}) };
+  // Their sizes as they stand after this turn, so the pickers open on them.
+  const shopper = shopperSizes(await sessions.getOrCreate(sessionId));
+  return {
+    ...message('assistant', reply.text, reply.attachment),
+    ...(reply.actions ? { actions: reply.actions } : {}),
+    ...(shopper ? { shopper } : {}),
+  };
 }
 
 /* ---------------- Vapi Chat API ---------------- */
