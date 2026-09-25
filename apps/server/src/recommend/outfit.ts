@@ -1,5 +1,6 @@
 import type { Money, OutfitInput, OutfitPiece, OutfitRecommendation, Product } from '@caddie/shared';
 import { parseRange, rangeOf, type Range } from '../catalog/audience.js';
+import type { Weather } from '../catalog/attributes.js';
 import { matchesColourText } from '../catalog/colour.js';
 import { searchProducts } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
@@ -121,6 +122,41 @@ export interface OutfitOptions {
   exclude?: Iterable<string>;
   /** The range they are known to shop. Named in the seed wins; see catalog/audience.ts. */
   known?: 'men' | 'women';
+  /** The weather it is for - it decides where a total budget goes. */
+  weather?: Weather[];
+  /**
+   * The budget is a target ("around £150"), not only a ceiling. Each slot then
+   * prefers pieces near its share rather than the cheapest - "around £150"
+   * came back as a £53 outfit of clearance lines.
+   */
+  aim?: boolean;
+}
+
+/**
+ * Where a total budget goes.
+ *
+ * Filled slot by slot, the first slot took whatever it liked and the last
+ * got the scraps: a £150 wet-weather outfit spent £60 on a polo and had £18
+ * left for the jacket that was the point of it. Each open slot now gets a
+ * share weighted by what matters for the use - the outer layer in the wet and
+ * cold, the top and shorts in the heat, never much on an accessory - with some
+ * slack, and only if nothing fits its share does it reach into the rest.
+ */
+export function slotWeight(slot: string, weather: Weather[] = []): number {
+  const wetOrCold = weather.includes('wet') || weather.includes('cold') || weather.includes('windy');
+  const hot = weather.includes('hot');
+  if (slot === 'layer') return wetOrCold ? 2.2 : hot ? 0.6 : 1.3;
+  if (slot === 'top') return hot ? 1.3 : 1;
+  if (slot === 'bottom') return wetOrCold ? 1.2 : 1;
+  if (slot === 'accessory') return 0.35;
+  return 1;
+}
+
+const SHARE_SLACK = 1.35;
+
+/** How far a piece's price is from what this slot should cost. */
+function nearness(product: Product, target: number, size?: string): number {
+  return Math.abs(priceFor(product, size).amount - target);
 }
 
 /**
@@ -176,7 +212,7 @@ export async function recommendOutfit(
   const defaulted = !parseRange(input.seed).range && !options.known && !keptRange;
   const rangeWord = range === 'women' ? 'ladies' : range === 'kids' ? 'kids' : 'mens';
 
-  for (const slot of slots) {
+  for (const [slotIndex, slot] of slots.entries()) {
     const staying = kept.find((piece) => piece.slot === slot.slot);
     if (staying) {
       pieces.push(staying);
@@ -198,12 +234,22 @@ export async function recommendOutfit(
 
     let pick: Product | undefined;
 
+    // This slot's share of what is left, then everything left if nothing fits the share.
+    const open = slots.slice(slotIndex).filter((entry) => !kept.some((piece) => piece.slot === entry.slot));
+    const totalWeight = open.reduce((sum, entry) => sum + slotWeight(entry.slot, options.weather), 0);
+    const share =
+      remaining !== null && open.length > 1
+        ? Math.min(remaining, (remaining * slotWeight(slot.slot, options.weather) * SHARE_SLACK) / totalWeight)
+        : remaining;
+    const ceilings = share !== null && remaining !== null && share < remaining ? [share, remaining] : [remaining];
+
+    for (const ceiling of ceilings) {
     for (const query of queries) {
       const results = await searchProducts({
         query,
         limit: 8,
-        ...(remaining !== null
-          ? { maxPrice: remaining, currency: input.budget?.currency ?? storeCurrency() }
+        ...(ceiling !== null
+          ? { maxPrice: ceiling, currency: input.budget?.currency ?? storeCurrency() }
           : {}),
       });
 
@@ -219,12 +265,18 @@ export async function recommendOutfit(
             // And nothing gets worn twice.
             !used.has(p.id),
         ),
-        remaining,
+        ceiling,
         input.size,
-      ).sort((a, b) => scoreForColour(b, input.colour) - scoreForColour(a, input.colour));
+      ).sort(
+        (a, b) =>
+          scoreForColour(b, input.colour) - scoreForColour(a, input.colour) ||
+          (options.aim && share !== null ? nearness(a, share / SHARE_SLACK, input.size) - nearness(b, share / SHARE_SLACK, input.size) : 0),
+      );
 
       pick = usable[0];
       if (pick) break;
+    }
+    if (pick) break;
     }
 
     /*

@@ -1,6 +1,13 @@
 import type { Cart, OutfitPiece, Product } from '@caddie/shared';
 import { z } from 'zod';
-import { parseRange, rangeOf } from '../catalog/audience.js';
+import { FEATURE_LABEL, attributesOf, type Feature } from '../catalog/attributes.js';
+import { parseRange, rangeOf, type Range } from '../catalog/audience.js';
+import { lookupProductName, unknownNameIn } from '../catalog/lookup.js';
+import { normaliseQuery } from '../catalog/taxonomy.js';
+import { nextStep } from '../recommend/nextStep.js';
+import { hasSignals, rankFacts, rankProducts } from '../recommend/rank.js';
+import { describeProfile, readIntent, type Budget } from '../shopper/profile.js';
+import { rankRequestFor, rememberShopper } from '../shopper/remember.js';
 import { colourMatch, coloursOffered, matchesColourText, parseColours } from '../catalog/colour.js';
 import { allDeals, type DealRecipe } from '../catalog/bundles.js';
 import { colourwayName, garmentName, otherColourways } from '../catalog/colourways.js';
@@ -10,7 +17,8 @@ import { DEFAULT_SLOTS, fitsSlot, namedSlots, recommendOutfit, slotsFor } from '
 import { recommendPack } from '../recommend/pack.js';
 import { findNamedPack, findUnstockedBundle, recommendNamedPack } from '../recommend/packs.js';
 import { priceFor, priceRange } from '../recommend/pricing.js';
-import { recommendSize } from '../recommend/size.js';
+import { categoryForProduct, recommendSize } from '../recommend/size.js';
+import { optionValueMatches } from '../recommend/sizeWords.js';
 import { addToCart, getCart, getProductDetails, isBrandProduct, searchProducts, setLineQuantity } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
 import { sessions, type CaddieSession } from '../session/store.js';
@@ -55,6 +63,16 @@ function saidRange(utterance: string | undefined): 'men' | 'women' | undefined {
 /** The range the customer is shopping, as far as we know it. */
 function knownRange(ctx: ToolContext): 'men' | 'women' | undefined {
   return ctx.session.sizeProfile.audience ?? ctx.session.preferences.audience;
+}
+
+/**
+ * The range for a deal: the customer's own words first, kids included.
+ *
+ * "Ladies ambassador pack" reached recommend_pack as "ambassador pack" often
+ * enough to matter, and the customer was shown the mens pack.
+ */
+function dealRange(ctx: ToolContext): Range | undefined {
+  return parseRange(ctx.utterance ?? '').range ?? knownRange(ctx);
 }
 
 /** The products on the customer's screen, read back from the mirror. */
@@ -141,9 +159,24 @@ function listFacts(products: Product[]): string {
           ? money(span.min, span.currency)
           : `${money(span.min, span.currency)} to ${money(span.max, span.currency)} depending on size`;
 
-      return `- ${product.title}${label} - ${shown} [${product.id}]`;
+      return `- ${product.title}${label} - ${shown} [${product.id}]${verifiedLine(product)}`;
     })
     .join('\n');
+}
+
+/**
+ * What the product's own description states, and nothing more.
+ *
+ * The model may describe a product with these - "a lightweight, breathable
+ * polo" - because Druids wrote them. It may not add to them: a polo whose
+ * description never says waterproof is not called waterproof, however much
+ * the customer wants one.
+ */
+function verifiedLine(product: Product): string {
+  const { features, fit } = attributesOf(product);
+  const bits = features.slice(0, 5).map((feature) => FEATURE_LABEL[feature]);
+  if (fit) bits.push(`${fit} cut`);
+  return bits.length ? ` | description states: ${bits.join(', ')}` : '';
 }
 
 /**
@@ -172,35 +205,96 @@ function colourAsked(explicit: string | undefined, ...texts: Array<string | unde
 
 /* ---------------- search_products ---------------- */
 
+const FEATURES = Object.keys(FEATURE_LABEL) as Feature[];
+
 const searchSchema = z.object({
   query: z.string().min(1).describe('What the customer is looking for, in English'),
   colour: z.string().optional(),
+  productName: z.string().optional(),
+  features: z.array(z.enum(FEATURES as [Feature, ...Feature[]])).optional(),
   limit: z.number().int().min(1).max(20).optional(),
   maxPrice: z.number().positive().optional(),
 });
+
+/**
+ * How firmly a colour binds this search.
+ *
+ * "I'd prefer navy" used to filter out every other colour as firmly as "only
+ * navy", and a customer who said navy was a preference saw two polos instead
+ * of the twelve that fitted everything else they had asked for. Their words
+ * this turn decide; failing that, how they put it before; a colour named for
+ * this request and nothing else is required for this request.
+ */
+function colourStrength(asked: string, turn: ReturnType<typeof readIntent>, ctx: ToolContext): 'required' | 'preferred' {
+  const words = parseColours(asked).colours.map((colour) => colour.word);
+  if (turn.colours?.words.some((word) => words.includes(word))) return turn.colours.strength;
+  const standing = ctx.session.shopper?.colours;
+  if (standing?.words.some((word) => words.includes(word))) return standing.strength;
+  return 'required';
+}
+
+/** The ceiling a budget puts on one garment, if it puts one there at all. */
+function priceCeiling(budget: Budget | undefined): number | undefined {
+  if (!budget || budget.per !== 'item') return undefined;
+  if (budget.kind === 'max') return budget.amount;
+  // "Around £50" is not a ceiling at £50, but £90 is not around it either.
+  if (budget.kind === 'around') return Math.round(budget.amount * 1.25);
+  return undefined;
+}
 
 const searchTool = defineTool({
   name: 'search_products',
   description:
     'Search the live Druids store for products. Use this for any question about what is available, what something costs, or what is in stock. Never answer those from memory. ' +
-    'If the customer names a colour - in any language - always pass it, in English, as `colour`. Only products in that colour come back.',
+    'Results come back ranked against everything the customer has told you (budget, size, fit, colours, weather, features), each marked exact, strong or partial with the verified reason - put the best one forward and say why in a few words. ' +
+    'If the customer names a colour - in any language - pass it, in English, as `colour`. If they name a specific product ("the Tour Championship Jacket"), pass that name as `productName`: the whole catalogue is checked for it.',
   schema: searchSchema,
   parameters: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: 'What the customer is looking for, in English' },
+      query: { type: 'string', description: 'What the customer is looking for, in English, keeping every describing word ("plain", "lightweight", "rain top").' },
       colour: { type: 'string', description: 'The colour they asked for, in English: "blue", "navy", "light grey". Never leave out a colour they named.' },
+      productName: {
+        type: 'string',
+        description: 'Only when they name one specific product rather than a kind of thing: its name as they said it. The catalogue is checked for it, which is the only thing that lets you say we do or do not stock it.',
+      },
+      features: {
+        type: 'array',
+        items: { type: 'string', enum: FEATURES },
+        description: 'What the garment must do, when they said so: ["waterproof"] for rain, ["warm"] for cold. Checked against each product description.',
+      },
       limit: { type: 'integer', minimum: 1, maximum: 20 },
-      maxPrice: { type: 'number', description: 'Upper price limit if the customer gave one' },
+      maxPrice: { type: 'number', description: 'Upper price limit per item, if the customer gave a hard one' },
     },
     required: ['query'],
   },
   async run(args, ctx): Promise<ToolResult> {
+    const turn = readIntent(ctx.utterance ?? '');
+    const profile = ctx.session.shopper;
+    const currency = ctx.session.preferences.currency ?? storeCurrency();
+
+    // Customer words into catalogue words: "rain top" is a jacket that has to be waterproof.
+    const normal = normaliseQuery(args.query);
+
     // Plain is the one thing read from their own words here - "swap this
     // orange polo for a plain white one" must not make orange the filter.
     const saidPlain = ctx.utterance ? parseColours(ctx.utterance).plain : false;
-    const asked = colourAsked(args.colour, args.query);
-    const colour = saidPlain && asked && !parseColours(asked).plain ? `plain ${asked}` : asked;
+    const namedColour = colourAsked(args.colour, normal.query);
+    const asked = saidPlain && namedColour && !parseColours(namedColour).plain ? `plain ${namedColour}` : namedColour;
+    /*
+     * Required colours filter; preferred ones only rank. A standing "only
+     * navy" carries into a search that names no colour; a standing "I like
+     * navy" only moves navy up.
+     */
+    const strength = asked ? colourStrength(asked, turn, ctx) : undefined;
+    const standing = !asked && profile?.colours?.strength === 'required' ? profile.colours.words.join(' or ') : undefined;
+    const filterColour = strength === 'preferred' ? (parseColours(asked!).plain ? 'plain' : undefined) : (asked ?? standing);
+    const rankColour = asked
+      ? { words: parseColours(asked).colours.map((colour) => colour.word), strength: strength! }
+      : profile?.colours
+        ? profile.colours
+        : null;
+
     /*
      * The range they asked for - in the query, or in their own words when the
      * model dropped it ("a polo for my son" searched as "polo"). Only a range
@@ -208,25 +302,85 @@ const searchTool = defineTool({
      * and was shown mens ones has not told us she shops mens.
      */
     const askedRange = parseRange(args.query).range ?? parseRange(ctx.utterance ?? '').range;
-    const rangeWord = askedRange && !parseRange(args.query).range ? `${askedRange === 'women' ? 'ladies' : askedRange} ` : '';
-    const query = `${rangeWord}${colour ? `${colour} ${parseColours(args.query).rest}` : args.query}`.trim();
+    const rangeWord = askedRange && !parseRange(normal.query).range ? `${askedRange === 'women' ? 'ladies' : askedRange} ` : '';
+    const words = parseColours(normal.query).rest;
+    const query = `${rangeWord}${filterColour ? `${filterColour} ${words}` : strength === 'preferred' ? words : normal.query}`.trim();
     const known = knownRange(ctx);
-    const products = await searchProducts({
+
+    const request = rankRequestFor(ctx.session, turn, {
+      features: [...normal.features, ...(args.features ?? [])],
+      colour: rankColour,
+      currency,
+    });
+    const ceiling = args.maxPrice ?? priceCeiling(request.budget);
+    const limit = args.limit ?? 6;
+    // Ranking needs room to choose: fetch wide, then keep the best.
+    const ranking = hasSignals(request);
+    const wide = await searchProducts({
       query,
-      limit: args.limit ?? 6,
-      ...(args.maxPrice !== undefined ? { maxPrice: args.maxPrice } : {}),
+      limit: ranking ? Math.max(limit * 4, 24) : limit,
+      ...(ceiling !== undefined ? { maxPrice: ceiling } : {}),
       ...(known ? { known } : {}),
     });
+    /*
+     * A preferred colour is looked for, not just waited for. The store has
+     * hundreds of polos; the top two dozen by relevance held no navy, and a
+     * customer who said "I'd prefer navy" was told there was none. The
+     * colour's own results go into the pool first, then everything else.
+     */
+    const preferredWords = rankColour?.strength === 'preferred' ? rankColour.words.join(' or ') : '';
+    const inColour = preferredWords
+      ? await searchProducts({
+          query: `${rangeWord}${preferredWords} ${words}`.trim(),
+          limit: limit * 2,
+          ...(ceiling !== undefined ? { maxPrice: ceiling } : {}),
+          ...(known ? { known } : {}),
+        })
+      : [];
+    const found = [...inColour, ...wide.filter((product) => !inColour.some((hit) => hit.id === product.id))];
+
+    /*
+     * A product they named, checked against the whole catalogue - the one
+     * thing that can say "we do not stock that" truthfully. Named products
+     * that exist go first, ahead of whatever search ranked highest.
+     */
+    const existence = args.productName ? lookupProductName(args.productName) : unknownNameIn(args.query);
+    const named = existence?.status === 'exact' ? existence.products.filter((p) => p.variants.some((v) => v.available)) : [];
+    const pool = [...named, ...found.filter((product) => !named.some((n) => n.id === product.id))];
+
+    const ranked = ranking ? rankProducts(pool, request) : [];
+    /*
+     * Never an exact match beside something that fails what they asked for:
+     * partial matches only appear when nothing better exists, and then the
+     * facts say so.
+     */
+    const good = ranked.filter((entry) => entry.matchLevel !== 'partial');
+    const shownRanked = ranking ? (good.length ? good : ranked.filter((e) => !e.missedRequirements.includes('turned down earlier'))) : [];
+    const products = ranking
+      ? [...named.filter((n) => !shownRanked.some((e) => e.product.id === n.id)), ...shownRanked.map((entry) => entry.product)].slice(0, limit)
+      : pool.slice(0, limit);
+    const onlyPartial = ranking && good.length === 0 && shownRanked.length > 0;
 
     await sessions.patch(ctx.session.id, {
       lastShown: {
         kind: 'products',
         items: products.map((p) => ({ id: p.id, title: p.title })),
         query,
-        ...(colour ? { colour } : {}),
+        ...(filterColour ? { colour: filterColour } : {}),
       },
       ...(askedRange === 'men' || askedRange === 'women' ? { preferences: { audience: askedRange } } : {}),
     });
+
+    const existenceFacts =
+      existence?.status === 'not-stocked'
+        ? `Catalogue check: nothing in the Druids catalogue is called "${existence.name}" - every product was checked. You may say we do not stock it.${
+            existence.closest.length ? ` Closest names: ${existence.closest.map((p) => p.title).join(', ')} - offer them as alternatives, never as it.` : ''
+          }`
+        : existence?.status === 'exact'
+          ? `Catalogue check: Druids does sell "${args.productName}": ${existence.products.map((p) => `${p.title} [${p.id}]${p.variants.some((v) => v.available) ? '' : ' (sold out)'}`).join(', ')}.`
+          : existence?.status === 'unknown'
+            ? `The full catalogue could not be checked just now. Say you could not find that exact product - never that we do not stock it.`
+            : '';
 
     if (products.length === 0) {
       /*
@@ -245,26 +399,53 @@ const searchTool = defineTool({
           };
         }
       }
-      return { speech: `I could not find anything for "${query}" in the store right now.` };
+      if (ceiling !== undefined) {
+        return {
+          speech: `I could not find anything for "${query}" at ${money(ceiling, currency)} or under.`,
+          facts: `Nothing matched under the ${money(ceiling, currency)} limit. Do not show or suggest anything over it unless they agree to spend more.${existenceFacts ? `\n${existenceFacts}` : ''}`,
+        };
+      }
+      return { speech: `I could not find anything for "${query}" in the store right now.`, ...(existenceFacts ? { facts: existenceFacts } : {}) };
     }
 
+    const top = shownRanked[0];
+    const pickLine =
+      top && !onlyPartial && top.reason
+        ? `\nLead with: ${top.product.title} [${top.product.id}] - ${top.matchLevel} match: ${top.reason}.${
+            top.missedPreferences.length ? ` It differs on: ${top.missedPreferences.join('; ')} - say so.` : ''
+          }`
+        : '';
+    const partialLine = onlyPartial
+      ? `\nNothing meets everything they asked for. These are the closest, and each fails something (below) - say plainly what is missing, never present them as what they asked for.`
+      : '';
+
     /*
-     * Worded as "closest" on purpose. The catalogue search is semantic and
-     * always returns its best guesses, so a request for something we do not
-     * stock still comes back full. Saying "I found 4 options" invites the
-     * model to present them as the thing that was asked for.
+     * Worded as "closest" on purpose: the search is by words and always
+     * returns its best guesses, and "I found 4 options" invites the model to
+     * present them as the thing that was asked for.
      */
     return {
-      speech:
-        products.length === 1
+      // A proven absence leads: "closest matches" first made the model hedge and ask the customer to confirm the name.
+      speech: existence?.status === 'not-stocked'
+        ? `We do not stock the ${existence.name.replace(/^(the|a|an)\s+/i, '')}. The closest options are on screen now.`
+        : onlyPartial
+        ? `I could not find anything that meets everything you asked for - these are the closest. They are on screen now.`
+        : products.length === 1
           ? 'Here is the closest match in the store. It is on screen now.'
           : `Here are the ${products.length} closest matches in the store. They are on screen now.`,
-      facts: `Results for "${query}", best match first:
-${listFacts(products)}${
-        colour
-          ? `\nEvery result is in ${colour} or a shade of it - the colour is in each name. Say which shade when it is not the exact word they used (navy for blue, teal for blue or green).`
-          : ''
-      }`,
+      facts: [
+        `Results for "${query}", best match first:\n${listFacts(products)}`,
+        normal.mapped.length ? `Searched in catalogue terms: ${normal.mapped.join('; ')}.` : '',
+        filterColour && strength !== 'preferred'
+          ? `Every result is in ${filterColour} or a shade of it - the colour is in each name. Say which shade when it is not the exact word they used (navy for blue, teal for blue or green).`
+          : strength === 'preferred'
+            ? `${asked} is a preference, not a rule: those colours are ranked first, others can still show.`
+            : '',
+        ranking ? `How each fits what they asked for:\n${rankFacts(shownRanked.filter((e) => products.includes(e.product)))}${pickLine}${partialLine}` : '',
+        existenceFacts,
+      ]
+        .filter(Boolean)
+        .join('\n'),
       attachment: { kind: 'products', products },
     };
   },
@@ -290,9 +471,50 @@ const detailsTool = defineTool({
     },
     required: ['productId'],
   },
-  async run(args): Promise<ToolResult> {
+  async run(args, ctx): Promise<ToolResult> {
     const product = await getProductDetails(args.productId, args.options);
-    if (!product) return { speech: 'I could not load that product.' };
+    if (!product) {
+      /*
+       * A name, not an id, that matched nothing. The model reaches for this
+       * tool with "Druids Tour Championship Jacket" as often as it searches,
+       * and "I could not load that product" left it asking the customer to
+       * confirm the name. The same whole-catalogue check as search answers it.
+       */
+      const named = /^(gid:\/\/|\d+$)/.test(args.productId.trim()) ? null : lookupProductName(args.productId);
+      if (named?.status === 'not-stocked') {
+        const name = named.name.replace(/^(the|a|an)\s+/i, '');
+        return {
+          speech: `We do not stock the ${name}.`,
+          facts: `Catalogue check: nothing in the Druids catalogue is called "${name}" - every product was checked. Say we don't stock it, then offer to show the closest with search_products.${
+            named.closest.length ? ` Closest names: ${named.closest.map((p) => `${p.title} [${p.id}]`).join(', ')} - alternatives, never it.` : ''
+          }`,
+        };
+      }
+      if (named?.status === 'exact') {
+        return {
+          speech: 'I found a few with that name - which one did you mean?',
+          facts: `Products with that name: ${named.products.map((p) => `${p.title} [${p.id}]`).join(', ')}. Call get_product_details with one of these ids.`,
+        };
+      }
+      return { speech: 'I could not load that product.' };
+    }
+
+    /*
+     * What it is like, as Druids describe it - the only product claims the
+     * Caddie may make beyond name, price and stock.
+     */
+    const attributes = attributesOf(product);
+    const verified = [
+      attributes.features.length ? `Its description states: ${attributes.features.map((f) => FEATURE_LABEL[f]).join(', ')}.` : 'Its description states no technical features - do not claim any.',
+      attributes.fit ? `Cut: ${attributes.fit}.` : '',
+      attributes.materials.length ? `Fabric: ${attributes.materials.join(', ')}.` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const next = await nextStep([product], {
+      profile: ctx.session.shopper,
+      basketProductIds: (ctx.session.basket ?? []).map((line) => line.productId),
+    });
 
     /*
      * Shopify returns a default variant even when nothing was selected, so the
@@ -312,6 +534,7 @@ const detailsTool = defineTool({
         speech: chosen.available
           ? `${product.title} in ${Object.values(chosen.options).join(', ')} is ${chosenPrice} and in stock.`
           : `${product.title} in ${Object.values(chosen.options).join(', ')} is out of stock.`,
+        facts: [verified, next?.line ?? ''].filter(Boolean).join('\n'),
         attachment: { kind: 'products', products: [product] },
       };
     }
@@ -340,6 +563,8 @@ const detailsTool = defineTool({
       facts: [
         effective.exact ? '' : `${product.title} is priced per variant, from ${price}. Do not quote a single price until a size is chosen.`,
         colours,
+        verified,
+        next?.line ?? '',
       ]
         .filter(Boolean)
         .join('\n'),
@@ -359,14 +584,23 @@ const sizeSchema = z.object({
   chestCm: z.number().positive().optional(),
   waistCm: z.number().positive().optional(),
   fitPreference: z.enum(['tight', 'regular', 'relaxed']).optional(),
+  layering: z.boolean().optional(),
   audience: z.enum(['men', 'women']).optional(),
   category: z.string().optional(),
+  productId: z.string().optional(),
 });
+
+const CONFIDENCE_WORDS = {
+  high: 'That is straight off the Druids size guide.',
+  medium: 'You are close to the line between two sizes.',
+  estimate: 'That is an estimate, not a measurement - a tape measure would make it certain.',
+} as const;
 
 const sizeTool = defineTool({
   name: 'find_my_size',
   description:
-    'Work out which Druids size fits the customer. Pass whatever they have told you so far. If the result has `missing` entries, ask for those instead of guessing a size yourself.',
+    'Work out which Druids size fits the customer. Pass whatever they have told you so far. If the result has `missing` entries, ask for those instead of guessing a size yourself. ' +
+    'When they are asking about one product ("what size am I in this"), pass its productId: its own chart and cut are used, so the answer can differ between garments.',
   schema: sizeSchema,
   parameters: {
     type: 'object',
@@ -379,6 +613,7 @@ const sizeTool = defineTool({
       chestCm: { type: 'number' },
       waistCm: { type: 'number' },
       fitPreference: { type: 'string', enum: ['tight', 'regular', 'relaxed'] },
+      layering: { type: 'boolean', description: 'They want room to wear something underneath.' },
       audience: {
         type: 'string',
         enum: ['men', 'women'],
@@ -386,41 +621,81 @@ const sizeTool = defineTool({
       },
       category: {
         type: 'string',
-        description: 'polo, midlayer, jacket, shorts, trousers, skort, belt or socks. Defaults to polo.',
+        description: 'polo, midlayer, jacket, shorts, trousers, skort, belt or socks. Defaults to polo. Leave out when you pass productId.',
       },
+      productId: { type: 'string', description: 'The product they are sizing for, when there is one.' },
     },
     required: [],
   },
   async run(args, ctx): Promise<ToolResult> {
+    const { productId, layering, ...measurements } = args;
+    const product = productId ? productById(productId) : null;
+    const productRange = product ? rangeOf(product) : undefined;
+    const shopper = ctx.session.shopper;
+
     // Merge with anything they told us earlier, and with the range they are
     // already browsing, so we only ask mens/womens when we truly cannot tell.
+    const audience =
+      args.audience ??
+      /*
+       * Said in their own words. "I need a womens polo, my chest is 100cm"
+       * reached this tool without the range four times in five, and the
+       * customer was asked whether they meant womens.
+       */
+      saidRange(ctx.utterance) ??
+      // The garment they asked about knows its own range.
+      (productRange === 'men' || productRange === 'women' ? productRange : undefined) ??
+      ctx.session.sizeProfile.audience ??
+      ctx.session.preferences.audience ??
+      audienceOf(onScreen(ctx)) ??
+      // A store that only sells one range has already answered the question.
+      audienceOf(allProducts().filter(isBrandProduct));
+    // The product decides the chart: trousers are sized by the waist, whatever was asked.
+    const category =
+      (product && audience ? categoryForProduct(audience, `${product.productType ?? ''} ${product.title}`) : undefined) ?? args.category;
+
     const profile = {
       ...ctx.session.sizeProfile,
-      ...args,
-      audience:
-        args.audience ??
-        /*
-         * Said in their own words. "I need a womens polo, my chest is 100cm"
-         * reached this tool without the range four times in five, and the
-         * customer was asked whether they meant womens.
-         */
-        saidRange(ctx.utterance) ??
-        ctx.session.sizeProfile.audience ??
-        ctx.session.preferences.audience ??
-        audienceOf(onScreen(ctx)) ??
-        // A store that only sells one range has already answered the question.
-        audienceOf(allProducts().filter(isBrandProduct)),
+      ...measurements,
+      ...(shopper?.usualSize && !measurements.usualSize ? { usualSize: shopper.usualSize } : {}),
+      ...(shopper?.fit && !measurements.fitPreference ? { fitPreference: shopper.fit } : {}),
+      audience,
+      ...(category ? { category } : {}),
     };
-    const recommendation = recommendSize(profile);
-    await sessions.patch(ctx.session.id, { sizeProfile: profile });
+    const recommendation = recommendSize(profile, {
+      layering: layering ?? shopper?.layering,
+      ...(product ? { productTitle: product.title } : {}),
+      ...(product && attributesOf(product).fit ? { productFit: attributesOf(product).fit } : {}),
+    });
+    // A category read off one product is not a fact about the customer.
+    const { category: _category, ...remembered } = profile;
+    await sessions.patch(ctx.session.id, { sizeProfile: args.category ? profile : remembered });
+    if (layering !== undefined) await rememberShopper(ctx.session.id, { layering });
 
     if (!recommendation.size) {
       return { speech: recommendation.reason, attachment: { kind: 'size', recommendation } };
     }
+    /*
+     * Whether the size is in stock in the garment they asked about - a size
+     * they cannot buy is only half an answer.
+     */
+    const stock =
+      product && recommendation.size
+        ? product.variants.some((variant) => variant.available && Object.values(variant.options).some((value) => optionValueMatches(value, recommendation.size!)))
+          ? `${recommendation.size} is in stock in the ${product.title}.`
+          : `${recommendation.size} is not in stock in the ${product.title} - say so, and offer the alternative size or another colourway.`
+        : '';
+    const level = recommendation.confidenceLevel ?? 'estimate';
     return {
-      speech: `${recommendation.reason}${
-        recommendation.confidence < 0.5 ? ' I am not certain though - one more measurement would help.' : ''
-      }`,
+      speech: `${recommendation.reason}${level === 'estimate' && !/estimate/i.test(recommendation.reason) ? ` ${CONFIDENCE_WORDS.estimate}` : ''}`,
+      facts: [
+        `Confidence: ${level}. ${CONFIDENCE_WORDS[level]}`,
+        recommendation.alternativeSize ? `Alternative: ${recommendation.alternativeSize} - ${recommendation.alternativeReason ?? ''}` : '',
+        category && product ? `Sized on the ${audience === 'women' ? 'ladies' : 'mens'} ${category} chart, for ${product.title}.` : '',
+        stock,
+      ]
+        .filter(Boolean)
+        .join('\n'),
       attachment: { kind: 'size', recommendation },
     };
   },
@@ -488,11 +763,13 @@ async function dealAnswer(
     });
     if (chosen) keep.set(index, chosen);
     const outgoing = current[index];
-    const pieces = fillDeal(onScreen, { size, colour, keep, exclude: outgoing ? [outgoing.id] : [] });
+    if (outgoing) await rememberShopper(ctx.session.id, { rejected: [outgoing.id], ...(chosen ? { liked: [chosen.id] } : {}) });
+    const turnedDown = ctx.session.shopper?.rejected ?? [];
+    const pieces = fillDeal(onScreen, { size, colour, keep, exclude: [...(outgoing ? [outgoing.id] : []), ...turnedDown] });
     return showDeal(onScreen, pieces, ctx, currency, args.query);
   }
 
-  const deal = findDeal(args.query, knownRange(ctx));
+  const deal = findDeal(args.query, dealRange(ctx));
   if (deal) return showDeal(deal, fillDeal(deal, { size, colour }), ctx, currency, args.query);
 
   // "Any bundles?" - the deals themselves, for them to choose from.
@@ -565,7 +842,9 @@ const packTool = defineTool({
   },
   async run(args, ctx): Promise<ToolResult> {
     const currency = args.currency ?? ctx.session.preferences.currency ?? storeCurrency();
-    const budgetAmount = args.budgetAmount ?? ctx.session.preferences.budgetAmount;
+    const statedBudget = ctx.session.shopper?.budget;
+    const budgetAmount =
+      args.budgetAmount ?? (statedBudget?.per === 'total' ? statedBudget.amount : undefined) ?? ctx.session.preferences.budgetAmount;
     // Named in their words counts, whether or not the model passed it on.
     const askedColour = colourAsked(args.colour, args.query);
     const colour = askedColour ?? ctx.session.preferences.colour;
@@ -688,8 +967,22 @@ function sameProduct(a: string, b: string): boolean {
  * from the mirror. Anything that has since gone - deleted, or no longer in
  * the catalogue - is simply rebuilt with the swapped slot.
  */
-async function outfitOnScreen(ctx: ToolContext): Promise<OutfitPiece[]> {
+/**
+ * The outfit they are working on: the one on screen, or the last one built.
+ *
+ * Not only lastShown. Asked to "swap the polo for a plain white one", the
+ * model searched for a plain white polo first - which replaced what was on
+ * screen - and then asked for the swap. The outfit was gone, so it was
+ * rebuilt from nothing: the trousers vanished in one run and turned white in
+ * another, while the reply said they were unchanged.
+ */
+function outfitShown(ctx: ToolContext): CaddieSession['lastShown'] {
   const shown = ctx.session.lastShown;
+  return shown?.kind === 'outfit' ? shown : ctx.session.lastOutfit;
+}
+
+async function outfitOnScreen(ctx: ToolContext): Promise<OutfitPiece[]> {
+  const shown = outfitShown(ctx);
   if (shown?.kind !== 'outfit') return [];
   const pieces = await Promise.all(
     shown.items.map(async (item) => {
@@ -732,7 +1025,7 @@ const outfitTool = defineTool({
   async run(args, ctx): Promise<ToolResult> {
     const currency = args.currency ?? ctx.session.preferences.currency ?? storeCurrency();
     const budgetAmount = args.budgetAmount ?? ctx.session.preferences.budgetAmount;
-    const askedColour = colourAsked(args.colour, args.seed, args.swap ? ctx.session.lastShown?.query : undefined);
+    const askedColour = colourAsked(args.colour, args.seed, args.swap ? outfitShown(ctx)?.query : undefined);
     const colour = askedColour ?? ctx.session.preferences.colour;
     const input = {
       seed: args.seed,
@@ -753,7 +1046,7 @@ const outfitTool = defineTool({
      * words decide: asking to swap, and naming exactly one piece on screen.
      */
     const swapWords = /\b(swap|swop|replace|instead|change|exchange)\b/i.test(ctx.utterance ?? '');
-    const wantsSwap = !!(args.swap || args.swapWith) || (swapWords && ctx.session.lastShown?.kind === 'outfit');
+    const wantsSwap = !!(args.swap || args.swapWith) || (swapWords && outfitShown(ctx)?.kind === 'outfit');
     const onScreen = wantsSwap ? await outfitOnScreen(ctx) : [];
     const mentioned = namedSlots(ctx.utterance ?? '');
     const impliedSwap =
@@ -815,7 +1108,7 @@ const outfitTool = defineTool({
       // Exactly one piece named in a swap request; two is a question, not a guess.
       (impliedSwap.length === 1 ? impliedSwap[0] : undefined);
     const swappedOut = outgoing
-      ? [...(ctx.session.lastShown?.swappedOut ?? []), outgoing.product.id]
+      ? [...(outfitShown(ctx)?.swappedOut ?? []), outgoing.product.id]
       : [];
     const keep = onScreen.filter((piece) => piece !== outgoing);
     if (outgoing && chosen) keep.push({ slot: outgoing.slot, product: chosen });
@@ -839,28 +1132,43 @@ const outfitTool = defineTool({
       }
     }
 
+    const shopper = ctx.session.shopper;
+    const weather = readIntent(ctx.utterance ?? '').weather ?? shopper?.weather;
+    const turnedDown = shopper?.rejected ?? [];
+    const aim = shopper?.budget?.per === 'total' && shopper.budget.kind === 'around' && budgetAmount === shopper.budget.amount;
     const recommendation = outgoing
       ? await recommendOutfit(
-          { ...input, seed: ctx.session.lastShown?.query ?? args.seed },
+          { ...input, seed: outfitShown(ctx)?.query ?? args.seed },
           // The same slots as before, in the same order, narrowed as before.
-          slotsFor(ctx.session.lastShown?.query ?? args.seed, onScreen.map((piece) => piece.slot), ctx.utterance),
-          { keep, exclude: swappedOut, ...(knownRange(ctx) ? { known: knownRange(ctx) } : {}) },
+          slotsFor(outfitShown(ctx)?.query ?? args.seed, onScreen.map((piece) => piece.slot), ctx.utterance),
+          { keep, exclude: [...swappedOut, ...turnedDown], aim, ...(weather ? { weather } : {}), ...(knownRange(ctx) ? { known: knownRange(ctx) } : {}) },
         )
-      : await recommendOutfit(input, slots, { keep, ...(knownRange(ctx) ? { known: knownRange(ctx) } : {}) });
+      : await recommendOutfit(input, slots, {
+          keep,
+          exclude: turnedDown,
+          aim,
+          ...(weather ? { weather } : {}),
+          ...(knownRange(ctx) ? { known: knownRange(ctx) } : {}),
+        });
+    // Swapped out is turned down: it is never offered again this session.
+    if (outgoing && outgoing.product.id !== chosen?.id) await rememberShopper(ctx.session.id, { rejected: [outgoing.product.id] });
+    if (chosen) await rememberShopper(ctx.session.id, { liked: [chosen.id] });
 
+    const shownOutfit = {
+      kind: 'outfit' as const,
+      items: recommendation.pieces.map((piece) => ({
+        id: piece.product.id,
+        title: piece.product.title,
+        slot: piece.slot,
+      })),
+      query: outgoing ? (outfitShown(ctx)?.query ?? args.seed) : args.seed,
+      budgetAmount,
+      colour: askedColour,
+      ...(swappedOut.length ? { swappedOut } : {}),
+    };
     await sessions.patch(ctx.session.id, {
-      lastShown: {
-        kind: 'outfit',
-        items: recommendation.pieces.map((piece) => ({
-          id: piece.product.id,
-          title: piece.product.title,
-          slot: piece.slot,
-        })),
-        query: outgoing ? (ctx.session.lastShown?.query ?? args.seed) : args.seed,
-        budgetAmount,
-        colour: askedColour,
-        ...(swappedOut.length ? { swappedOut } : {}),
-      },
+      lastShown: shownOutfit,
+      lastOutfit: shownOutfit,
       // What they were shown decides the range, so "what size am I" does not ask mens or womens again.
       preferences: { colour: askedColour, budgetAmount, currency, audience: audienceOf(recommendation.pieces.map((piece) => piece.product)) },
     });
@@ -1044,6 +1352,24 @@ const addToCartTool = defineTool({
     }
 
     /*
+     * Chosen is liked; what it replaces is turned down. The next suggestion is
+     * worked out now, from what they actually chose - never offered after
+     * "just the jacket".
+     */
+    const replacedIds = args.replaces
+      ? (ctx.session.basket ?? [])
+          .filter((line) => line.lineId === args.replaces || sameProduct(line.productId, args.replaces ?? ''))
+          .map((line) => line.productId)
+          .filter((id) => !sameProduct(id, product.id))
+      : [];
+    const shopper = await rememberShopper(ctx.session.id, { liked: [product.id], ...(replacedIds.length ? { rejected: replacedIds } : {}) });
+    const next = await nextStep([product], {
+      profile: shopper,
+      basketProductIds: (ctx.session.basket ?? []).map((line) => line.productId),
+    });
+    const nextLine = next ? `\n${next.line}` : '';
+
+    /*
      * On the storefront the basket is the theme's cart, in the shopper's
      * browser: the widget makes the change. Everything above - the variant,
      * its stock, the choices still open - is decided here as before.
@@ -1060,7 +1386,7 @@ const addToCartTool = defineTool({
         speech: outgoingLines.length
           ? `Swapping the ${outgoingLines.map((line) => line.title).join(' and ')} for the ${product.title}${choice ? ` in ${choice}` : ''}.`
           : `Adding the ${product.title}${choice ? ` in ${choice}` : ''} to your basket.`,
-        facts: 'The widget makes this change in the store cart and shows the basket once it has.',
+        facts: `The widget makes this change in the store cart and shows the basket once it has. Say it is going in, not that the basket now holds it.${nextLine}`,
         actions: [
           {
             type: 'add',
@@ -1099,7 +1425,7 @@ const addToCartTool = defineTool({
       : args.replaces
         ? `Added the ${product.title}, but I could not find the item it was replacing in your basket, so nothing was removed. ${total}`
         : `Added. ${total}`;
-    return { speech, facts: cartFacts(cart), attachment: { kind: 'cart', cart } };
+    return { speech, facts: `${cartFacts(cart)}${nextLine}`, attachment: { kind: 'cart', cart } };
   },
 });
 
@@ -1336,7 +1662,7 @@ const addPackTool = defineTool({
      * thing to say, and it used to go nowhere. Named, and not the one on
      * screen, the pack is built here - one piece per step, in their size.
      */
-    const named = args.pack ? findDeal(args.pack, knownRange(ctx)) : null;
+    const named = args.pack ? findDeal(args.pack, dealRange(ctx)) : null;
     const deal = named && named.handle !== onScreen?.handle ? named : onScreen;
     if (!deal) return { speech: 'Which pack would you like - the Ambassador Pack, the Prestige Pack or another?' };
     const built = deal === onScreen && shown ? null : fillDeal(deal, { size: args.size ?? ctx.session.sizeProfile.usualSize });
@@ -1492,6 +1818,101 @@ const viewCartTool = defineTool({
   },
 });
 
+/* ---------------- note_shopper ---------------- */
+
+/**
+ * What the customer told us that needs understanding rather than parsing.
+ *
+ * Most of the profile is read from their words by code every turn (see
+ * shopper/profile.ts): budgets, colours, fit, sizes. Some of it needs a
+ * reader - "a golf trip to Portugal in July" is hot weather, "I don't like the
+ * look of that one" turns down a product. The model records those here, and
+ * code keeps them: every later search, size and outfit uses them.
+ */
+const noteSchema = z.object({
+  occasion: z.string().max(80).optional(),
+  weather: z.array(z.enum(['wet', 'cold', 'hot', 'windy'])).optional(),
+  fit: z.enum(['tight', 'regular', 'relaxed']).optional(),
+  layering: z.boolean().optional(),
+  colours: z.object({ words: z.array(z.string()).min(1), strength: z.enum(['required', 'preferred']) }).optional(),
+  avoidColours: z.array(z.string()).optional(),
+  requiredFeatures: z.array(z.enum(FEATURES as [Feature, ...Feature[]])).optional(),
+  preferredFeatures: z.array(z.enum(FEATURES as [Feature, ...Feature[]])).optional(),
+  budget: z
+    .object({ amount: z.number().positive(), kind: z.enum(['max', 'around', 'ideal']), per: z.enum(['item', 'total']) })
+    .optional(),
+  liked: z.array(z.string()).optional(),
+  rejected: z.array(z.string()).optional(),
+  justThis: z.string().optional(),
+  clearJustThis: z.boolean().optional(),
+});
+
+const noteShopperTool = defineTool({
+  name: 'note_shopper',
+  description:
+    'Remember something the customer told you about what they need, when it takes understanding rather than a keyword: the occasion, the weather a place or season means ("Portugal in July" is hot), products they liked or turned down (by id), that they only want this one thing ("just the jacket"), or a budget\'s kind ("max" is a hard limit, "around" is near it, "ideal" is a wish; per item or total). Call it alongside your other tools; say nothing about it to the customer.',
+  schema: noteSchema,
+  parameters: {
+    type: 'object',
+    properties: {
+      occasion: { type: 'string', description: 'e.g. "club match", "wedding", "golf trip to Portugal"' },
+      weather: { type: 'array', items: { type: 'string', enum: ['wet', 'cold', 'hot', 'windy'] } },
+      fit: { type: 'string', enum: ['tight', 'regular', 'relaxed'] },
+      layering: { type: 'boolean' },
+      colours: {
+        type: 'object',
+        properties: { words: { type: 'array', items: { type: 'string' } }, strength: { type: 'string', enum: ['required', 'preferred'] } },
+        required: ['words', 'strength'],
+      },
+      avoidColours: { type: 'array', items: { type: 'string' } },
+      requiredFeatures: { type: 'array', items: { type: 'string', enum: FEATURES } },
+      preferredFeatures: { type: 'array', items: { type: 'string', enum: FEATURES } },
+      budget: {
+        type: 'object',
+        properties: {
+          amount: { type: 'number' },
+          kind: { type: 'string', enum: ['max', 'around', 'ideal'] },
+          per: { type: 'string', enum: ['item', 'total'] },
+        },
+        required: ['amount', 'kind', 'per'],
+      },
+      liked: { type: 'array', items: { type: 'string' }, description: 'Product ids they said they like' },
+      rejected: { type: 'array', items: { type: 'string' }, description: 'Product ids they turned down - never offered again' },
+      justThis: { type: 'string', description: 'The garment they said is all they want, e.g. "jacket"' },
+      clearJustThis: { type: 'boolean', description: 'They have since asked for more' },
+    },
+    required: [],
+  },
+  async run(args, ctx): Promise<ToolResult> {
+    const existing = ctx.session.shopper?.features;
+    const update = {
+      ...(args.occasion ? { occasion: args.occasion } : {}),
+      ...(args.weather?.length ? { weather: args.weather } : {}),
+      ...(args.fit ? { fit: args.fit } : {}),
+      ...(args.layering !== undefined ? { layering: args.layering } : {}),
+      ...(args.colours ? { colours: { words: args.colours.words.map((w) => w.toLowerCase()), strength: args.colours.strength } } : {}),
+      ...(args.avoidColours?.length ? { avoidColours: args.avoidColours.map((w) => w.toLowerCase()) } : {}),
+      ...(args.requiredFeatures || args.preferredFeatures
+        ? {
+            features: {
+              required: args.requiredFeatures ?? existing?.required ?? [],
+              preferred: args.preferredFeatures ?? existing?.preferred ?? [],
+            },
+          }
+        : {}),
+      ...(args.budget ? { budget: args.budget } : {}),
+      ...(args.liked?.length ? { liked: args.liked } : {}),
+      ...(args.rejected?.length ? { rejected: args.rejected } : {}),
+      ...(args.justThis ? { justThis: args.justThis } : args.clearJustThis ? { justThis: '' } : {}),
+    };
+    const profile = await rememberShopper(ctx.session.id, update);
+    return {
+      speech: '',
+      facts: `Noted. ${describeProfile(profile, ctx.session.preferences.currency ?? storeCurrency()) ?? ''}`.trim(),
+    };
+  },
+});
+
 /* ---------------- registry ---------------- */
 
 export const tools: CaddieTool[] = [
@@ -1505,6 +1926,7 @@ export const tools: CaddieTool[] = [
   otherColoursTool,
   updateCartTool,
   viewCartTool,
+  noteShopperTool,
 ] as CaddieTool[];
 
 const byName = new Map(tools.map((tool) => [tool.name, tool]));

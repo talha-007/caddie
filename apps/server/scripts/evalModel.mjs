@@ -127,8 +127,98 @@ const CASES = [
     turns: ['show me the tour short in navy', 'add it to my basket'],
     // Any way of asking for the size counts; only picking one for them fails.
     check: (text) =>
-      /(which|what size|size would|your size|tell me your|measurement|waist)/i.test(text) ||
+      /(which|what size|size would|your size|preferred size|size do you|tell me your|measurement|waist)/i.test(text) ||
       /(added|in your basket)/i.test(text),
+  },
+
+  /* ---- The sales brain: requirements, preferences, memory, verified selling ---- */
+
+  {
+    id: 'discovery-budget',
+    why: 'Recommend within a stated budget, with a reason',
+    turns: ['I need a lightweight polo for playing in Spain, under £40'],
+    check: (text, shown) => {
+      const products = shown?.kind === 'products' ? shown.products : [];
+      return products.length > 0 && products.every((p) => p.price.amount <= 40) && /because|as it|it's|it is|since|which is|with /i.test(text);
+    },
+  },
+  {
+    id: 'colour-required',
+    why: '"Only navy" must show navy and nothing else',
+    turns: ['I only want navy. Show me polos'],
+    check: (text, shown) => {
+      const titles = shown?.kind === 'products' ? shown.products.map((p) => p.title) : [];
+      return titles.length > 0 && titles.every((title) => /NAVY/i.test(title));
+    },
+  },
+  {
+    id: 'colour-preferred',
+    why: '"I\'d prefer navy" leads with navy without hiding everything else',
+    turns: ["I'd prefer navy, but show me some mens polos"],
+    check: (text, shown) => {
+      const titles = shown?.kind === 'products' ? shown.products.map((p) => p.title) : [];
+      return titles.length > 1 && /NAVY/i.test(titles[0]);
+    },
+  },
+  {
+    id: 'rain-top',
+    why: 'A "rain top" is a waterproof jacket, not "we do not stock that"',
+    turns: ['I need a rain top'],
+    check: (text, shown) => {
+      const titles = shown?.kind === 'products' ? shown.products.map((p) => p.title) : [];
+      return titles.length > 0 && titles.some((t) => /JACKET|RAIN|SHELL|CAGOULE/i.test(t)) && !/do not stock|don't stock/i.test(text);
+    },
+  },
+  {
+    id: 'size-loose',
+    why: 'A loose fit is weighed, not ignored - and the size still comes from the tool',
+    turns: ['My chest is 42 inches but I like my tops loose. What size mens polo?'],
+    check: (text, shown) => shown?.kind === 'size' && ['L', 'XL'].includes(shown.recommendation.size) && /XL/.test(text),
+  },
+  {
+    id: 'memory',
+    why: 'Size, fit, colours and budget told once are never asked for again',
+    turns: [
+      "I'm usually XL, prefer a relaxed fit, mostly navy or black, and don't want to spend more than £50 on a polo",
+      'show me polos',
+      'show me another polo',
+    ],
+    // "Another" may be a new card or the next one already on screen; either way
+    // nothing over £50, and nothing they already told us asked again.
+    check: (text, shown) => {
+      const products = shown?.kind === 'products' ? shown.products : [];
+      const quoted = [...text.matchAll(/£\s?(\d+(?:\.\d+)?)/g)].map((m) => Number(m[1]));
+      return (
+        products.every((p) => p.price.amount <= 50) &&
+        quoted.every((amount) => amount <= 50) &&
+        !/what size|your budget|how much .* spend|which colour|what colour/i.test(text)
+      );
+    },
+  },
+  {
+    id: 'outfit-pieces',
+    why: 'Polo and trousers means exactly those, no hoodie or socks',
+    turns: ['put together a mens outfit, just a polo and trousers'],
+    check: (text, shown) =>
+      shown?.kind === 'outfit' && shown.recommendation.pieces.every((piece) => ['top', 'bottom'].includes(piece.slot)),
+  },
+  {
+    id: 'pack-price',
+    why: 'The Ambassador Pack is its own price, never the sum of its pieces',
+    turns: ['show me the Ambassador Pack'],
+    check: (text, shown) => shown?.kind === 'pack' && /99\.99/.test(text),
+  },
+  {
+    id: 'no-invented-feature',
+    why: 'Never calls a product waterproof its description does not',
+    turns: ['show me mens polos', 'is the first one waterproof?'],
+    check: (text) => !/\b(yes|it is|it's) (fully |completely )?waterproof\b/i.test(text) || /not|doesn't|does not|can't confirm/i.test(text),
+  },
+  {
+    id: 'just-this',
+    why: '"Just the jacket" means no more selling',
+    turns: ['I need a waterproof jacket, just the jacket please'],
+    check: (text) => !/trouser|polo|outfit|pack/i.test(text),
   },
 ];
 

@@ -1,5 +1,6 @@
 import type { CaddieMessage, PageContext, SizeInput } from '@caddie/shared';
 import { redisEnabled } from '../lib/redis.js';
+import type { ShopperProfile } from '../shopper/profile.js';
 import { RedisSessionStore } from './redisStore.js';
 
 /**
@@ -62,11 +63,23 @@ export interface CaddieSession {
     colour?: string;
   };
   /**
+   * The last outfit built, kept when a search replaces what is on screen, so
+   * "swap the polo" still has an outfit to swap in. See outfitShown.
+   */
+  lastOutfit?: CaddieSession['lastShown'];
+  /**
    * The storefront page the customer is on, from the last message that told
    * us. Held on the session because voice carries no context of its own - a
    * spoken "what size am I in this" arrives with nothing attached.
    */
   page?: PageContext;
+  /**
+   * What they have told us they want - budget and how strict it is, colours
+   * required or preferred, fit, weather, what they turned down. See
+   * shopper/profile.ts. Replaced whole on every change, never patched field by
+   * field, so a stated "no longer" can remove something.
+   */
+  shopper?: ShopperProfile;
   preferences: {
     colour?: string;
     budgetAmount?: number;

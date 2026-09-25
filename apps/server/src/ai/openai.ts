@@ -4,6 +4,8 @@ import { UpstreamError } from '../lib/errors.js';
 import { fetchWithTimeout, Semaphore } from '../lib/http.js';
 import { log } from '../lib/logger.js';
 import { sessions, type CaddieSession } from '../session/store.js';
+import { describeProfile, readIntent, standingPart } from '../shopper/profile.js';
+import { rememberShopper } from '../shopper/remember.js';
 import { runTool, toolDefinitionsForVapi } from '../tools/index.js';
 import { costOfTokens } from '../usage/pricing.js';
 import { record } from '../usage/store.js';
@@ -193,6 +195,15 @@ function basketContext(session: CaddieSession): ChatMessage | null {
   };
 }
 
+/**
+ * What the customer has told us they want, so it is never asked twice. After
+ * the stable prompt, like the rest of the per-turn context, so the cache holds.
+ */
+export function shopperContext(session: CaddieSession): ChatMessage | null {
+  const text = describeProfile(session.shopper, session.preferences.currency);
+  return text ? { role: 'system', content: text } : null;
+}
+
 function history(session: CaddieSession): ChatMessage[] {
   return session.messages.slice(-HISTORY_TURNS).map((message) => ({
     role: message.role,
@@ -269,12 +280,20 @@ export interface TurnMeta {
 }
 
 export async function converse(sessionId: string, userText: string, meta?: TurnMeta): Promise<Reply> {
+  /*
+   * What this message tells us about them - budget, colours, fit, weather -
+   * is kept before the model runs, so every tool this turn already uses it.
+   * Code reads it, not the model: it was the model's job before, and "I'm
+   * usually XL, relaxed fit, max £50" was forgotten by the next request.
+   */
+  const learned = standingPart(readIntent(userText));
+  if (Object.keys(learned).length) await rememberShopper(sessionId, learned);
   const session = await sessions.getOrCreate(sessionId);
   const turnStartedAt = Date.now();
 
   const messages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
-    ...([pageContext(session), screenContext(session), basketContext(session)].filter(Boolean) as ChatMessage[]),
+    ...([pageContext(session), screenContext(session), basketContext(session), shopperContext(session)].filter(Boolean) as ChatMessage[]),
     ...history(session),
     { role: 'user', content: userText },
   ];

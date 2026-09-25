@@ -30,7 +30,7 @@ export function asksForDeals(query: string): boolean {
   return /\b(bundles?|deals?|packs?|offers?|multi ?buys?)\b/i.test(query);
 }
 
-export function findDeal(query: string, known?: 'men' | 'women'): DealRecipe | null {
+export function findDeal(query: string, known?: Range): DealRecipe | null {
   const deals = allDeals();
   const keyword = KEYWORDS.find((entry) => entry.words.test(query));
   if (!keyword) return null;
