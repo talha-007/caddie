@@ -76,8 +76,9 @@ export const NAMED_PACKS: NamedPack[] = [
  * inventing a pack and a price for it.
  *
  * Slot structures are known - each is a set of collections on druids.com, e.g.
- * the Prestige Pack is a polo, a hoodie or sweater, and golf joggers. Add one
- * to NAMED_PACKS and seedPacks.mjs together the moment its price is confirmed.
+ * the Prestige Pack is a polo, a hoodie or sweater, and golf joggers. The live
+ * deals are read from the theme now (catalog/bundles.ts); this list only answers
+ * when that fails.
  */
 export interface UnstockedBundle {
   name: string;

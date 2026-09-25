@@ -8,8 +8,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * There is no live transcript on the way up - what they said appears as their
  * own message once the server has heard it.
  *
- * Almost everything below is here because of a specific failure. Read
- * docs/widget-update-prompt.md section 4 before changing any of it:
+ * Almost everything below is here because of a specific failure. Read this
+ * before changing any of it:
  *
  *   - the microphone stays open between turns, because opening it on the press
  *     swallows the first word of every clip

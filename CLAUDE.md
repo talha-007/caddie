@@ -1,7 +1,7 @@
 # Druids Personal Caddie
 
 Voice and chat shopping assistant embedded in the Druids Shopify storefront.
-Two builders, 14 days. Plan: [docs/ROADMAP.md](docs/ROADMAP.md).
+Two builders.
 
 The customer asks for something; the Caddie finds real products, recommends a
 size, builds a pack or an outfit, and fills a real Shopify basket.
@@ -49,8 +49,15 @@ This is enforced in three places and all three have to stay true:
    (what gets rendered) and `facts` (grounding data, never read aloud)
 3. the UI rendering `attachment`, never parsing message text
 
-Full list: [docs/RULES.md](docs/RULES.md). It is short, and every rule in it
-exists because the Caddie broke it once.
+Two more that do not bend:
+
+- **Variants are checked before anything goes in the basket.** Never add a
+  variant the customer has not chosen a size (and colour) for.
+- **Types change in `packages/shared` first.** It is the contract between the
+  server and the widget. Change it there, then tell the other person - never
+  add a field to one side and hope.
+
+Every rule here exists because the Caddie broke it once.
 
 ## Things that cause silent bugs
 
@@ -144,9 +151,8 @@ press means the first word goes into a device that has not started - keep the
 stream open between turns instead. `autoGainControl: false` gives a truer
 level reading and a worse recording, so leave it on. And stopping the recorder
 on the release takes the tail of the last word with it, so keep going for
-about 200ms. All three, and the two that follow from keeping the microphone
-open, are written up in `docs/widget-update-prompt.md` - they were found in a
-test UI that no longer exists, and the widget has not had them applied yet.
+about 200ms. The widget keeps the microphone warm while the panel is open
+(`useVoice`'s `warm` option) for the first of these.
 
 **Never send silence to the transcriber.** Given a clip with no speech in it,
 a transcription model does not return nothing - it invents, out of whatever
@@ -211,10 +217,10 @@ Richer merchandising data in Shopify would make every one of the above better.
 
 ## The store
 
-`qqfeqi-xb.myshopify.com` is a test store, priced in GBP. It holds 24 real
-Druids products and 25 generic demo items. Details, and the deliberate
-out-of-stock variant that exists so the unhappy path can be tested, are in
-[docs/STORE.md](docs/STORE.md).
+The live Druids store, `lachicos.myshopify.com` (www.druids.com), priced in
+GBP: about 2,500 active products. `SHOPIFY_BRAND_TAG` stays empty there -
+679 real Druids products do not carry the `druids-product` tag. The old test
+store and its seed scripts are gone.
 
 ## How we talk to Shopify, and why
 

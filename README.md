@@ -7,9 +7,7 @@ Voice and chat shopping assistant for the Druids store. Two week sprint, two bui
 | **Talha** | AI, Vapi, Shopify catalog, backend, recommendation logic, cart, release |
 | **Amir** | UI, product cards, basket, mobile and device testing |
 
-Day by day plan: [docs/ROADMAP.md](docs/ROADMAP.md). The rules that keep us honest: [docs/RULES.md](docs/RULES.md).
-Building the widget: [docs/API.md](docs/API.md) is everything the UI needs from the backend,
-and [docs/widget-kickoff-prompt.md](docs/widget-kickoff-prompt.md) briefs a coding agent on it.
+How it works, the rules it must not break, and what has gone wrong before: [CLAUDE.md](CLAUDE.md).
 
 ## Getting started
 
