@@ -3,6 +3,7 @@ import type { Journey, Product } from '@caddie/shared';
 import { Composer } from './components/Composer.js';
 import { ContextBar, Header } from './components/Header.js';
 import { Home } from './components/Home.js';
+import { QuickStart, describeSizes } from './components/QuickStart.js';
 import { Launcher } from './components/Launcher.js';
 import { BasketPanel } from './components/panels/BasketPanel.js';
 import { ShopProvider, type Shop } from './components/ShopContext.js';
@@ -32,6 +33,8 @@ export function Caddie({ context }: { context: WidgetContext }) {
   // The mic is held open while the panel is, so the first words of a clip are never lost.
   const voice = useVoice(caddie.sendClip, { warm: open });
   const [screen, setScreen] = useState<Screen>('chat');
+  /** Changing who they shop for or their size, from the line above the composer. */
+  const [editingSizes, setEditingSizes] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const openRootRef = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -169,6 +172,7 @@ export function Caddie({ context }: { context: WidgetContext }) {
       loadProduct: caddie.loadProduct,
       resolveVariant: caddie.resolveVariant,
       size: caddie.size,
+      sizes: caddie.sizes,
       busy: caddie.busy,
       addToBasket: caddie.addToBasket,
       addPack: caddie.addPack,
@@ -193,6 +197,7 @@ export function Caddie({ context }: { context: WidgetContext }) {
       caddie.resolveVariant,
       caddie.send,
       caddie.size,
+      caddie.sizes,
       close,
       context.page,
       openBasket,
@@ -243,6 +248,8 @@ export function Caddie({ context }: { context: WidgetContext }) {
                 busy={caddie.busy}
                 onJourney={beginJourney}
                 onAsk={caddie.send}
+                sizes={caddie.sizes}
+                onProfile={(profile) => void caddie.setProfile(profile)}
               />
             ) : (
               <Thread
@@ -265,6 +272,25 @@ export function Caddie({ context }: { context: WidgetContext }) {
                     Dismiss
                   </button>
                 </p>
+              ) : null}
+              {/* Who and what size, always one tap from changing - every card opens on it. */}
+              {!empty && editingSizes ? (
+                <QuickStart
+                  initial={caddie.sizes}
+                  busy={caddie.busy}
+                  onCancel={() => setEditingSizes(false)}
+                  onDone={(profile) => {
+                    setEditingSizes(false);
+                    void caddie.setProfile(profile);
+                  }}
+                />
+              ) : !empty && caddie.sizes?.range ? (
+                <div className="caddie-profile-line">
+                  <span>{describeSizes(caddie.sizes)}</span>
+                  <button type="button" className="caddie-link" disabled={caddie.busy} onClick={() => setEditingSizes(true)}>
+                    Change
+                  </button>
+                </div>
               ) : null}
               {/* The home screen carries its own example phrases under the hero orb. */}
               {!empty ? <SuggestionChips last={lastKind} disabled={caddie.busy} onPick={caddie.send} /> : null}

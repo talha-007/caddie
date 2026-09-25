@@ -184,6 +184,14 @@ export function Takes({ voice }: { voice: VoiceState }) {
 
 /** The one place a microphone failure is explained, wherever the orb is. */
 export function VoiceError({ voice }: { voice: VoiceState }) {
+  // Silence or a tap is not a failure: a quiet line that goes by itself.
+  if (!voice.error && voice.hint) {
+    return (
+      <p className="caddie-notice caddie-notice--hint" role="status">
+        <span>{voice.hint}</span>
+      </p>
+    );
+  }
   if (!voice.error) return null;
   return (
     <p className="caddie-notice caddie-notice--error" role="alert">

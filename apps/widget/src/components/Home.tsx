@@ -1,7 +1,8 @@
-import type { ReactNode } from 'react';
-import type { Journey } from '@caddie/shared';
+import { useState, type ReactNode } from 'react';
+import type { Journey, ShopperSizes } from '@caddie/shared';
 import type { VoiceState } from '../lib/useVoice.js';
 import { HangerIcon, RulerIcon, ShirtIcon, SparkleIcon, TagIcon } from './icons.js';
+import { QuickStart, describeSizes } from './QuickStart.js';
 import { SuggestionChips } from './SuggestionChips.js';
 import { VoiceOrb } from './VoiceOrb.js';
 
@@ -23,9 +24,14 @@ interface HomeProps {
   busy: boolean;
   onJourney: (journey: Journey) => void;
   onAsk: (text: string) => void;
+  /** Who they shop for and their sizes, once given. */
+  sizes: ShopperSizes | null;
+  onProfile: (profile: ShopperSizes) => void;
 }
 
-export function Home({ productTitle, voice, busy, onJourney, onAsk }: HomeProps) {
+export function Home({ productTitle, voice, busy, onJourney, onAsk, sizes, onProfile }: HomeProps) {
+  // Changing who they shop for or their size, after it was given.
+  const [editing, setEditing] = useState(false);
   return (
     <div className="caddie-home">
       <div className="caddie-home__hero">
@@ -45,6 +51,26 @@ export function Home({ productTitle, voice, busy, onJourney, onAsk }: HomeProps)
           </li>
         </ul>
       </div>
+
+      {/* Who and what size first: then the first thing shown is their range, in their size. */}
+      {sizes?.range && !editing ? (
+        <div className="caddie-profile-line">
+          <span>Shopping for {describeSizes(sizes)}</span>
+          <button type="button" className="caddie-link" disabled={busy} onClick={() => setEditing(true)}>
+            Change
+          </button>
+        </div>
+      ) : (
+        <QuickStart
+          initial={sizes}
+          busy={busy}
+          {...(sizes?.range ? { onCancel: () => setEditing(false) } : {})}
+          onDone={(profile) => {
+            setEditing(false);
+            onProfile(profile);
+          }}
+        />
+      )}
 
       <div className="caddie-journeys">
         {JOURNEYS.map(({ journey, title, blurb, icon }) => (

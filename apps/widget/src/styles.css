@@ -533,6 +533,44 @@
   color: var(--caddie-accent-fg);
 }
 
+/* "Not sure" and "Skip": an option, not a size. */
+.caddie-chip-btn--quiet {
+  border-style: dashed;
+  color: var(--caddie-muted);
+}
+
+/* ---------- Quick start: who and what size, first ---------- */
+
+.caddie-quickstart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.caddie-quickstart__question {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.caddie-quickstart__back,
+.caddie-quickstart__cancel {
+  align-self: flex-start;
+  font-size: 13px;
+}
+
+/* "Men · L · 34 waist  Change" - what every card opens on, always changeable. */
+.caddie-profile-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px;
+  font-size: 13px;
+  color: var(--caddie-muted);
+}
+
 .caddie-chip {
   display: inline-flex;
   align-items: center;
@@ -915,6 +953,14 @@
 .caddie-notice--error {
   background: var(--caddie-warning-soft);
   color: var(--caddie-warning-text);
+}
+
+/* A nudge ("hold the mic while you speak"), not an error: no colour, no button. */
+.caddie-notice--hint {
+  justify-content: center;
+  padding: 4px 12px;
+  background: transparent;
+  color: var(--caddie-muted);
 }
 
 /* ---------- Product media ---------- */

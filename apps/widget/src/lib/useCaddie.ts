@@ -9,10 +9,11 @@ import type {
   PageContext,
   Product,
   ProductVariant,
+  ShopperSizes,
   SizeInput,
   SizeRecommendation,
 } from '@caddie/shared';
-import { openEventStream, restartSession, runTool, sendMessage, sendVoice, syncBasket } from './api.js';
+import { openEventStream, restartSession, runTool, saveProfile, sendMessage, sendVoice, syncBasket } from './api.js';
 import {
   addBundleToThemeCart,
   addToThemeCart,
@@ -72,6 +73,10 @@ export interface CaddieState {
   cart: Cart | null;
   /** The most recent size recommendation, used to preselect sizes on cards. */
   size: SizeRecommendation | null;
+  /** Who they shop for and their sizes: every size picker opens on these. */
+  sizes: ShopperSizes | null;
+  /** The quick start's answers: saved, and every size picker opens on them. Sends nothing. */
+  setProfile: (profile: ShopperSizes) => Promise<void>;
   busy: boolean;
   /** Which journey the pending request is for, so the loading state can say what it is doing. */
   busyJourney: Journey | null;
@@ -148,6 +153,8 @@ interface StoredThread {
   messages: ThreadMessage[];
   cart: Cart | null;
   size: SizeRecommendation | null;
+  /** Who they shop for and their sizes - kept through "New chat", like the basket. */
+  sizes?: ShopperSizes | null;
 }
 
 function readThread(): StoredThread | null {
@@ -243,6 +250,7 @@ export function useCaddie(page: PageContext): CaddieState {
   const [messages, setMessages] = useState<ThreadMessage[]>(stored?.messages ?? []);
   const [cart, setCart] = useState<Cart | null>(stored?.cart ?? null);
   const [size, setSize] = useState<SizeRecommendation | null>(stored?.size ?? null);
+  const [sizes, setSizes] = useState<ShopperSizes | null>(stored?.sizes ?? null);
   const [details, setDetails] = useState<Record<string, Product>>({});
   const [busy, setBusy] = useState(false);
   const [busyJourney, setBusyJourney] = useState<Journey | null>(null);
@@ -268,8 +276,8 @@ export function useCaddie(page: PageContext): CaddieState {
   }, []);
 
   useEffect(() => {
-    writeThread({ messages, cart, size });
-  }, [messages, cart, size]);
+    writeThread({ messages, cart, size, sizes });
+  }, [messages, cart, size, sizes]);
 
   /**
    * The basket as it really is, read once on load. The stored copy is only
@@ -360,6 +368,8 @@ export function useCaddie(page: PageContext): CaddieState {
         heldCart.current = null;
       }
       if (attachment?.kind === 'size') setSize(attachment.recommendation);
+      // However they told us - quick start, chat or a size answer - the pickers open on it.
+      if (base?.shopper) setSizes(base.shopper);
       if (attachment?.kind === 'products') remember(attachment.products);
 
       const now = Date.now();
@@ -765,11 +775,32 @@ export function useCaddie(page: PageContext): CaddieState {
     [applyActions, deliver, sessionId, withBusy],
   );
 
+  /*
+   * The quick start: who they shop for and their size, saved and nothing
+   * more. It used to post "Show me your best picks" as if the customer had
+   * typed it; answering two questions is not asking for anything. From here
+   * every card opens on their size, and the Caddie knows it for whatever they
+   * ask next.
+   */
+  const setProfile = useCallback(
+    async (profile: ShopperSizes) => {
+      setSizes(profile);
+      try {
+        await saveProfile(sessionId, profile);
+      } catch {
+        // The sizes are still on this device, so the pickers still open on them.
+      }
+    },
+    [sessionId],
+  );
+
   return {
     sessionId,
     messages,
     cart,
     size,
+    sizes,
+    setProfile,
     busy,
     busyJourney,
     error,

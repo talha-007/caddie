@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect } from 'react';
-import type { BundleDeal, Cart, Journey, PageContext, Product, ProductVariant, SizeRecommendation } from '@caddie/shared';
+import type { BundleDeal, Cart, Journey, PageContext, Product, ProductVariant, ShopperSizes, SizeRecommendation } from '@caddie/shared';
 import type { BasketItem } from '../lib/useCaddie.js';
 import { sameId } from '../lib/variants.js';
 
@@ -13,6 +13,8 @@ export interface Shop {
   loadProduct: (product: Product) => Promise<Product | null>;
   resolveVariant: (productId: string, selection: Record<string, string>) => Promise<ProductVariant | null>;
   size: SizeRecommendation | null;
+  /** Their sizes from the quick start or the chat - the picker's starting point. */
+  sizes: ShopperSizes | null;
   busy: boolean;
   addToBasket: (items: BasketItem[]) => Promise<boolean>;
   /** Variants chosen in conversation, by product id - the cards start from these. */

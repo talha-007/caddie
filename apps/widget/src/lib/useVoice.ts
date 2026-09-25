@@ -32,6 +32,12 @@ export interface VoiceState {
   /** How long the current clip is, in seconds. */
   seconds: number;
   error: string | null;
+  /**
+   * A nudge, not a failure: the clip was too short or silent. Nothing is
+   * broken, so it is shown quietly and clears itself - a red "could not hear
+   * anything (level 0.008)" read as if the microphone had failed.
+   */
+  hint: string | null;
   supported: boolean;
   /** Recording or uploading - the composer dims while this is true. */
   active: boolean;
@@ -112,6 +118,14 @@ export function useVoice(onClip: (clip: Blob) => Promise<void>, options: VoiceOp
   const [level, setLevel] = useState(0);
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
+
+  // A hint is a passing remark: it goes by itself.
+  useEffect(() => {
+    if (!hint) return;
+    const timer = setTimeout(() => setHint(null), 4000);
+    return () => clearTimeout(timer);
+  }, [hint]);
 
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<BlobPart[]>([]);
@@ -309,8 +323,8 @@ export function useVoice(onClip: (clip: Blob) => Promise<void>, options: VoiceOp
       const clip = new Blob(parts, { type });
       const tooShort = Date.now() - startedAt.current < MIN_CLIP_MS || clip.size < 1024;
       if (tooShort) {
-        setStatus('error');
-        setError('That was too short. Hold the mic while you speak.');
+        setStatus('idle');
+        setHint('Hold the mic while you speak.');
         return;
       }
 
@@ -323,10 +337,12 @@ export function useVoice(onClip: (clip: Blob) => Promise<void>, options: VoiceOp
       // fraction of a penny; refusing someone who is talking costs the sale.
       const measured = frames.current >= MIN_METERED_FRAMES;
       if (measured && peak.current <= SILENCE_PEAK) {
-        setStatus('error');
-        // The peak is in the message because when this goes wrong, that number
-        // is the difference between a bad threshold and a dead audio graph.
-        setError(`I could not hear anything (level ${peak.current.toFixed(3)}). Check your microphone and try again.`);
+        setStatus('idle');
+        setHint("I didn't catch that - hold the mic and try again.");
+        // The peak is logged because when this goes wrong, that number is the
+        // difference between a bad threshold and a dead audio graph. Not shown:
+        // it means nothing to a customer.
+        console.info('[caddie] no speech in clip, peak level', peak.current.toFixed(3));
         return;
       }
 
@@ -344,6 +360,7 @@ export function useVoice(onClip: (clip: Blob) => Promise<void>, options: VoiceOp
 
   const start = useCallback(async () => {
     if (!supported || recorder.current || opening.current) return;
+    setHint(null);
     opening.current = true;
     pending.current = null;
     stopping.current = false;
@@ -449,6 +466,7 @@ export function useVoice(onClip: (clip: Blob) => Promise<void>, options: VoiceOp
     level,
     seconds,
     error,
+    hint,
     supported,
     active: status === 'starting' || status === 'recording' || status === 'sending',
     start,

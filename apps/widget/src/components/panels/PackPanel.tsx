@@ -46,12 +46,6 @@ export function PackPanel({ recommendation, latest }: { recommendation: PackReco
           <span className="caddie-eyebrow caddie-eyebrow--accent">{bundle ? bundle.title : 'Your selection'}</span>
           <span className="caddie-muted">{plural(items.length, 'piece')}</span>
         </div>
-        {saved ? (
-          <span className="caddie-save-badge">
-            <small>Save</small>
-            {formatMoney(saved)}
-          </span>
-        ) : null}
       </header>
 
       <p className="caddie-card__lead">{reason}</p>
@@ -69,16 +63,19 @@ export function PackPanel({ recommendation, latest }: { recommendation: PackReco
         ))}
       </div>
 
-      <div className={`caddie-total${overBudget ? ' is-over' : ''}`}>
-        <div>
-          <span className="caddie-total__label">{bundle ? 'Pack price' : 'Total'}</span>
-          {rrp && saved ? <s className="caddie-price__rrp">RRP {formatMoney(rrp)}</s> : null}
+      {/* No price as if it could be paid, for a pack that cannot be bought yet. */}
+      {bundle?.blocked ? null : (
+        <div className={`caddie-total${overBudget ? ' is-over' : ''}`}>
+          <div>
+            <span className="caddie-total__label">{bundle ? 'Pack price' : 'Total'}</span>
+            {rrp && saved ? <s className="caddie-price__rrp">RRP {formatMoney(rrp)}</s> : null}
+          </div>
+          <div className="caddie-total__value">
+            <strong>{formatMoney(total)}</strong>
+            {saved ? <span className="caddie-total__saving">You save {formatMoney(saved)}</span> : null}
+          </div>
         </div>
-        <div className="caddie-total__value">
-          <strong>{formatMoney(total)}</strong>
-          {saved ? <span className="caddie-total__saving">You save {formatMoney(saved)}</span> : null}
-        </div>
-      </div>
+      )}
 
       {overBudget ? (
         <p className="caddie-notice caddie-notice--warning" role="status">
@@ -86,11 +83,18 @@ export function PackPanel({ recommendation, latest }: { recommendation: PackReco
         </p>
       ) : null}
 
-      {bundle && (!complete || !onStorefront()) ? (
-        // Off the storefront, or a step with nothing in stock: the deal page can finish it.
-        <a className="caddie-btn caddie-btn--primary caddie-btn--block" href={bundle.url} target="_top">
-          Build it on the {bundle.title.toLowerCase()} page
-        </a>
+      {bundle?.blocked ? (
+        // Cannot be bought yet: a quiet line, not a warning - nothing has gone wrong for them.
+        <p className="caddie-notice caddie-notice--hint" role="status">
+          {bundle.blocked}
+        </p>
+      ) : bundle && (!complete || !onStorefront()) ? (
+        // Off the storefront, or a step with nothing in stock: the deal page can finish it - if there is one.
+        bundle.url ? (
+          <a className="caddie-btn caddie-btn--primary caddie-btn--block" href={bundle.url} target="_top">
+            Build it on the {bundle.title.toLowerCase()} page
+          </a>
+        ) : null
       ) : (
         <AddAllButton
           ready={choices.ready}

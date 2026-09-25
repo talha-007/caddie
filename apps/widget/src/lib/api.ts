@@ -5,7 +5,9 @@ import type {
   CartAction,
   ChatRequest,
   PageContext,
+  ProfileRequest,
   SessionRestartResponse,
+  ShopperSizes,
 } from '@caddie/shared';
 import { onStorefront } from './themeCart.js';
 
@@ -46,6 +48,11 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 /** The store cart as the widget read it, so the Caddie can see what is really in it. */
 export function syncBasket(sessionId: string, basket: BasketSync) {
   return post<{ ok: boolean }>(`/api/session/${encodeURIComponent(sessionId)}/basket`, basket);
+}
+
+/** Who they shop for and their sizes, from the quick start. */
+export function saveProfile(sessionId: string, profile: ProfileRequest) {
+  return post<{ ok: boolean; shopper: ShopperSizes }>(`/api/session/${encodeURIComponent(sessionId)}/profile`, profile);
 }
 
 /** A clean chat on the same basket - behind "New chat". */

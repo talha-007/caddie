@@ -38,7 +38,12 @@ export function useProductChoice(product: Product): ProductChoice {
   const onThisPage = Boolean(shop.page.productId && sameId(shop.page.productId, product.id));
   // Chosen in conversation first, then the variant on the page they are looking at.
   const pickedId = shop.picked[product.id] ?? null;
-  const hints = { size: shop.size?.size ?? null, variantId: pickedId ?? (onThisPage ? (shop.page.variantId ?? null) : null) };
+  // A size worked out for them wins; otherwise the size and waist they gave us.
+  const hints = {
+    size: shop.size?.size ?? shop.sizes?.size ?? null,
+    waist: shop.sizes?.waist ?? null,
+    variantId: pickedId ?? (onThisPage ? (shop.page.variantId ?? null) : null),
+  };
 
   const [selection, setSelection] = useState<Selection>(() => (full ? initialSelection(full, hints) : {}));
   const [loading, setLoading] = useState(false);

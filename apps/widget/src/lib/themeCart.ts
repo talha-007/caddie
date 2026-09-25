@@ -95,7 +95,8 @@ function toCart(raw: AjaxCart): Cart {
 
 /** Which bundle a line belongs to, from the properties the theme's builder writes. */
 function bundleOf(item: AjaxCart['items'][number]): string | undefined {
-  const id = item.properties?.['__bundle_id'];
+  // __bundle_id from the old bundle builder, _data_bundle_id from the sport-bundle (condition) packs.
+  const id = item.properties?.['__bundle_id'] ?? item.properties?.['_data_bundle_id'];
   return typeof id === 'string' && id ? id : undefined;
 }
 

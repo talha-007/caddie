@@ -42,11 +42,16 @@ export function productOptions(product: Product): PickerOption[] {
       }
     }
   }
-  return [...byName.entries()].map(([name, values]) => ({
-    name,
-    values,
-    kind: COLOUR.test(name) ? 'colour' : SIZE.test(name) ? 'size' : 'other',
-  }));
+  return (
+    [...byName.entries()]
+      // Shopify's placeholder for a product with no options: "Title: Default Title" is not a choice.
+      .filter(([name, values]) => !(values.length === 1 && /^default title$/i.test(values[0] ?? '')))
+      .map(([name, values]) => ({
+        name,
+        values,
+        kind: COLOUR.test(name) ? 'colour' : SIZE.test(name) ? 'size' : 'other',
+      }))
+  );
 }
 
 /** True when the product offers no real choice - one colour, one size, or none at all. */
@@ -100,9 +105,29 @@ export function isValueAvailable(product: Product, selection: Selection, name: s
  * the size the Caddie recommended, the colour named in the title, or the
  * variant open on the product page. Every one is visible before they tap Add.
  */
+/** "Medium", "med", "M" are one size; "8/10" and "8-10" too. */
+function sizeKey(value: string): string {
+  const clean = value.trim().toLowerCase().replace(/[-\s]+/g, '/');
+  const words: Record<string, string> = { small: 's', medium: 'm', med: 'm', large: 'l', 'x/large': 'xl', 'extra/large': 'xl', xxl: '2xl', xxxl: '3xl' };
+  return words[clean] ?? clean;
+}
+
+/** Their size among a product's sizes, trying each of theirs in turn - a top size, then a waist. */
+function matchSize(values: string[], wanted: Array<string | null | undefined>): string | undefined {
+  for (const size of wanted) {
+    if (!size) continue;
+    const match = values.find((value) => sizeKey(value) === sizeKey(size));
+    if (match) return match;
+    // A combined size - the belt's "M/L" and "L/XL" - when exactly one of them holds theirs.
+    const halves = values.filter((value) => /[a-z]\s*\/\s*[a-z]/i.test(value) && sizeKey(value).split('/').includes(sizeKey(size)));
+    if (halves.length === 1) return halves[0];
+  }
+  return undefined;
+}
+
 export function initialSelection(
   product: Product,
-  hints: { size?: string | null; variantId?: string | null } = {},
+  hints: { size?: string | null; waist?: string | null; variantId?: string | null } = {},
 ): Selection {
   const selection: Selection = {};
   const options = productOptions(product);
@@ -118,16 +143,17 @@ export function initialSelection(
       const named = option.values.find((value) => new RegExp(`\\b${escapeRegExp(value.toLowerCase())}\\b`).test(title));
       if (named) selection[option.name] = named;
     }
-    if (option.kind === 'size' && hints.size && !pageVariant) {
-      const match = option.values.find((value) => value.toLowerCase() === hints.size?.toLowerCase());
+    // Their size, already chosen - they can still tap another.
+    if (option.kind === 'size' && !pageVariant) {
+      const match = matchSize(option.values, [hints.size, hints.waist]);
       if (match) selection[option.name] = match;
     }
   }
 
-  // The page variant's size is what they were looking at, but the recommended size wins.
-  if (pageVariant && hints.size) {
+  // The page variant's size is what they were looking at, but their own size wins.
+  if (pageVariant && (hints.size || hints.waist)) {
     const sizeOption = options.find((option) => option.kind === 'size');
-    const match = sizeOption?.values.find((value) => value.toLowerCase() === hints.size?.toLowerCase());
+    const match = sizeOption ? matchSize(sizeOption.values, [hints.size, hints.waist]) : undefined;
     if (sizeOption && match) selection[sizeOption.name] = match;
   }
 
