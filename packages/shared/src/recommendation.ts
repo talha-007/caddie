@@ -46,6 +46,14 @@ export interface SizeRecommendation {
   /** 0-1. Below 0.5 the Caddie should ask one more question instead of committing. */
   confidence: number;
   alternativeSize: string | null;
+  /** When to choose the alternative instead: "XL only if you want room to layer underneath." */
+  alternativeReason?: string;
+  /**
+   * How sure, in words a customer can take at face value. high: read straight
+   * off the Druids chart. medium: between two sizes, or a fit call. estimate:
+   * height and weight, or their usual size - never presented as certain.
+   */
+  confidenceLevel?: 'high' | 'medium' | 'estimate';
   reason: string;
   basis: SizeBasis;
   /** Questions the Caddie still needs answered. Empty when we are confident. */
