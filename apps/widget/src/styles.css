@@ -1543,7 +1543,7 @@
 .caddie-trysay {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
 
 .caddie-trysay__label {
@@ -1557,27 +1557,46 @@
 .caddie-trysay__list {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 16px;
+  gap: 8px;
 }
 
+/*
+ * Tinted pills, the same surface as the "just tell me naturally" hint, so a
+ * suggestion reads as something you can press rather than as body copy.
+ * min-height stays on --caddie-touch: these are the one-tap way in on a phone.
+ */
 .caddie-trysay__item {
   display: inline-flex;
   align-items: center;
   min-height: var(--caddie-touch);
+  padding: 10px 16px;
+  border: 1px solid var(--caddie-glass-line);
+  border-radius: var(--caddie-radius-pill);
+  background: var(--caddie-tint-strong);
   color: var(--caddie-accent-strong);
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 500;
   text-align: left;
-  border-bottom: 1px solid transparent;
-  transition: border-color 200ms var(--caddie-ease), opacity 200ms var(--caddie-ease);
+  box-shadow: var(--caddie-shadow-soft);
+  transition: transform 200ms var(--caddie-ease), box-shadow 200ms var(--caddie-ease),
+    background 200ms var(--caddie-ease), border-color 200ms var(--caddie-ease);
 }
 
-.caddie-trysay__item:hover:not(:disabled) {
-  border-bottom-color: currentColor;
+.caddie-root .caddie-trysay__item:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: var(--caddie-accent-soft);
+  border-color: rgba(var(--caddie-accent-rgb), 0.3);
+  box-shadow: var(--caddie-shadow-lift);
+}
+
+.caddie-trysay__item:active:not(:disabled) {
+  transform: translateY(0) scale(0.99);
+  box-shadow: var(--caddie-shadow-soft);
 }
 
 .caddie-trysay__item:disabled {
   opacity: 0.45;
+  box-shadow: none;
 }
 
 /* ---------- Voice ---------- */
