@@ -74,6 +74,8 @@ export interface CartLine {
   quantity: number;
   unitPrice: Money;
   lineTotal: Money;
+  /** Set when the line is a piece of a bundle deal: the pack it belongs to, by name. */
+  bundle?: string;
 }
 
 export interface Cart {

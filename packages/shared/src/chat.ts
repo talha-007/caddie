@@ -1,5 +1,5 @@
 import type { Cart, Product } from './product.js';
-import type { OutfitRecommendation, PackRecommendation, SizeRecommendation } from './recommendation.js';
+import type { BundleDeal, OutfitRecommendation, PackRecommendation, SizeRecommendation } from './recommendation.js';
 
 export type Role = 'user' | 'assistant';
 
@@ -13,6 +13,58 @@ export interface CaddieMessage {
   text: string;
   createdAt: string;
   attachment?: CaddieAttachment;
+  /** Basket changes for the widget to carry out in the store's own cart. See CartAction. */
+  actions?: CartAction[];
+}
+
+/**
+ * A change to the store's own cart, carried out by the widget.
+ *
+ * On a Shopify storefront the basket customers trust - and the one the bundle
+ * discounts are applied to - is the theme's cart, which lives in their
+ * browser. The server cannot touch it; it decides what goes in and hands the
+ * widget the change. Numeric Shopify ids, as the theme's cart endpoints take.
+ */
+export type CartAction =
+  | {
+      type: 'add';
+      lines: Array<{ variantId: string; quantity: number }>;
+      /** Cart line keys to remove once the add has succeeded - a swap. */
+      removeKeys?: string[];
+    }
+  | { type: 'change'; lineKey: string; quantity: number }
+  | {
+      type: 'add-bundle';
+      bundle: BundleDeal;
+      /**
+       * Packs already in the cart that this one replaces, by bundle id - a change
+       * to a pack. Removed only after the new one is in, and by id rather than
+       * line key, because adding to the cart re-keys the lines already there.
+       */
+      replaceBundles?: string[];
+      /** The id to give this pack's lines, chosen by the server so it can replace it later. */
+      bundleId?: string;
+      /** The chosen variant for each step, in step order. */
+      pieces: Array<{ variantId: string; productId: string; price: number; compareAtPrice: number | null }>;
+    };
+
+/**
+ * The store cart as the widget last read it, sent back so the model can see
+ * what is in it. Line keys are what /cart/change.js takes.
+ */
+export interface BasketSync {
+  lines: Array<{
+    key: string;
+    productId: string;
+    variantId: string;
+    title: string;
+    variantTitle: string;
+    quantity: number;
+    /** Set on lines that belong to a bundle deal: that pack's bundle id. */
+    bundle?: string;
+    /** Which deal, by page handle, e.g. "golf-ambassador-pack". */
+    bundleName?: string;
+  }>;
 }
 
 export type CaddieAttachment =
@@ -53,6 +105,19 @@ export interface ChatRequest {
 export interface ChatResponse {
   sessionId: string;
   message: CaddieMessage;
+}
+
+/**
+ * POST /api/session/:id/restart - a fresh conversation on the same basket.
+ *
+ * Behind the widget's "New chat". The conversation otherwise carries across
+ * page loads; this clears what was said and keeps what they are buying and
+ * what fits them.
+ */
+export interface SessionRestartResponse {
+  sessionId: string;
+  /** The basket carried over, or null if there is none (or it has expired). */
+  cart: Cart | null;
 }
 
 export interface ApiError {

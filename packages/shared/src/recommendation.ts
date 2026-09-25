@@ -86,6 +86,29 @@ export interface PackRecommendation {
     /** What the pack is meant to contain, in order, whether filled or not. */
     slots: Array<{ slot: string; productId: string | null }>;
   };
+  /**
+   * Set when this is one of the Druids deals built on the theme's bundle
+   * builder - the Ambassador Pack, Prestige Pack, Rainsuit Special and the
+   * rest. Those are not products: the pack price is charged at checkout by a
+   * discount that matches the bundle properties on each cart line, so the
+   * pieces must go in through `buildBundleCartItems`, never one by one.
+   */
+  bundle?: BundleDeal;
+}
+
+/** One of the store's bundle deals, as its page defines it. */
+export interface BundleDeal {
+  /** The page handle, e.g. "golf-ambassador-pack" - also the bundle's name on each cart line. */
+  handle: string;
+  title: string;
+  /** The pack price by currency code, as the page sets it: { GBP: 99.99, EUR: 119.99 }. */
+  prices: Record<string, number>;
+  /** The page's "dynamic prices" setting, which changes the lines it writes. */
+  dynamicPrices: boolean;
+  /** One piece from each step, in order. `productId` is null when nothing in stock fits. */
+  steps: Array<{ title: string; productId: string | null }>;
+  /** The store page for the deal, for anything the Caddie cannot do itself. */
+  url: string;
 }
 
 /* ---------------- Outfit ---------------- */
