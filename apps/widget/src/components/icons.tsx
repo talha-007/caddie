@@ -61,11 +61,18 @@ export const CloseIcon = (p: IconProps) => (
   </Svg>
 );
 
-/** Start a new conversation: a pencil on a page, as messaging apps use. */
+/**
+ * Start a new conversation: a rounded speech bubble with a plus.
+ * Drawn on the same 24px grid as its neighbours in the header, so it
+ * carries the same optical weight as the basket and close icons.
+ */
 export const NewChatIcon = (p: IconProps) => (
   <Svg {...p}>
-    <path {...stroke} d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6" />
-    <path {...stroke} d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 8.5-8.5z" />
+    <path
+      {...stroke}
+      d="M20.5 14.2a2.8 2.8 0 0 1-2.8 2.8H9.2l-3.3 2.7a.5.5 0 0 1-.82-.39V6.8A2.8 2.8 0 0 1 7.9 4h9.8a2.8 2.8 0 0 1 2.8 2.8z"
+    />
+    <path {...stroke} d="M12.8 7.9v5.2M10.2 10.5h5.2" />
   </Svg>
 );
 

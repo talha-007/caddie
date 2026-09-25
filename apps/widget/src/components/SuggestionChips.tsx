@@ -32,9 +32,7 @@ export function SuggestionChips({
       <div className="caddie-trysay__list">
         {phrases.map((phrase) => (
           <button key={phrase} type="button" className="caddie-trysay__item" disabled={disabled} onClick={() => onPick(phrase)}>
-            <span aria-hidden="true">“</span>
             {phrase}
-            <span aria-hidden="true">”</span>
           </button>
         ))}
       </div>
