@@ -14,21 +14,27 @@
  */
 
 .caddie-root {
-  /* Brand */
-  --caddie-accent: #7b2c7b;
-  --caddie-accent-strong: #5e1f5e;
-  --caddie-accent-soft: #f4eaf4;
+  /* Brand - the Druids course green.
+   * The storefront hero green is #66893c; this is a hair deeper so the same
+   * token works as text on white AND under white button labels (4.7:1 both
+   * ways). The -rgb pair feeds the rgba() tints further down. */
+  --caddie-accent: #5c7d35;
+  --caddie-accent-rgb: 92, 125, 53;
+  --caddie-accent-strong: #445e26;
+  --caddie-accent-soft: #eef3e7;
   --caddie-accent-fg: #ffffff;
-  --caddie-gradient: linear-gradient(135deg, #5e1f5e 0%, #7b2c7b 55%, #9b3a8e 100%);
+  --caddie-gradient: linear-gradient(135deg, #445e26 0%, #5c7d35 55%, #6d8f42 100%);
 
-  /* Voice-first surfaces. Tints, glows and glass, all from the brand purple. */
-  --caddie-tint: #faf7fa;
-  --caddie-tint-strong: #f3ebf3;
+  /* Voice-first surfaces. Tints, glows and glass, all from the brand green. */
+  --caddie-tint: #f8faf6;
+  --caddie-tint-strong: #edf2e7;
   --caddie-glass: rgba(255, 255, 255, 0.72);
-  --caddie-glass-line: rgba(123, 44, 123, 0.12);
-  --caddie-glow: rgba(123, 44, 123, 0.28);
-  --caddie-bloom: rgba(155, 58, 142, 0.22);
-  --caddie-orb-light: #b455a4;
+  --caddie-glass-line: rgba(var(--caddie-accent-rgb), 0.12);
+  --caddie-glow: rgba(var(--caddie-accent-rgb), 0.28);
+  --caddie-bloom: rgba(var(--caddie-bloom-rgb), 0.22);
+  --caddie-bloom-rgb: 122, 156, 76;
+  --caddie-orb-light: #8fb45e;
+  --caddie-orb-light-rgb: 143, 180, 94;
 
   /* Surfaces and text */
   --caddie-bg: #f8f6f4;
@@ -51,9 +57,9 @@
   --caddie-radius: 16px;
   --caddie-radius-control: 12px;
   --caddie-radius-pill: 999px;
-  --caddie-shadow: 0 16px 48px rgba(40, 16, 40, 0.22);
-  --caddie-shadow-soft: 0 2px 10px rgba(40, 16, 40, 0.06);
-  --caddie-shadow-lift: 0 10px 30px rgba(40, 16, 40, 0.1);
+  --caddie-shadow: 0 16px 48px rgba(26, 36, 14, 0.22);
+  --caddie-shadow-soft: 0 2px 10px rgba(26, 36, 14, 0.06);
+  --caddie-shadow-lift: 0 10px 30px rgba(26, 36, 14, 0.1);
   --caddie-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
   /* Sizing */
@@ -203,11 +209,11 @@
   border-radius: 50%;
   background: var(--caddie-gradient);
   color: var(--caddie-accent-fg);
-  box-shadow: var(--caddie-shadow), 0 0 0 4px rgba(123, 44, 123, 0.14);
+  box-shadow: var(--caddie-shadow), 0 0 0 4px rgba(var(--caddie-accent-rgb), 0.14);
 }
 
 .caddie-launcher:hover .caddie-launcher__orb {
-  box-shadow: var(--caddie-shadow), 0 0 0 6px rgba(123, 44, 123, 0.2);
+  box-shadow: var(--caddie-shadow), 0 0 0 6px rgba(var(--caddie-accent-rgb), 0.2);
 }
 
 .caddie-badge {
@@ -247,7 +253,7 @@
   flex-direction: column;
   height: 92vh;
   height: 92dvh;
-  /* A breath of purple behind the orb, white where the content sits. */
+  /* A breath of green behind the orb, white where the content sits. */
   background: linear-gradient(180deg, #ffffff 0%, var(--caddie-tint) 34%, #ffffff 72%);
   border-radius: var(--caddie-radius-sheet) var(--caddie-radius-sheet) 0 0;
   box-shadow: var(--caddie-shadow);
@@ -657,7 +663,7 @@
 
 .caddie-journey:hover:not(:disabled) {
   transform: translateY(-2px);
-  border-color: rgba(123, 44, 123, 0.28);
+  border-color: rgba(var(--caddie-accent-rgb), 0.28);
   box-shadow: var(--caddie-shadow-lift);
 }
 
@@ -700,7 +706,7 @@
 /* ---------- Thread ---------- */
 /*
  * A chat log: an avatar and a bubble per turn, the customer on the right in
- * brand purple, the Caddie on the left on a light surface. Cards and forms
+ * brand green, the Caddie on the left on a light surface. Cards and forms
  * stay full width under the turn that produced them, so a product grid is
  * never squeezed into a bubble.
  */
@@ -1479,7 +1485,7 @@
 .caddie-input:focus {
   border-color: var(--caddie-accent);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(123, 44, 123, 0.15);
+  box-shadow: 0 0 0 3px rgba(var(--caddie-accent-rgb), 0.15);
 }
 
 .caddie-measure {
@@ -1617,16 +1623,16 @@
   overflow: hidden;
   background:
     radial-gradient(circle at 34% 26%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 44%),
-    radial-gradient(circle at 74% 78%, var(--caddie-orb-light) 0%, rgba(180, 85, 164, 0) 56%),
-    radial-gradient(circle at 50% 46%, #7b2c7b 0%, #5e1f5e 100%);
+    radial-gradient(circle at 74% 78%, var(--caddie-orb-light) 0%, rgba(var(--caddie-orb-light-rgb), 0) 56%),
+    radial-gradient(circle at 50% 46%, var(--caddie-accent) 0%, var(--caddie-accent-strong) 100%);
   /*
-   * The halo from the concept: two rings of thinning purple around the orb,
+   * The halo from the concept: two rings of thinning green around the orb,
    * there in every state, with the drop glow underneath.
    */
   box-shadow:
-    inset 0 -12px 28px rgba(30, 8, 30, 0.32),
-    0 0 0 12px rgba(123, 44, 123, 0.07),
-    0 0 0 26px rgba(123, 44, 123, 0.04),
+    inset 0 -12px 28px rgba(18, 26, 8, 0.32),
+    0 0 0 12px rgba(var(--caddie-accent-rgb), 0.07),
+    0 0 0 26px rgba(var(--caddie-accent-rgb), 0.04),
     0 16px 40px var(--caddie-glow);
   /* The live microphone, straight from the hook. */
   transform: scale(calc(1 + var(--caddie-level, 0) * 0.07));
@@ -1637,7 +1643,7 @@
   position: absolute;
   inset: -16%;
   border-radius: 50%;
-  background: radial-gradient(circle, var(--caddie-bloom) 0%, rgba(155, 58, 142, 0) 66%);
+  background: radial-gradient(circle, var(--caddie-bloom) 0%, rgba(var(--caddie-bloom-rgb), 0) 66%);
   filter: blur(10px);
   pointer-events: none;
 }
@@ -1695,7 +1701,7 @@
 
 .caddie-voiceorb--error .caddie-voiceorb__core {
   filter: saturate(0.22) brightness(0.94);
-  box-shadow: inset 0 -12px 28px rgba(30, 8, 30, 0.26);
+  box-shadow: inset 0 -12px 28px rgba(18, 26, 8, 0.26);
 }
 
 .caddie-voiceorb--error .caddie-voiceorb__bloom {
@@ -1778,9 +1784,9 @@
 
 .caddie-voiceorb--pill .caddie-voiceorb__core {
   box-shadow:
-    inset 0 -6px 14px rgba(30, 8, 30, 0.3),
-    0 0 0 6px rgba(123, 44, 123, 0.07),
-    0 0 0 13px rgba(123, 44, 123, 0.04),
+    inset 0 -6px 14px rgba(18, 26, 8, 0.3),
+    0 0 0 6px rgba(var(--caddie-accent-rgb), 0.07),
+    0 0 0 13px rgba(var(--caddie-accent-rgb), 0.04),
     0 8px 18px var(--caddie-glow);
 }
 
@@ -2020,10 +2026,10 @@
 .host-page__btn {
   margin: 4px 6px 4px 0;
   padding: 10px 14px;
-  border: 1px solid #7b2c7b;
+  border: 1px solid #5c7d35;
   border-radius: 999px;
   background: #ffffff;
-  color: #7b2c7b;
+  color: #5c7d35;
   font: inherit;
   font-weight: 600;
   cursor: pointer;
