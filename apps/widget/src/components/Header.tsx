@@ -1,15 +1,17 @@
 import type { WidgetContext } from '../lib/context.js';
-import { BackIcon, BasketIcon, CloseIcon, SparkleIcon } from './icons.js';
+import { BackIcon, BasketIcon, CloseIcon, NewChatIcon, SparkleIcon } from './icons.js';
 
 interface HeaderProps {
   basketCount: number;
   onBasket: (() => void) | null;
   onBack: (() => void) | null;
   onClose: () => void;
+  /** Offered once there is a conversation to leave; the chat now carries across pages. */
+  onNewChat?: (() => void) | null;
   title?: string;
 }
 
-export function Header({ basketCount, onBasket, onBack, onClose, title }: HeaderProps) {
+export function Header({ basketCount, onBasket, onBack, onClose, onNewChat, title }: HeaderProps) {
   return (
     <header className="caddie-header">
       <span className="caddie-header__grab" aria-hidden="true" />
@@ -33,6 +35,11 @@ export function Header({ basketCount, onBasket, onBack, onClose, title }: Header
           </h2>
           {title ? null : <p>Your AI shopping assistant. Built for golfers.</p>}
         </div>
+        {onNewChat ? (
+          <button type="button" className="caddie-icon-btn" onClick={onNewChat} aria-label="Start a new chat" title="New chat">
+            <NewChatIcon />
+          </button>
+        ) : null}
         {onBasket ? (
           <button
             type="button"

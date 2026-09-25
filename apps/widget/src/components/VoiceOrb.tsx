@@ -24,7 +24,13 @@ export type OrbState = 'idle' | 'listening' | 'thinking' | 'error';
 
 export function orbState(voice: VoiceState, busy: boolean): OrbState {
   if (!voice.supported || voice.status === 'error') return 'error';
-  if (voice.status === 'recording' || voice.status === 'starting') return 'listening';
+  /*
+   * Only once the recorder is really running. On a first press the mic takes
+   * a moment to open, and showing "Listening" through it told people to talk
+   * into nothing - their first words never reached the clip.
+   */
+  if (voice.status === 'recording') return 'listening';
+  if (voice.status === 'starting') return 'thinking';
   if (voice.status === 'sending' || busy) return 'thinking';
   return 'idle';
 }
@@ -38,6 +44,13 @@ export const STATUS: Record<OrbState, string> = {
 };
 
 export const UNSUPPORTED = 'Voice needs a newer browser';
+
+/** The status line. The mic opening is not the Caddie thinking, so it says so. */
+export function statusLabel(voice: VoiceState, state: OrbState): string {
+  if (!voice.supported) return UNSUPPORTED;
+  if (voice.status === 'starting') return 'One moment…';
+  return STATUS[state];
+}
 
 /** A tap is a toggle; anything longer is hold-to-talk and sends on release. */
 const HOLD_MS = 600;
@@ -194,7 +207,7 @@ export function VoiceOrb({ voice, busy }: OrbProps) {
   const state = orbState(voice, busy);
   // Only the live microphone drives the core; everything else rests at zero.
   const level = state === 'listening' ? Math.min(Math.max(voice.level, 0), 1) : 0;
-  const label = voice.supported ? STATUS[state] : UNSUPPORTED;
+  const label = statusLabel(voice, state);
 
   return (
     <div className="caddie-voice">

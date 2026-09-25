@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Journey, Product } from '@caddie/shared';
 import { Composer } from './components/Composer.js';
 import { ContextBar, Header } from './components/Header.js';
@@ -28,10 +28,12 @@ function garmentFor(title: string | undefined): string {
 
 export function Caddie({ context }: { context: WidgetContext }) {
   const caddie = useCaddie(context.page);
-  const voice = useVoice(caddie.sendClip);
   const [open, setOpen] = useState(false);
+  // The mic is held open while the panel is, so the first words of a clip are never lost.
+  const voice = useVoice(caddie.sendClip, { warm: open });
   const [screen, setScreen] = useState<Screen>('chat');
   const panelRef = useRef<HTMLDivElement>(null);
+  const openRootRef = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
 
   const { startJourney, refreshCart } = caddie;
@@ -40,7 +42,9 @@ export function Caddie({ context }: { context: WidgetContext }) {
   const show = useCallback(() => {
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setOpen(true);
-  }, []);
+    // The store cart may have changed while the Caddie was closed - the theme's own buttons, another tab.
+    void refreshCart();
+  }, [refreshCart]);
 
   const close = useCallback(() => {
     // Closing mid-recording throws the clip away rather than sending it.
@@ -117,6 +121,31 @@ export function Caddie({ context }: { context: WidgetContext }) {
     [show, startJourney],
   );
 
+  /*
+   * Above everything the theme floats. On the live Druids theme an Instagram
+   * "FOLLOW DRUIDS" pill covered the mic, and a "YOUR LOOK IS READY" tab cut
+   * across the panel - both at the highest z-index there is, so no z-index of
+   * ours could win, only tie. The top layer (a manual popover) is drawn above
+   * every z-index on the page. Browsers without it keep the z-index as before.
+   */
+  useLayoutEffect(() => {
+    const root = openRootRef.current;
+    if (!open || !root || typeof root.showPopover !== 'function') return;
+    root.setAttribute('popover', 'manual');
+    try {
+      root.showPopover();
+    } catch {
+      // Already showing, or refused: the z-index still stands.
+    }
+    return () => {
+      try {
+        root.hidePopover();
+      } catch {
+        // It went with the node.
+      }
+    };
+  }, [open]);
+
   // Escape closes; the page behind stops scrolling while the sheet is up on a phone.
   // Runs on open/close only, so a voice status change never steals focus from the input.
   useEffect(() => {
@@ -142,6 +171,8 @@ export function Caddie({ context }: { context: WidgetContext }) {
       size: caddie.size,
       busy: caddie.busy,
       addToBasket: caddie.addToBasket,
+      addPack: caddie.addPack,
+      picked: caddie.picked,
       send: caddie.send,
       startJourney: beginJourney,
       cart: caddie.cart,
@@ -152,6 +183,8 @@ export function Caddie({ context }: { context: WidgetContext }) {
     [
       beginJourney,
       caddie.addToBasket,
+      caddie.addPack,
+      caddie.picked,
       caddie.busy,
       caddie.cart,
       caddie.changeQuantity,
@@ -180,7 +213,7 @@ export function Caddie({ context }: { context: WidgetContext }) {
 
   return (
     <ShopProvider value={shop}>
-      <div className="caddie-root">
+      <div ref={openRootRef} className="caddie-root caddie-root--open">
         <div className="caddie-backdrop" onClick={close} aria-hidden="true" />
         <div
           ref={panelRef}
@@ -194,6 +227,7 @@ export function Caddie({ context }: { context: WidgetContext }) {
             basketCount={basketCount}
             onBasket={screen === 'chat' ? openBasket : null}
             onBack={screen === 'basket' ? () => setScreen('chat') : null}
+            onNewChat={screen === 'chat' && !empty && !caddie.busy ? () => void caddie.newChat() : null}
             onClose={close}
             {...(screen === 'basket' ? { title: 'Your basket' } : {})}
           />

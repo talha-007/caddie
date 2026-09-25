@@ -50,9 +50,8 @@ const MAX_CLIP_MS = 30_000;
 /** The tail of the last word lives here. */
 const TAIL_MS = 200;
 /**
- * How long the microphone stays open after a turn. Long enough that the next
- * one starts instantly, short enough that the browser's recording indicator
- * does not sit there looking like we are listening in.
+ * How long the microphone stays open after a turn once the panel is closed.
+ * While the panel is open it stays open throughout - see VoiceOptions.warm.
  */
 const IDLE_RELEASE_MS = 25_000;
 /** Below this peak the microphone heard nothing worth a transcription. */
@@ -76,7 +75,33 @@ function describe(err: unknown): string {
   return err instanceof Error ? err.message : 'The recording failed.';
 }
 
-export function useVoice(onClip: (clip: Blob) => Promise<void>): VoiceState {
+export interface VoiceOptions {
+  /**
+   * The Caddie panel is open, so a press is likely: hold the microphone open
+   * for as long as it is.
+   *
+   * Released 25 seconds after each clip, the mic was closed again by the time
+   * most customers spoke next - reading the cards takes longer than that - so
+   * nearly every press reopened it, and the opening swallowed their first
+   * words: "I need five polos" reached the server as "Live follows". Opened
+   * on panel-open only when permission is already granted, so the browser's
+   * prompt still comes from a deliberate tap, never from opening the panel.
+   */
+  warm?: boolean;
+}
+
+/** Whether the microphone is already allowed, so opening it cannot raise a prompt. */
+async function micGranted(): Promise<boolean> {
+  try {
+    const result = await navigator.permissions?.query({ name: 'microphone' as PermissionName });
+    return result?.state === 'granted';
+  } catch {
+    // Firefox does not know the name: it is then opened on the first press.
+    return false;
+  }
+}
+
+export function useVoice(onClip: (clip: Blob) => Promise<void>, options: VoiceOptions = {}): VoiceState {
   // getUserMedia only exists on https (and localhost), which the storefront is.
   const supported =
     typeof window !== 'undefined' &&
@@ -123,6 +148,10 @@ export function useVoice(onClip: (clip: Blob) => Promise<void>): VoiceState {
 
   const onClipRef = useRef(onClip);
   onClipRef.current = onClip;
+  const warmRef = useRef(Boolean(options.warm));
+  warmRef.current = Boolean(options.warm);
+  /** One getUserMedia at a time: the panel warming it and a press can race. */
+  const acquiring = useRef<Promise<MediaStream> | null>(null);
 
   /** Everything that belongs to one clip. The microphone itself survives this. */
   const endTurn = useCallback(() => {
@@ -159,6 +188,9 @@ export function useVoice(onClip: (clip: Blob) => Promise<void>): VoiceState {
   /** Nothing has used the microphone for a while: let the indicator clear. */
   const scheduleRelease = useCallback(() => {
     if (idle.current) clearTimeout(idle.current);
+    idle.current = null;
+    // Held for as long as the panel is open; the countdown starts when it closes.
+    if (warmRef.current) return;
     idle.current = setTimeout(release, IDLE_RELEASE_MS);
   }, [release]);
 
@@ -182,9 +214,16 @@ export function useVoice(onClip: (clip: Blob) => Promise<void>): VoiceState {
     // revived - drop the whole graph and open a fresh one.
     if (live) release();
 
-    const source = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
+    if (!acquiring.current) {
+      acquiring.current = navigator.mediaDevices
+        .getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+        .finally(() => {
+          acquiring.current = null;
+        });
+    } else {
+      return acquiring.current;
+    }
+    const source = await acquiring.current;
     stream.current = source;
     // If the device disappears mid-session, do not keep a dead stream around.
     source.getAudioTracks().forEach((track) => {
@@ -211,6 +250,27 @@ export function useVoice(onClip: (clip: Blob) => Promise<void>): VoiceState {
     }
     return source;
   }, [release]);
+
+  // Open with the panel, when already allowed; closed panel, the usual countdown.
+  const warm = Boolean(options.warm);
+  useEffect(() => {
+    if (!supported) return;
+    if (!warm) {
+      // Mid-clip is the recorder's business; otherwise let the indicator clear soon.
+      if (!recorder.current && stream.current) scheduleRelease();
+      return;
+    }
+    if (idle.current) clearTimeout(idle.current);
+    idle.current = null;
+    let stale = false;
+    void micGranted().then((granted) => {
+      if (stale || !granted || !warmRef.current) return;
+      microphone().catch(() => undefined); // the press will try again, and explain
+    });
+    return () => {
+      stale = true;
+    };
+  }, [microphone, scheduleRelease, supported, warm]);
 
   /**
    * Drives the waveform, and watches for a microphone that heard nothing.

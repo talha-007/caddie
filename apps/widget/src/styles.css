@@ -171,7 +171,11 @@
 .caddie-launcher {
   position: fixed;
   right: calc(var(--caddie-gutter) + env(safe-area-inset-right, 0px));
-  bottom: calc(var(--caddie-launcher-offset) + env(safe-area-inset-bottom, 0px));
+  /* --caddie-lift is set by Launcher.tsx to clear other floating buttons. */
+  /* No transition on bottom: Launcher.tsx measures the resting position by
+     dropping the lift and reading it straight back, and an animated bottom
+     reports where it was, not where it is going - it settled onto the pill. */
+  bottom: calc(var(--caddie-launcher-offset) + var(--caddie-lift, 0px) + env(safe-area-inset-bottom, 0px));
   z-index: 2147483000;
   display: inline-flex;
   align-items: center;
@@ -1984,7 +1988,9 @@
 
   .caddie-launcher {
     right: 24px;
-    bottom: 24px;
+    /* The lift and the theme offset apply here too - this used to be a flat
+       24px, which is why a theme raising the launcher saw no change. */
+    bottom: calc(max(24px, var(--caddie-launcher-offset)) + var(--caddie-lift, 0px));
   }
 }
 
@@ -2208,4 +2214,24 @@
     white-space: nowrap;
     scroll-snap-align: start;
   }
+}
+
+/*
+ * The open Caddie is shown as a manual popover so it sits in the top layer,
+ * above everything the theme floats (see Caddie.tsx). A popover arrives with
+ * the browser's own box - centred, bordered, padded, painted - and none of it
+ * belongs here: the root is an invisible holder and the panel positions
+ * itself, exactly as it did before.
+ */
+.caddie-root--open[popover] {
+  position: fixed;
+  inset: auto;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: visible;
+  background: transparent;
+  color: inherit;
 }

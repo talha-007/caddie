@@ -2,13 +2,25 @@ import type { PackRecommendation } from '@caddie/shared';
 import { formatMoney, plural, saving, sumMoney } from '../../lib/format.js';
 import { BasketIcon, SparkleIcon } from '../icons.js';
 import { ProductTile } from '../ProductCard.js';
+import { onStorefront } from '../../lib/themeCart.js';
 import { useShop } from '../ShopContext.js';
 import { useChoices } from './useChoices.js';
 
-/** Ambassador Pack: the pieces side by side, one total, one "Add all". */
+/**
+ * A pack: the pieces side by side, one total, one "Add all".
+ *
+ * Two kinds arrive here. One of the store's bundle deals (`bundle` set) - the
+ * Ambassador Pack and the rest - with its real name and fixed price, added as
+ * one bundle so the store charges the pack price. Or a selection of pieces
+ * put together to a budget, which is not a deal and is never called one: it
+ * was labelled "Your Ambassador Pack" at the sum of its prices, which Druids
+ * does not sell.
+ */
 export function PackPanel({ recommendation, latest }: { recommendation: PackRecommendation; latest: boolean }) {
   const shop = useShop();
-  const { items, total, overBudget, reason } = recommendation;
+  const { items, total, overBudget, reason, bundle } = recommendation;
+  // A deal can only go in whole: every step needs its piece.
+  const complete = !bundle || bundle.steps.every((step) => step.productId);
   const choices = useChoices(items);
 
   if (items.length === 0) {
@@ -16,9 +28,12 @@ export function PackPanel({ recommendation, latest }: { recommendation: PackReco
   }
 
   // Only claim a saving when every piece carries a real RRP from Shopify.
-  const rrp = items.every((item) => item.compareAtPrice)
-    ? sumMoney(items.map((item) => item.compareAtPrice ?? item.price))
-    : null;
+  // For a deal, the saving is the pieces at their own prices against the pack price.
+  const rrp = bundle
+    ? sumMoney(items.map((item) => item.price))
+    : items.every((item) => item.compareAtPrice)
+      ? sumMoney(items.map((item) => item.compareAtPrice ?? item.price))
+      : null;
   const saved = rrp ? saving(total, rrp) : null;
 
   return (
@@ -28,7 +43,7 @@ export function PackPanel({ recommendation, latest }: { recommendation: PackReco
           <SparkleIcon size={16} />
         </span>
         <div className="caddie-card__heading">
-          <span className="caddie-eyebrow caddie-eyebrow--accent">Your Ambassador Pack</span>
+          <span className="caddie-eyebrow caddie-eyebrow--accent">{bundle ? bundle.title : 'Your selection'}</span>
           <span className="caddie-muted">{plural(items.length, 'piece')}</span>
         </div>
         {saved ? (
@@ -44,14 +59,19 @@ export function PackPanel({ recommendation, latest }: { recommendation: PackReco
       <div className="caddie-grid" role="list">
         {items.map((product) => (
           <div role="listitem" key={product.id}>
-            <ProductTile product={product} swappable={latest} onChoice={choices.onChoice} />
+            <ProductTile
+              product={product}
+              {...(bundle ? { slot: bundle.steps.find((step) => step.productId === product.id)?.title ?? '' } : {})}
+              swappable={latest}
+              onChoice={choices.onChoice}
+            />
           </div>
         ))}
       </div>
 
       <div className={`caddie-total${overBudget ? ' is-over' : ''}`}>
         <div>
-          <span className="caddie-total__label">Pack total</span>
+          <span className="caddie-total__label">{bundle ? 'Pack price' : 'Total'}</span>
           {rrp && saved ? <s className="caddie-price__rrp">RRP {formatMoney(rrp)}</s> : null}
         </div>
         <div className="caddie-total__value">
@@ -66,7 +86,20 @@ export function PackPanel({ recommendation, latest }: { recommendation: PackReco
         </p>
       ) : null}
 
-      <AddAllButton ready={choices.ready} missing={choices.missing} count={items.length} onAdd={() => shop.addToBasket(choices.items)} />
+      {bundle && (!complete || !onStorefront()) ? (
+        // Off the storefront, or a step with nothing in stock: the deal page can finish it.
+        <a className="caddie-btn caddie-btn--primary caddie-btn--block" href={bundle.url} target="_top">
+          Build it on the {bundle.title.toLowerCase()} page
+        </a>
+      ) : (
+        <AddAllButton
+          ready={choices.ready}
+          missing={choices.missing}
+          count={items.length}
+          {...(bundle ? { label: `Add the ${bundle.title.toLowerCase()} to basket` } : {})}
+          onAdd={() => (bundle ? shop.addPack(bundle, choices.items) : shop.addToBasket(choices.items))}
+        />
+      )}
     </section>
   );
 }

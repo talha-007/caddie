@@ -39,27 +39,37 @@ export function BasketPanel({ cart }: { cart: Cart | null }) {
             <div className="caddie-basket__detail">
               <p className="caddie-basket__title">{line.title}</p>
               {line.variantTitle ? <p className="caddie-muted">{line.variantTitle}</p> : null}
+              {line.bundle ? <p className="caddie-muted">Part of your pack</p> : null}
               <div className="caddie-qty" role="group" aria-label={`Quantity of ${line.title}`}>
                 <button
                   type="button"
                   className="caddie-icon-btn caddie-icon-btn--small"
-                  aria-label={line.quantity === 1 ? `Remove ${line.title}` : `One fewer ${line.title}`}
-                  onClick={() => shop.changeQuantity(line.lineId, line.quantity - 1)}
+                  aria-label={
+                    line.bundle
+                      ? `Remove the pack ${line.title} is part of`
+                      : line.quantity === 1
+                        ? `Remove ${line.title}`
+                        : `One fewer ${line.title}`
+                  }
+                  onClick={() => shop.changeQuantity(line.lineId, line.bundle ? 0 : line.quantity - 1)}
                 >
-                  {line.quantity === 1 ? <TrashIcon size={16} /> : <MinusIcon size={16} />}
+                  {line.quantity === 1 || line.bundle ? <TrashIcon size={16} /> : <MinusIcon size={16} />}
                 </button>
                 <span className="caddie-qty__value" aria-live="polite">
                   {line.quantity}
                 </span>
-                <button
-                  type="button"
-                  className="caddie-icon-btn caddie-icon-btn--small"
-                  aria-label={`One more ${line.title}`}
-                  disabled={line.quantity >= 10}
-                  onClick={() => shop.changeQuantity(line.lineId, line.quantity + 1)}
-                >
-                  <PlusIcon size={16} />
-                </button>
+                {/* A pack piece comes one of each: it goes in and out with its pack. */}
+                {line.bundle ? null : (
+                  <button
+                    type="button"
+                    className="caddie-icon-btn caddie-icon-btn--small"
+                    aria-label={`One more ${line.title}`}
+                    disabled={line.quantity >= 10}
+                    onClick={() => shop.changeQuantity(line.lineId, line.quantity + 1)}
+                  >
+                    <PlusIcon size={16} />
+                  </button>
+                )}
               </div>
             </div>
             <span className="caddie-basket__price">{formatMoney(line.lineTotal)}</span>

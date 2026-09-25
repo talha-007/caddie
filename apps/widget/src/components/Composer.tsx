@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import type { VoiceState } from '../lib/useVoice.js';
 import { MicIcon, SendIcon, StopIcon } from './icons.js';
-import { STATUS, Takes, UNSUPPORTED, VoiceError, Wave, orbHint, orbState, usePress } from './VoiceOrb.js';
+import { Takes, UNSUPPORTED, VoiceError, Wave, orbHint, orbState, statusLabel, usePress } from './VoiceOrb.js';
 
 /**
  * The composer: typing and talking in one bar, the way a messaging app does it.
@@ -32,7 +32,7 @@ export function Composer({ voice, busy, onSend, placeholder = 'Ask me anythingâ€
   const { recording, down, up, onKeyDown: orbKeys } = usePress(voice);
   const state = orbState(voice, busy);
   const level = state === 'listening' ? Math.min(Math.max(voice.level, 0), 1) : 0;
-  const label = voice.supported ? STATUS[state] : UNSUPPORTED;
+  const label = statusLabel(voice, state);
   const ready = text.trim().length > 0;
 
   // Grow with the text, up to MAX_ROWS, then scroll.

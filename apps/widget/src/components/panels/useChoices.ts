@@ -17,7 +17,9 @@ export function useChoices(products: Product[]) {
   let missing = 0;
   for (const product of products) {
     const variant = chosen[product.id];
-    if (variant) items.push({ variantId: variant.id, title: product.title });
+    if (variant) {
+      items.push({ productId: product.id, options: variant.options, title: product.title, variantId: variant.id, price: variant.price.amount });
+    }
     else missing += 1;
   }
 

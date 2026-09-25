@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  BundleDeal,
   CaddieAttachment,
   CaddieMessage,
   Cart,
+  CartAction,
   Journey,
   PageContext,
   Product,
@@ -10,7 +12,18 @@ import type {
   SizeInput,
   SizeRecommendation,
 } from '@caddie/shared';
-import { openEventStream, runTool, sendMessage, sendVoice } from './api.js';
+import { openEventStream, restartSession, runTool, sendMessage, sendVoice, syncBasket } from './api.js';
+import {
+  addBundleToThemeCart,
+  addToThemeCart,
+  announceToTheme,
+  basketSync,
+  changeThemeCartLine,
+  onStorefront,
+  setThemeCartLines,
+  readCart,
+  runActions,
+} from './themeCart.js';
 import { announceCart } from './events.js';
 import { sameId } from './variants.js';
 
@@ -34,9 +47,22 @@ export interface ThreadMessage extends CaddieMessage {
   local?: LocalCard;
 }
 
+/**
+ * What the customer picked, as the product and its options - never a variant
+ * id. add_to_cart refuses variant ids on purpose (models invent them), so
+ * sending one failed every Add button with "productId Required".
+ */
 export interface BasketItem {
-  variantId: string;
+  productId: string;
+  options: Record<string, string>;
   title: string;
+  /**
+   * The chosen variant and its price, for the store's own cart. On the
+   * storefront the widget adds straight to the theme's cart - the variant was
+   * resolved from the customer's choice on the card, not by a model.
+   */
+  variantId?: string;
+  price?: number;
 }
 
 export interface CaddieState {
@@ -63,37 +89,112 @@ export interface CaddieState {
   resolveVariant: (productId: string, selection: Record<string, string>) => Promise<ProductVariant | null>;
   details: Record<string, Product>;
   addToBasket: (items: BasketItem[]) => Promise<boolean>;
+  /** A bundle deal into the store cart as one pack, at the pack price. Storefront only. */
+  addPack: (bundle: BundleDeal, items: BasketItem[]) => Promise<boolean>;
   changeQuantity: (lineId: string, quantity: number) => Promise<void>;
   refreshCart: () => Promise<void>;
   /** Posts a recorded clip; the transcript comes back as the customer's own message. */
   sendClip: (clip: Blob) => Promise<void>;
   clearError: () => void;
+  /** Empty the thread and start again; the basket and size stay. */
+  newChat: () => Promise<void>;
+  /**
+   * Variants the Caddie chose in conversation, by product id. Sizes agreed by
+   * talking went into the basket while the pack card still said "Size"; the
+   * cards start from these instead.
+   */
+  picked: Record<string, string>;
 }
 
-const LEGACY_KEYS = ['druids-caddie-session', 'druids-caddie-thread'];
+const SESSION_KEY = 'druids-caddie-session';
+const THREAD_KEY = 'druids-caddie-thread';
+/** Enough to pick the conversation back up; the server keeps its own words. */
+const MAX_STORED = 40;
 /** How long a card counts as "just shown" when the same one arrives again. */
 const DUPLICATE_WINDOW_MS = 6000;
 
 /* ---------------- session ---------------- */
 
 /**
- * Every page load is a new conversation. Nothing about the thread is stored,
- * so a reload always drops the customer back at the start with an empty chat.
+ * One conversation per tab, carried across page loads.
+ *
+ * A Shopify storefront is a full page load per product, so a customer who
+ * builds an outfit and clicks into the polo lands on a new page. Starting the
+ * chat afresh each time lost their outfit, their size and the thread of what
+ * they had asked - and before the basket was kept, the basket too. Kept for
+ * the tab (sessionStorage), so a new tab or a closed browser starts clean, and
+ * "New chat" starts again on purpose.
  */
 function useSessionId(): string {
   return useMemo(() => {
     try {
-      // Clear threads left behind by older builds that did persist.
-      for (const key of LEGACY_KEYS) sessionStorage.removeItem(key);
+      // Older builds stored the id JSON-encoded, quotes and all.
+      const existing = sessionStorage.getItem(SESSION_KEY)?.replace(/"/g, '');
+      if (existing) return existing;
+      const id = crypto.randomUUID();
+      sessionStorage.setItem(SESSION_KEY, id);
+      return id;
     } catch {
-      // Private mode - there was nothing stored to clear anyway.
+      // Private mode: the basket lasts this page only, and the chat still works.
+      return crypto.randomUUID();
     }
-    return crypto.randomUUID();
   }, []);
 }
 
 
+/* ---------------- the stored thread ---------------- */
+
+interface StoredThread {
+  messages: ThreadMessage[];
+  cart: Cart | null;
+  size: SizeRecommendation | null;
+}
+
+function readThread(): StoredThread | null {
+  try {
+    const raw = sessionStorage.getItem(THREAD_KEY);
+    const parsed = raw ? (JSON.parse(raw) as StoredThread) : null;
+    return parsed && Array.isArray(parsed.messages) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cards carry whole products, so a long thread can outgrow what the browser
+ * will store. When it does, the oldest cards lose their payload first - their
+ * words stay - rather than the whole thread being dropped on the next reload.
+ */
+function writeThread(thread: StoredThread): void {
+  let messages = thread.messages.slice(-MAX_STORED);
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      sessionStorage.setItem(THREAD_KEY, JSON.stringify({ ...thread, messages }));
+      return;
+    } catch {
+      const cards = messages.filter((m) => m.attachment);
+      if (cards.length === 0) break;
+      const drop = new Set(cards.slice(0, Math.ceil(cards.length / 2)).map((m) => m.id));
+      messages = messages.map((m) => {
+        if (!drop.has(m.id)) return m;
+        const { attachment: _dropped, ...rest } = m;
+        return rest as ThreadMessage;
+      });
+    }
+  }
+  try {
+    sessionStorage.removeItem(THREAD_KEY);
+  } catch {
+    // Private mode: nothing is stored, and the chat still works.
+  }
+}
+
 /* ---------------- helpers ---------------- */
+
+/** gid://shopify/ProductVariant/123 -> 123, as the theme's cart endpoints take ids. */
+function numericId(id: string): string {
+  return id.split('/').pop() ?? id;
+}
 
 function message(role: CaddieMessage['role'], text: string, extra: Partial<ThreadMessage> = {}): ThreadMessage {
   return { id: crypto.randomUUID(), role, text, createdAt: new Date().toISOString(), ...extra };
@@ -137,14 +238,16 @@ function dropOldCarts(messages: ThreadMessage[], incoming: CaddieAttachment | un
 
 export function useCaddie(page: PageContext): CaddieState {
   const sessionId = useSessionId();
+  const stored = useMemo(readThread, []);
 
-  const [messages, setMessages] = useState<ThreadMessage[]>([]);
-  const [cart, setCart] = useState<Cart | null>(null);
-  const [size, setSize] = useState<SizeRecommendation | null>(null);
+  const [messages, setMessages] = useState<ThreadMessage[]>(stored?.messages ?? []);
+  const [cart, setCart] = useState<Cart | null>(stored?.cart ?? null);
+  const [size, setSize] = useState<SizeRecommendation | null>(stored?.size ?? null);
   const [details, setDetails] = useState<Record<string, Product>>({});
   const [busy, setBusy] = useState(false);
   const [busyJourney, setBusyJourney] = useState<Journey | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Record<string, string>>({});
 
   const busyRef = useRef(false);
   const recent = useRef<Array<{ signature: string; at: number; id: string }>>([]);
@@ -163,6 +266,80 @@ export function useCaddie(page: PageContext): CaddieState {
     setCart(next);
     announceCart(next.totalQuantity);
   }, []);
+
+  useEffect(() => {
+    writeThread({ messages, cart, size });
+  }, [messages, cart, size]);
+
+  /**
+   * The basket as it really is, read once on load. The stored copy is only
+   * what it was when the last page closed - another tab, or checkout, may
+   * have changed it since - so it is shown first and corrected here. A
+   * basket the server no longer knows (a restart without Redis) reads as
+   * empty rather than showing items that are not there. Read quietly: the
+   * badge updates, and no card is added to the thread.
+   */
+  const ready = useRef<Promise<void>>(Promise.resolve());
+  useEffect(() => {
+    let stale = false;
+    // On the storefront the basket is the store's own cart: read it, and tell the server.
+    if (onStorefront()) {
+      ready.current = readCart()
+        .then((current) => {
+          if (stale) return;
+          updateCart(current);
+          void syncBasket(sessionId, basketSync()).catch(() => undefined);
+        })
+        .catch(() => undefined);
+      return () => {
+        stale = true;
+      };
+    }
+    // The same read also arrives down the event stream; keep it out of the thread.
+    quietCart.current += 1;
+    ready.current = runTool(sessionId, 'view_cart', {})
+      .then((result) => {
+        if (stale) return;
+        if (result.attachment?.kind === 'cart') updateCart(result.attachment.cart);
+        else setCart(null);
+      })
+      .catch(() => {
+        // Offline for a moment: keep what we had rather than blank the badge.
+      })
+      .finally(() => {
+        setTimeout(() => {
+          quietCart.current -= 1;
+        }, 1500);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [sessionId, updateCart]);
+
+  /**
+   * "New chat": an empty thread, on purpose. The server forgets the words but
+   * keeps the basket and what it knows of their fit - starting a new
+   * conversation is not a reason to lose what they were buying.
+   */
+  const newChat = useCallback(async () => {
+    if (busyRef.current) return;
+    setMessages([]);
+    setError(null);
+    recent.current = [];
+    ready.current = restartSession(sessionId)
+      .then(async ({ cart: carried }) => {
+        // On the storefront the server does not hold the cart; the store does.
+        if (onStorefront()) {
+          updateCart(await readCart());
+          await syncBasket(sessionId, basketSync());
+          return;
+        }
+        if (carried) updateCart(carried);
+        else setCart(null);
+      })
+      .catch(() => undefined);
+    await ready.current;
+  }, [sessionId, updateCart]);
 
   const remember = useCallback((products: Product[]) => {
     const full = products.filter((product) => product.variants.length > 0);
@@ -211,6 +388,44 @@ export function useCaddie(page: PageContext): CaddieState {
     [remember, updateCart],
   );
 
+  /** The store cart after a change: shown, reported to the server, and announced to the theme. */
+  const showStoreCart = useCallback(
+    (current: Cart) => {
+      deliver('', { kind: 'cart', cart: current });
+      void syncBasket(sessionId, basketSync()).catch(() => undefined);
+    },
+    [deliver, sessionId],
+  );
+
+  /**
+   * The basket changes the Caddie decided on, made in the store's own cart.
+   * The server chooses the variant and checks its stock; only the widget can
+   * reach the theme's cart, in the shopper's browser, so the change is made
+   * here - and a failure is said out loud rather than left looking added.
+   */
+  const applyActions = useCallback(
+    async (actions: CartAction[] | undefined) => {
+      if (!actions?.length || !onStorefront()) return;
+      const chosen: Record<string, string> = {};
+      for (const action of actions) {
+        if (action.type !== 'add-bundle') continue;
+        for (const piece of action.pieces) chosen['gid://shopify/Product/' + piece.productId] = piece.variantId;
+      }
+      if (Object.keys(chosen).length) setPicked((prev) => ({ ...prev, ...chosen }));
+      try {
+        showStoreCart(await runActions(actions));
+      } catch (err) {
+        setError(`Your basket could not be updated: ${err instanceof Error ? err.message : 'please try again.'}`);
+        try {
+          showStoreCart(await readCart());
+        } catch {
+          // The error above already says what matters.
+        }
+      }
+    },
+    [showStoreCart],
+  );
+
   // Voice-driven results arrive here rather than as a chat response.
   useEffect(() => {
     return openEventStream(sessionId, (event) => {
@@ -248,6 +463,7 @@ export function useCaddie(page: PageContext): CaddieState {
     setBusyJourney(journey);
     setError(null);
     try {
+      await ready.current;
       await task();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -270,9 +486,10 @@ export function useCaddie(page: PageContext): CaddieState {
       await withBusy(guessJourney(trimmed), async () => {
         const reply = await sendMessage(sessionId, trimmed, page);
         deliver(reply.message.text, reply.message.attachment, reply.message);
+        await applyActions(reply.message.actions);
       });
     },
-    [deliver, page, sessionId, withBusy],
+    [applyActions, deliver, page, sessionId, withBusy],
   );
 
   const startJourney = useCallback((journey: Journey) => {
@@ -372,6 +589,24 @@ export function useCaddie(page: PageContext): CaddieState {
   const addToBasket = useCallback(
     async (items: BasketItem[]): Promise<boolean> => {
       if (items.length === 0 || busyRef.current) return false;
+
+      // The store's own cart, straight from the card: the variant is the one the customer chose.
+      if (onStorefront()) {
+        const lines = items.filter((item) => item.variantId).map((item) => ({ variantId: numericId(item.variantId!), quantity: 1 }));
+        if (lines.length !== items.length) return false;
+        let ok = false;
+        await withBusy(null, async () => {
+          await addToThemeCart(lines);
+          const current = await readCart();
+          announceToTheme();
+          updateCart(current);
+          void syncBasket(sessionId, basketSync()).catch(() => undefined);
+          setMessages((prev) => [...prev, message('assistant', '', { local: { kind: 'added', count: lines.length, cart: current } })]);
+          ok = true;
+        });
+        return ok;
+      }
+
       let added = 0;
       let latest: Cart | null = null;
 
@@ -379,7 +614,11 @@ export function useCaddie(page: PageContext): CaddieState {
       await withBusy(null, async () => {
         try {
           for (const item of items) {
-            const result = await runTool(sessionId, 'add_to_cart', { variantId: item.variantId, quantity: 1 });
+            const result = await runTool(sessionId, 'add_to_cart', {
+              productId: item.productId,
+              options: item.options,
+              quantity: 1,
+            });
             if (result.attachment?.kind !== 'cart') {
               throw new Error(`${item.title} could not be added. ${result.speech}`);
             }
@@ -410,6 +649,7 @@ export function useCaddie(page: PageContext): CaddieState {
     async (name: string, args: Record<string, unknown>) => {
       quietCart.current += 1;
       try {
+        await ready.current;
         const result = await runTool(sessionId, name, args);
         if (result.attachment?.kind === 'cart') updateCart(result.attachment.cart);
       } catch (err) {
@@ -423,13 +663,75 @@ export function useCaddie(page: PageContext): CaddieState {
     [sessionId, updateCart],
   );
 
-  const changeQuantity = useCallback(
-    (lineId: string, quantity: number) =>
-      quantity < 0 ? Promise.resolve() : quietCartCall('update_cart_item', { lineId, quantity }),
-    [quietCartCall],
+  /**
+   * A whole bundle deal into the store's cart, as the theme's own builder adds
+   * it, so the store charges the pack price. Every piece carries the variant
+   * the customer chose on its card.
+   */
+  const addPack = useCallback(
+    async (bundle: BundleDeal, items: BasketItem[]): Promise<boolean> => {
+      if (!onStorefront() || busyRef.current) return false;
+      if (items.some((item) => !item.variantId || item.price === undefined)) return false;
+      let ok = false;
+      await withBusy('pack', async () => {
+        await addBundleToThemeCart(
+          bundle,
+          items.map((item) => ({
+            variantId: numericId(item.variantId!),
+            productId: numericId(item.productId),
+            price: item.price!,
+            compareAtPrice: null,
+          })),
+        );
+        const current = await readCart();
+        announceToTheme();
+        showStoreCart(current);
+        ok = true;
+      });
+      return ok;
+    },
+    [showStoreCart, withBusy],
   );
 
-  const refreshCart = useCallback(() => quietCartCall('view_cart', {}), [quietCartCall]);
+  const changeQuantity = useCallback(
+    async (lineId: string, quantity: number) => {
+      if (quantity < 0) return;
+      if (!onStorefront()) return quietCartCall('update_cart_item', { lineId, quantity });
+      try {
+        /*
+         * A piece of a pack is priced with its pack: removing one alone would
+         * leave the rest at full price. It comes out whole, and a pack piece's
+         * quantity does not go up on its own.
+         */
+        const lines = basketSync().lines;
+        const bundle = lines.find((line) => line.key === lineId)?.bundle;
+        if (bundle) {
+          if (quantity !== 0) return;
+          await setThemeCartLines(Object.fromEntries(lines.filter((entry) => entry.bundle === bundle).map((line) => [line.key, 0])));
+        } else {
+          await changeThemeCartLine(lineId, quantity);
+        }
+        const current = await readCart();
+        announceToTheme();
+        updateCart(current);
+        void syncBasket(sessionId, basketSync()).catch(() => undefined);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not update your basket.');
+      }
+    },
+    [quietCartCall, sessionId, updateCart],
+  );
+
+  const refreshCart = useCallback(async () => {
+    if (!onStorefront()) return quietCartCall('view_cart', {});
+    try {
+      // The theme may have changed it since - its own Add buttons, another tab.
+      updateCart(await readCart());
+      void syncBasket(sessionId, basketSync()).catch(() => undefined);
+    } catch {
+      // Keep what we had.
+    }
+  }, [quietCartCall, sessionId, updateCart]);
 
   const sendClip = useCallback(
     async (clip: Blob) => {
@@ -452,6 +754,7 @@ export function useCaddie(page: PageContext): CaddieState {
             setMessages((prev) => prev.filter((m) => m.id !== heard.id));
           }
           deliver(reply.message.text, reply.message.attachment, reply.message);
+          await applyActions(reply.message.actions);
         } catch (err) {
           // Nothing was heard, so leave no gap behind.
           setMessages((prev) => prev.filter((m) => m.id !== heard.id));
@@ -459,7 +762,7 @@ export function useCaddie(page: PageContext): CaddieState {
         }
       });
     },
-    [deliver, sessionId, withBusy],
+    [applyActions, deliver, sessionId, withBusy],
   );
 
   return {
@@ -478,9 +781,12 @@ export function useCaddie(page: PageContext): CaddieState {
     resolveVariant,
     details,
     addToBasket,
+    addPack,
+    picked,
     changeQuantity,
     refreshCart,
     sendClip,
     clearError: useCallback(() => setError(null), []),
+    newChat,
   };
 }

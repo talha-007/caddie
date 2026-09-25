@@ -36,7 +36,9 @@ export function useProductChoice(product: Product): ProductChoice {
   const shop = useShop();
   const full = shop.details[product.id] ?? (product.variants.length > 0 ? product : null);
   const onThisPage = Boolean(shop.page.productId && sameId(shop.page.productId, product.id));
-  const hints = { size: shop.size?.size ?? null, variantId: onThisPage ? (shop.page.variantId ?? null) : null };
+  // Chosen in conversation first, then the variant on the page they are looking at.
+  const pickedId = shop.picked[product.id] ?? null;
+  const hints = { size: shop.size?.size ?? null, variantId: pickedId ?? (onThisPage ? (shop.page.variantId ?? null) : null) };
 
   const [selection, setSelection] = useState<Selection>(() => (full ? initialSelection(full, hints) : {}));
   const [loading, setLoading] = useState(false);
@@ -47,6 +49,11 @@ export function useProductChoice(product: Product): ProductChoice {
     if (full && Object.keys(selection).length === 0) setSelection(initialSelection(full, hints));
     // Only when the loaded product changes, not on every selection.
   }, [fullId]);
+
+  // Sizes agreed by talking move the pickers too, not only the basket.
+  useEffect(() => {
+    if (full && pickedId) setSelection(initialSelection(full, hints));
+  }, [pickedId, fullId]);
 
   const load = useCallback(async () => {
     setLoading(true);

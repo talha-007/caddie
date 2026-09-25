@@ -61,6 +61,14 @@ export const CloseIcon = (p: IconProps) => (
   </Svg>
 );
 
+/** Start a new conversation: a pencil on a page, as messaging apps use. */
+export const NewChatIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path {...stroke} d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6" />
+    <path {...stroke} d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 8.5-8.5z" />
+  </Svg>
+);
+
 export const BackIcon = (p: IconProps) => (
   <Svg {...p}>
     <path {...stroke} d="M15 5l-7 7 7 7" />

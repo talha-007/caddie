@@ -1,4 +1,13 @@
-import type { CaddieAttachment, CaddieMessage, ChatRequest, PageContext } from '@caddie/shared';
+import type {
+  BasketSync,
+  CaddieAttachment,
+  CaddieMessage,
+  CartAction,
+  ChatRequest,
+  PageContext,
+  SessionRestartResponse,
+} from '@caddie/shared';
+import { onStorefront } from './themeCart.js';
 
 const BASE = (import.meta.env.VITE_CADDIE_API_URL ?? 'http://localhost:8787').replace(/\/$/, '');
 
@@ -16,13 +25,32 @@ async function unwrap<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/**
+ * Where this shopper's basket lives. On the storefront it is the store's own
+ * cart, and the server hands the widget changes to make rather than keeping a
+ * basket of its own (see themeCart.ts).
+ */
+function cartHeader(): Record<string, string> {
+  return { 'x-caddie-cart': onStorefront() ? 'theme' : 'storefront' };
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...cartHeader() },
     body: JSON.stringify(body),
   });
   return unwrap<T>(res);
+}
+
+/** The store cart as the widget read it, so the Caddie can see what is really in it. */
+export function syncBasket(sessionId: string, basket: BasketSync) {
+  return post<{ ok: boolean }>(`/api/session/${encodeURIComponent(sessionId)}/basket`, basket);
+}
+
+/** A clean chat on the same basket - behind "New chat". */
+export function restartSession(sessionId: string) {
+  return post<SessionRestartResponse>(`/api/session/${encodeURIComponent(sessionId)}/restart`, {});
 }
 
 export function sendMessage(sessionId: string, text: string, context?: PageContext) {
@@ -35,6 +63,7 @@ export interface ToolResponse {
   sessionId: string;
   speech: string;
   attachment?: CaddieAttachment;
+  actions?: CartAction[];
 }
 
 export function runTool(sessionId: string, name: string, args: Record<string, unknown>) {
@@ -52,6 +81,18 @@ export interface VoiceResponse {
 }
 
 /**
+ * The languages this shopper is likely to speak, most likely first: the
+ * storefront page's own (Shopify sets <html lang> to the shopper's chosen
+ * language), then the browser's. The server checks the language it detects in
+ * a clip against these, and hears it again if the two disagree.
+ */
+function customerLanguages(): string[] {
+  const page = typeof document !== 'undefined' ? document.documentElement.lang : '';
+  const browser = typeof navigator !== 'undefined' ? [...(navigator.languages ?? [navigator.language])] : [];
+  return [...new Set([page, ...browser].filter(Boolean))].slice(0, 6);
+}
+
+/**
  * Sends one recorded clip. The body is the audio itself - no form wrapper -
  * and the server transcribes it and answers in the same round trip.
  */
@@ -59,10 +100,11 @@ export function sendVoice(sessionId: string, clip: Blob) {
   // Browsers report types like "audio/webm;codecs=opus"; the server wants the
   // plain type it can map to a file extension for transcription.
   const contentType = (clip.type || 'audio/webm').split(';')[0] as string;
+  const lang = encodeURIComponent(customerLanguages().join(','));
 
-  return fetch(`${BASE}/api/voice?sessionId=${encodeURIComponent(sessionId)}`, {
+  return fetch(`${BASE}/api/voice?sessionId=${encodeURIComponent(sessionId)}&lang=${lang}`, {
     method: 'POST',
-    headers: { 'Content-Type': contentType },
+    headers: { 'Content-Type': contentType, ...cartHeader() },
     body: clip,
   }).then((res) => unwrap<VoiceResponse>(res));
 }

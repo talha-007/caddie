@@ -74,7 +74,12 @@ function AddButton({ product, choice, label = 'Add' }: { product: Product; choic
       type="button"
       className="caddie-btn caddie-btn--primary caddie-btn--small"
       disabled={!variant || shop.busy || resolving}
-      onClick={() => variant && shop.addToBasket([{ variantId: variant.id, title: product.title }])}
+      onClick={() =>
+        variant &&
+        shop.addToBasket([
+          { productId: product.id, options: variant.options, title: product.title, variantId: variant.id, price: variant.price.amount },
+        ])
+      }
       aria-label={variant ? `Add ${product.title} to basket` : `Choose options for ${product.title} first`}
     >
       {text}

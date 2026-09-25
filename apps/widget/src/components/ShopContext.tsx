@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect } from 'react';
-import type { Cart, Journey, PageContext, Product, ProductVariant, SizeRecommendation } from '@caddie/shared';
+import type { BundleDeal, Cart, Journey, PageContext, Product, ProductVariant, SizeRecommendation } from '@caddie/shared';
 import type { BasketItem } from '../lib/useCaddie.js';
 import { sameId } from '../lib/variants.js';
 
@@ -15,6 +15,10 @@ export interface Shop {
   size: SizeRecommendation | null;
   busy: boolean;
   addToBasket: (items: BasketItem[]) => Promise<boolean>;
+  /** Variants chosen in conversation, by product id - the cards start from these. */
+  picked: Record<string, string>;
+  /** A bundle deal as one pack, at the pack price. */
+  addPack: (bundle: BundleDeal, items: BasketItem[]) => Promise<boolean>;
   send: (text: string) => Promise<void>;
   startJourney: (journey: Journey) => void;
   /** The live basket, not the snapshot inside an old card. */
