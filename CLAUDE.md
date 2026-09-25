@@ -83,6 +83,19 @@ Druids' developers change `snippets/bundle-builder-script-v4.liquid`, update bot
 then check the pack price at checkout on the preview theme. Never add pack
 pieces one by one, and never remove one piece alone - either loses the price.
 
+**The Ambassador Pack comes by conditions** - Warm Rounds, Mixed Conditions,
+Cool & Wet, for mens, ladies and juniors - on the sport-bundle page of a theme
+not yet published (`SHOPIFY_CONDITION_PACKS_THEME_ID` / `_PAGE`; empty turns
+them off and the single pack comes back). They replace the old Ambassador Pack
+of the same range, and the Caddie asks which unless the customer's weather
+says. Their lines are the new builder's (`buildPlusBundleItems`): a trigger
+property and `_data_bundle_id`, **never** the v4 price properties, which a
+legacy script reprices. The pack price comes from a discount Function keyed on
+the trigger, and a trigger the Function does not know is silently ignored -
+Mixed and Cool & Wet priced at the sum of their pieces in a test cart. So
+`add_pack_to_cart` prices each one in a throwaway Storefront cart first and
+refuses to add it if checkout would charge anything else.
+
 **Cart updates replace rather than merge.** Shopify's `update_cart` sets the
 cart's lines to exactly what you send, so sending one line deletes the rest.
 Go through `addToCart` / `setLineQuantity` in `apps/server/src/shopify/catalog.ts`.
