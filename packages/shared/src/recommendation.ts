@@ -117,6 +117,25 @@ export interface BundleDeal {
   steps: Array<{ title: string; productId: string | null }>;
   /** The store page for the deal, for anything the Caddie cannot do itself. */
   url: string;
+  /**
+   * How its lines go into the cart. 'v4' (the default): the old bundle
+   * builder's price properties. 'plus': the sport-bundle builder's - only a
+   * trigger property and a group id, priced at checkout by the discount
+   * Function. The two must never mix: the old price properties make a legacy
+   * script reprice the lines and stop the Function applying.
+   */
+  format?: 'v4' | 'plus';
+  /** 'plus' only: the property the checkout Function looks for, e.g. { "__amb-mens-condition": "mixed" }. */
+  trigger?: Record<string, string>;
+  /** Condition packs: "warm", "mixed" or "coolwet", and how the store names it. */
+  condition?: string;
+  conditionTitle?: string;
+  /**
+   * Why it cannot be bought right now, when it cannot - a step with nothing in
+   * stock, or checkout not applying the pack price. The card says this instead
+   * of offering to add it, and shows no price as if it could be paid.
+   */
+  blocked?: string;
 }
 
 /* ---------------- Outfit ---------------- */

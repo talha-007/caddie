@@ -32,6 +32,8 @@ export interface BundlePiece {
   /** Major units, e.g. 45 for £45.00. */
   price: number;
   compareAtPrice: number | null;
+  /** The product's handle - the 'plus' format writes it on each line. */
+  handle?: string;
 }
 
 export interface BundleContext {
@@ -65,11 +67,42 @@ function minor(amount: number): number {
   return Math.round(amount * 100);
 }
 
+/**
+ * The sport-bundle builder's lines (assets/sport-quick-cart-bundle.js,
+ * buildPlusBundleItems): the shopper's country, the product handle, one group
+ * id shared by every line of this pack, and the pack's trigger properties -
+ * nothing else. Checkout prices it per market through the discount Function,
+ * which keys on the trigger. No price goes on the line: that theme's own notes
+ * say a legacy script reprices anything carrying the old price properties and
+ * the Function then never applies.
+ */
+export function buildPlusBundleItems(
+  bundle: Pick<BundleDeal, 'handle' | 'trigger'>,
+  pieces: BundlePiece[],
+  context: Pick<BundleContext, 'country' | 'bundleId'>,
+): BundleCartItem[] {
+  if (pieces.length === 0) throw new BundleCartError('A bundle needs its pieces.');
+  const trigger = Object.entries(bundle.trigger ?? {});
+  // Without its trigger the Function never discounts: refuse rather than charge full price.
+  if (trigger.length === 0) throw new BundleCartError(`${bundle.handle} has no checkout trigger, so it would not get its pack price.`);
+  return pieces.map((piece) => ({
+    id: piece.variantId,
+    quantity: 1,
+    properties: [
+      ['__Localization', context.country],
+      ['__Product_Url', piece.handle ?? ''],
+      ['_data_bundle_id', context.bundleId],
+      ...trigger,
+    ] as Array<[string, string]>,
+  }));
+}
+
 export function buildBundleCartItems(
-  bundle: Pick<BundleDeal, 'handle' | 'prices' | 'dynamicPrices'>,
+  bundle: Pick<BundleDeal, 'handle' | 'prices' | 'dynamicPrices'> & Partial<Pick<BundleDeal, 'format' | 'trigger'>>,
   pieces: BundlePiece[],
   context: BundleContext,
 ): BundleCartItem[] {
+  if (bundle.format === 'plus') return buildPlusBundleItems(bundle, pieces, context);
   // The theme's own override: Ireland has its own price whatever the currency
   // (stored as EUR_IE when the deals are read).
   const start =

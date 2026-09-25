@@ -15,7 +15,27 @@ export interface CaddieMessage {
   attachment?: CaddieAttachment;
   /** Basket changes for the widget to carry out in the store's own cart. See CartAction. */
   actions?: CartAction[];
+  /**
+   * Who they are shopping for and their sizes, as the server now knows them -
+   * so every size picker opens on their size, however they told us (the quick
+   * start, "I'm usually an L" in chat, or a size recommendation).
+   */
+  shopper?: ShopperSizes;
 }
+
+/**
+ * The range and sizes a customer has given. `size` is the lettered or ladies'
+ * size for tops (L, 12, 8/10); `waist` is the number trousers and shorts use.
+ * The two are separate scales - see sizeWords.ts on the server.
+ */
+export interface ShopperSizes {
+  range?: 'men' | 'women' | 'kids';
+  size?: string;
+  waist?: string;
+}
+
+/** POST /api/session/:id/profile - the quick start's answers. */
+export type ProfileRequest = ShopperSizes;
 
 /**
  * A change to the store's own cart, carried out by the widget.
@@ -45,7 +65,7 @@ export type CartAction =
       /** The id to give this pack's lines, chosen by the server so it can replace it later. */
       bundleId?: string;
       /** The chosen variant for each step, in step order. */
-      pieces: Array<{ variantId: string; productId: string; price: number; compareAtPrice: number | null }>;
+      pieces: Array<{ variantId: string; productId: string; price: number; compareAtPrice: number | null; handle?: string }>;
     };
 
 /**
