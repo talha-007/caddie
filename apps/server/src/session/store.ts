@@ -2,6 +2,20 @@ import type { CaddieMessage, PageContext, SizeInput } from '@caddie/shared';
 import { redisEnabled, redisUsable } from '../lib/redis.js';
 import type { ShopperProfile } from '../shopper/profile.js';
 import type { ShoppingFocus } from './focus.js';
+
+/** A basket action waiting on the customer's next answer (see tools/actionGateway.ts). */
+export interface PendingAction {
+  type: 'add-product';
+  /** The products it may finish with: the one named, or its colourways. */
+  productIds: string[];
+  /** Options already settled, kept when the answer fills in the rest. */
+  options?: Record<string, string>;
+  quantity?: number;
+  /** What it is waiting for. */
+  awaiting: 'size' | 'colour' | 'option';
+  /** Their message count when it was asked - only their next message can finish it. */
+  turn: number;
+}
 import { RedisSessionStore } from './redisStore.js';
 
 /**
@@ -92,16 +106,15 @@ export interface CaddieSession {
    */
   cardFocus?: string;
   /**
-   * An add the customer asked for that is waiting on a choice ("add it" -
-   * "what size?"): their size answer finishes it without another "add it".
-   * `turn` is how many of their messages there were when they asked.
+   * A basket action the customer asked for that is waiting on one thing
+   * ("add the Elite Polo" - "what size?"). Their answer next turn finishes
+   * that action, for those products, and nothing else: "M" cannot finish a
+   * different product's add, and a turn about anything else lets it go.
+   * Set and cleared only by the Action Gateway (tools/actionGateway.ts).
    */
-  pendingAdd?: {
-    productId: string;
-    turn: number;
-    /** Every product the waiting add may finish with - the one named, or its colourways - so "M" cannot finish a different product's add. */
-    productIds?: string[];
-  };
+  pendingAction?: PendingAction;
+  /** The product the gateway last put in the basket, and when - what "make it two" and "remove it" mean. */
+  lastAdded?: { productId: string; turn: number };
   /**
    * What the customer has chosen for each pack, by handle (see
    * tools/packState.ts): confirmed values only, and what they asked for that
@@ -264,8 +277,8 @@ export class MemorySessionStore implements SessionStore {
     if (patch.lastShown && patch.focusProductId === undefined) delete session.focusProductId;
     // Nor the card they touched on it.
     if (patch.lastShown && patch.cardFocus === undefined) delete session.cardFocus;
-    // A finished (or abandoned) add clears what it was waiting on.
-    if ('pendingAdd' in patch && patch.pendingAdd === undefined) delete session.pendingAdd;
+    // A finished (or abandoned) action clears what it was waiting on.
+    if ('pendingAction' in patch && patch.pendingAction === undefined) delete session.pendingAction;
     await this.save(session);
     return session;
   }
@@ -323,8 +336,8 @@ class ResilientSessionStore implements SessionStore {
     if (patch.lastShown && patch.focusProductId === undefined) delete session.focusProductId;
     // Nor the card they touched on it.
     if (patch.lastShown && patch.cardFocus === undefined) delete session.cardFocus;
-    // A finished (or abandoned) add clears what it was waiting on.
-    if ('pendingAdd' in patch && patch.pendingAdd === undefined) delete session.pendingAdd;
+    // A finished (or abandoned) action clears what it was waiting on.
+    if ('pendingAction' in patch && patch.pendingAction === undefined) delete session.pendingAction;
     await this.save(session);
     return session;
   }

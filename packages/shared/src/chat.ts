@@ -161,3 +161,46 @@ export interface ApiError {
   error: string;
   detail?: string;
 }
+
+/*
+ * The widget's own basket changes, made through the server's Action Gateway.
+ *
+ * The card's Add button, the pack's Add button and the basket's quantity
+ * buttons used to write straight to the theme's cart: no check that the
+ * variant was real and in stock, no pack price check, no pack replacement.
+ * The click is still the customer's authority - the server checks everything
+ * else and hands back the CartActions for the widget to make, exactly as it
+ * does for an add the Caddie makes in chat.
+ */
+
+/** POST /api/session/:id/add - the Add button on a product card (or "Add all"). */
+export interface UiAddRequest {
+  /** Each with the options on the card's pickers at the moment of the click. */
+  items: Array<{ productId: string; options: Record<string, string>; quantity?: number }>;
+}
+
+/** POST /api/session/:id/add-pack - the Add button on a pack card. */
+export interface UiPackAddRequest {
+  /** The deal's handle, as the pack card carries it. */
+  handle: string;
+  /** Every piece on the card, in step order, with its pickers' options. */
+  pieces: Array<{ productId: string; options: Record<string, string> }>;
+}
+
+/** POST /api/session/:id/cart-line - a quantity button, or remove, in the basket. */
+export interface UiCartLineRequest {
+  lineId: string;
+  /** 0 removes the line. */
+  quantity: number;
+}
+
+/** The answer to all three. */
+export interface UiActionResponse {
+  ok: boolean;
+  /** The changes to make in the store's own cart (on the storefront). */
+  actions?: CartAction[];
+  /** The basket after the change, where the server holds the cart itself (the dev harness). */
+  cart?: Cart;
+  /** When nothing changed: what is needed, in words to show the customer. */
+  message?: string;
+}

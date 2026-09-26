@@ -63,6 +63,11 @@ export interface ToolResult {
    * `unless` is what shows the reply already says it.
    */
   lead?: { text: string; unless: RegExp };
+  /**
+   * For a basket action: whether it happened (the Action Gateway's word, not
+   * the model's). The reply check refuses "I've added it" after ok: false.
+   */
+  outcome?: { ok: boolean; action: string; reason?: string };
 }
 
 export interface CaddieTool<Schema extends z.ZodTypeAny = z.ZodTypeAny> {

@@ -45,6 +45,8 @@ async function conversation(...turns: Array<[string, string]>) {
     { id: `a${i}`, role: 'assistant' as const, text: replied, createdAt: new Date(at + i * 2000 + 1000).toISOString() },
   ]);
   if (messages.length) await sessions.append(id, messages);
+  // The jacket is the card on screen - what "add it" means (an add with nothing to point at is refused: see actionGateway).
+  await sessions.patch(id, { lastShown: { kind: 'products', items: [{ id: JACKET.id, title: JACKET.title }] } });
   return id;
 }
 

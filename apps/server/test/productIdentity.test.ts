@@ -197,7 +197,7 @@ describe('"add it": the product they tapped, were offered, or were waiting on', 
     await said('Add the Clima Jacket 3.0 in navy');
     const asked = await add({ productId: CLIMA_NAVY.id }, 'Add the Clima Jacket 3.0 in navy');
     expect(asked.added).toEqual([]);
-    expect((await sessions.getOrCreate(id)).pendingAdd?.productIds).toEqual([CLIMA_NAVY.id]);
+    expect((await sessions.getOrCreate(id)).pendingAction?.productIds).toEqual([CLIMA_NAVY.id]);
     await caddie('What size would you like?');
     await said('M');
     expect((await add({ productId: ELITE_NAVY.id, options: { Size: 'M' } }, 'M')).added).toEqual([`${CLIMA_NAVY.title} / M x1`]);

@@ -1,4 +1,4 @@
-import type { Cart, OutfitPiece, Product } from '@caddie/shared';
+import type { Cart, CartAction, OutfitPiece, Product } from '@caddie/shared';
 import { z } from 'zod';
 import { FEATURE_LABEL, WEATHER_NEEDS, attributesOf, hasFeature, type Feature, type Weather } from '../catalog/attributes.js';
 import { inRange, parseRange, rangeOf, type Range } from '../catalog/audience.js';
@@ -18,7 +18,8 @@ import {
 } from '../catalog/hybrid.js';
 import { conceptKindsInQuery, topKindsFor, type Climate } from '../catalog/concepts.js';
 import { colourAsked, intentDiagnostics, rememberedWhenEchoed, resolveSearchIntent, sizesNeverGiven } from './searchIntent.js';
-import { cartAuthorization, offerSentence, quantityAsked, turnNow } from './cartAuthorization.js';
+import { asksToRemove, cartAuthorization, offerSentence, offeredAction, quantityAsked, quantityInWords } from './cartAuthorization.js';
+import { executeCommerceAction, registerPlanner, type ActionOutcome, type ActionPlan, type ActionSource, type CommerceAction } from './actionGateway.js';
 import { packStatus, packStatusFacts, readPackChoices } from './packState.js';
 
 export { sizesNeverGiven };
@@ -44,7 +45,7 @@ import { recommendPack } from '../recommend/pack.js';
 import { findNamedPack, findUnstockedBundle, recommendNamedPack } from '../recommend/packs.js';
 import { priceFor, priceRange } from '../recommend/pricing.js';
 import { categoryForProduct, recommendSize } from '../recommend/size.js';
-import { normaliseSize, optionValueMatches } from '../recommend/sizeWords.js';
+import { normaliseSize, optionValueMatches, sameSize } from '../recommend/sizeWords.js';
 import { addToCart, getCart, getProductDetails, isBrandProduct, searchProducts, setLineQuantity } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
 import { sessions, tappedSinceLastSaid, type CaddieSession } from '../session/store.js';
@@ -326,7 +327,8 @@ function listFacts(products: Product[], evidence?: (product: Product) => string)
  * what they last touched. A size is allowed ("add it in M").
  */
 export function bareReference(text: string): boolean {
-  const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  // "I'll" is one word ("ill"), not "i" and "ll".
+  const words = text.toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
   // "Add them" is as bare as "add it": a pair of socks, a set of the cards on screen.
   if (!words.some((word) => ['it', 'this', 'that', 'one', 'them', 'these', 'those'].includes(word))) return false;
   const filler = new Set(['add', 'put', 'pop', 'get', 'buy', 'take', 'ill', 'i', 'will', 'can', 'you', 'please', 'it', 'this', 'that', 'one', 'them', 'these', 'those', 'the', 'a', 'to', 'in', 'into', 'my', 'basket', 'cart', 'bag', 'yes', 'yeah', 'ok', 'okay', 'go', 'ahead', 'and', 'just', 'size', 'thanks', 'thank', 'now', 'for', 'me', 'then', 'do', 'lets', 'let', 's']);
@@ -347,7 +349,7 @@ export function bareReference(text: string): boolean {
  * none of those says anything is the model's pick used as it always was.
  */
 type ActionTarget =
-  | { kind: 'bound'; products: Product[]; label: string; source: 'customer-words' | 'screen-reference' | 'card-action' | 'pending' | 'offer' | 'focus' }
+  | { kind: 'bound'; products: Product[]; label: string; source: 'customer-words' | 'screen-reference' | 'card-action' | 'pending' | 'offer' | 'last-reply' | 'focus' }
   | { kind: 'ambiguous'; designs: NamedDesign[] }
   | { kind: 'unbound' };
 
@@ -355,7 +357,7 @@ type ActionTarget =
 function presented(ctx: ToolContext, designs: NamedDesign[]): NamedDesign[] {
   const onScreen = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
   const focus = ctx.session.activeShoppingContext;
-  const waiting = new Set(ctx.session.pendingAdd?.productIds ?? []);
+  const waiting = new Set(ctx.session.pendingAction?.productIds ?? []);
   return designs.filter(
     (design) =>
       design.products.some((product) => onScreen.has(product.id) || waiting.has(product.id) || product.id === focus?.productId) ||
@@ -398,9 +400,9 @@ export function actionTarget(ctx: ToolContext): ActionTarget {
   if (tapped) return { kind: 'bound', products: [tapped], label: tapped.title, source: 'card-action' };
 
   const auth = cartAuthorization(ctx);
-  const pending = ctx.session.pendingAdd;
+  const pending = ctx.session.pendingAction;
   if (auth.authorized && auth.source === 'continuation' && pending) {
-    const waiting = (pending.productIds ?? [pending.productId]).map((id) => productById(id)).filter((product): product is Product => !!product);
+    const waiting = pending.productIds.map((id) => productById(id)).filter((product): product is Product => !!product);
     if (waiting.length) return { kind: 'bound', products: waiting, label: waiting.length === 1 ? waiting[0]!.title : designOf(waiting[0]!.title), source: 'pending' };
   }
   if (auth.authorized && auth.source === 'confirmation') {
@@ -408,6 +410,26 @@ export function actionTarget(ctx: ToolContext): ActionTarget {
     const offer = offerSentence(lastReply);
     const offered = offer ? fromIdentity(resolveCustomerProductIdentity(offer, 'offer'), ctx, 'offer') : null;
     if (offered) return offered;
+  }
+  /*
+   * The product the Caddie's last reply recommended by name - "I'd go for the
+   * Elite Polo in navy. What size?" - "M, add it". Their "it" answers what
+   * they were just told; a reply naming several is not one to pick from.
+   */
+  if (bareReference(said) || (auth.authorized && auth.source !== 'utterance')) {
+    const lastReply = [...ctx.session.messages].reverse().find((message) => message.role === 'assistant')?.text ?? '';
+    const recommended = lastReply ? fromIdentity(resolveCustomerProductIdentity(lastReply, 'offer'), ctx, 'offer') : null;
+    if (recommended?.kind === 'bound' && recommended.products.length) return { ...recommended, source: 'last-reply' };
+  }
+  /*
+   * The only card on screen: "add it", "I'll take the M", "L" to "shall I
+   * add it?" cannot mean anything else - unless they name a kind it is not.
+   */
+  const screenItems = (ctx.session.lastShown?.items ?? []).filter((item) => item.id);
+  const only = screenItems.length === 1 ? productById(screenItems[0]!.id) : null;
+  const kindsSaid = categoriesAsked(said);
+  if (only && (bareReference(said) || auth.authorized) && (!kindsSaid.length || isCategory(only, kindsSaid))) {
+    return { kind: 'bound', products: [only], label: only.title, source: 'screen-reference' };
   }
   /*
    * The product they are shopping for - while it is still what they are
@@ -2821,6 +2843,8 @@ const outfitTool = defineTool({
      */
     let basketSpeech = '';
     let basketNote = '';
+    let basketActions: CartAction[] = [];
+    let basketOutcome: ToolResult['outcome'];
     if (inBasket && outgoing) {
       const placed = recommendation.pieces.find((piece) => piece.slot === outgoing.slot)?.product;
       const theirPick = chosen && placed && sameProduct(placed.id, chosen.id) ? chosen : null;
@@ -2839,13 +2863,12 @@ const outfitTool = defineTool({
         : [];
 
       if (theirPick && fits.length === 1 && fits[0]) {
-        const swapped = await runTool(
-          'add_to_cart',
-          { productId: theirPick.id, options: fits[0].options, replaces: outgoing.product.id },
-          ctx,
-        );
-        basketSpeech = ` In your basket too: ${swapped.speech}`;
+        // Through the gateway like any other basket change - and its actions handed to the widget, which once said "swapping" and did nothing.
+        const swapped = await executeCommerceAction(ctx, { type: 'add-product', productId: theirPick.id, options: fits[0].options, replaces: outgoing.product.id });
+        basketSpeech = swapped.ok ? ` In your basket too: ${swapped.speech}` : ` Your basket is unchanged - ${swapped.speech}`;
         basketNote = swapped.facts ? `\n${swapped.facts}` : '';
+        basketActions = swapped.actions ?? [];
+        basketOutcome = { ok: swapped.ok, action: swapped.action, ...(swapped.reason ? { reason: swapped.reason } : {}) };
       } else if (theirPick) {
         basketSpeech = ` The ${outgoing.product.title} is still in your basket - which size would you like the ${theirPick.title} in, so I can swap it there too?`;
       } else {
@@ -2863,6 +2886,8 @@ const outfitTool = defineTool({
         recommendation.total.currency,
       )}.${basketSpeech}`,
       attachment: { kind: 'outfit', recommendation },
+      ...(basketActions.length ? { actions: basketActions } : {}),
+      ...(basketOutcome ? { outcome: basketOutcome } : {}),
     };
   },
 });
@@ -2912,221 +2937,344 @@ const addToCartTool = defineTool({
     required: ['productId'],
   },
   async run(args, ctx): Promise<ToolResult> {
+    // Choosing a piece for a pack on screen is a change to the pack, not the basket.
     const picked = await pickFromPackChoices(ctx);
     if (picked) return picked;
-    /*
-     * What they picked on this product's card, when their words now name no
-     * size: "add it" after tapping M is M - over the size the model reached
-     * for from their profile. A size they say now always wins.
-     */
-    /*
-     * "Add it", straight after tapping a size on a card, is that card's
-     * product - whatever the model reached for. It once added the jacket it
-     * had just recommended rather than the one the customer had tapped. Only
-     * for a bare reference: "add that black jacket" names something, and is
-     * the model's to resolve.
-     */
-    const proposed = productById(args.productId) ?? (/^(gid:\/\/|\d+$)/.test(args.productId.trim()) ? null : resolveProduct(ctx.session, args.productId)?.product ?? null);
-    /*
-     * Which product: the customer's, then the model's (see actionTarget). A
-     * model pick outside what they authorised is corrected when their target
-     * is one product, and asked about when it is several - never added.
-     */
-    const target = actionTarget(ctx);
-    const diagnostics = {
-      sessionId: ctx.session.id,
-      customer: describeIdentity(resolveCustomerProductIdentity(ctx.utterance ?? '')),
-      focus: ctx.session.activeShoppingContext?.design ?? ctx.session.activeShoppingContext?.productId ?? null,
-      pending: ctx.session.pendingAdd?.productIds ?? (ctx.session.pendingAdd ? [ctx.session.pendingAdd.productId] : null),
-      proposed: proposed?.title ?? args.productId,
-      target: target.kind === 'bound' ? `${target.source}: ${target.label}` : target.kind,
+    return fromOutcome(await executeCommerceAction(ctx, { type: 'add-product', ...args }));
+  },
+});
+
+/** A gateway outcome as the model reads it: what happened, and - when nothing did - exactly that. */
+function fromOutcome(outcome: ActionOutcome, extraFacts = ''): ToolResult {
+  const facts = [outcome.facts, outcome.cart ? cartFacts(outcome.cart) : '', extraFacts].filter(Boolean).join('\n');
+  return {
+    speech: outcome.speech,
+    ...(facts ? { facts } : {}),
+    ...(outcome.actions?.length ? { actions: outcome.actions } : {}),
+    ...(outcome.cart ? { attachment: { kind: 'cart' as const, cart: outcome.cart } } : {}),
+    outcome: { ok: outcome.ok, action: outcome.action, ...(outcome.reason ? { reason: outcome.reason } : {}) },
+  };
+}
+
+/* ---------------- planners: the validation behind each basket action ---------------- */
+
+const optionAwaiting = (name: string): 'size' | 'colour' | 'option' => (/colou?r/i.test(name) ? 'colour' : /size|waist|leg|length/i.test(name) ? 'size' : 'option');
+
+/**
+ * A product added to the basket. Which product (the customer's, never the
+ * model's alone), the variant their choices make, in stock, how many they
+ * asked for - all decided before anything is handed to the cart.
+ */
+async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: ActionSource): Promise<ActionPlan> {
+  if (action.type !== 'add-product') throw new Error('planAddProduct: wrong action');
+  let productId = action.productId;
+  const ui = source === 'ui-add';
+  const proposed = productById(productId) ?? (/^(gid:\/\/|\d+$)/.test(productId.trim()) ? null : resolveProduct(ctx.session, productId)?.product ?? null);
+
+  /*
+   * Which product. A click is its own product. Otherwise the customer's
+   * target (actionTarget); a model pick outside it is corrected when their
+   * target is one product and asked about when it is several. And with no
+   * target from the customer at all, nothing is added: a model's pick alone
+   * never decides what goes in the basket.
+   */
+  const target: ActionTarget = ui ? (proposed ? { kind: 'bound', products: [proposed], label: proposed.title, source: 'card-action' } : { kind: 'unbound' }) : actionTarget(ctx);
+  const diagnostics = {
+    sessionId: ctx.session.id,
+    source,
+    customer: ui ? 'ui' : describeIdentity(resolveCustomerProductIdentity(ctx.utterance ?? '')),
+    focus: ctx.session.activeShoppingContext?.design ?? ctx.session.activeShoppingContext?.productId ?? null,
+    pending: ctx.session.pendingAction?.productIds ?? null,
+    proposed: proposed?.title ?? productId,
+    target: target.kind === 'bound' ? `${target.source}: ${target.label}` : target.kind,
+  };
+  if (target.kind === 'ambiguous') {
+    log.warn('cart.add_target', { ...diagnostics, decision: 'ambiguous' });
+    const names = target.designs.map((design) => titleCaseWords(design.design));
+    return {
+      ok: false,
+      reason: 'ambiguous-target',
+      speech: `Which do you mean - ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}?`,
+      facts: `What they named fits more than one product: ${target.designs.map((design) => `${design.design} (${design.range}) [${design.products.map((p) => p.id).join(', ')}]`).join('; ')}. Ask which one - never pick for them.`,
     };
-    if (target.kind === 'ambiguous') {
-      log.warn('cart.add_target', { ...diagnostics, decision: 'ambiguous - nothing added' });
-      const names = target.designs.map((design) => titleCaseWords(design.design));
+  }
+  if (target.kind === 'unbound') {
+    log.warn('cart.add_target', { ...diagnostics, decision: 'no trusted target' });
+    const screen = (ctx.session.lastShown?.items ?? []).filter((item) => item.id);
+    return {
+      ok: false,
+      reason: 'no-target',
+      speech: ui ? 'I could not find that product.' : 'Which one would you like me to add?',
+      facts: ui
+        ? `The product on that card [${productId}] is not in the catalogue.`
+        : `Nothing they said, tapped, were offered or were waiting on says which product. ${screen.length ? `On screen: ${screen.map((item, i) => `${i + 1}. ${item.title}`).join('; ')}.` : ''} Ask which one - never pick for them.`,
+    };
+  }
+  if (!(proposed && target.products.some((product) => product.id === proposed.id))) {
+    const shown = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
+    const onScreen = target.products.filter((product) => shown.has(product.id));
+    const pick = target.products.length === 1 ? target.products[0]! : onScreen.length === 1 ? onScreen[0]! : null;
+    log.warn('identity.rejected_model_target', { ...diagnostics, corrected: pick?.title ?? null });
+    if (!pick) {
+      const made = target.products.length ? target.products : proposed ? designMembers(proposed) : [];
       return {
-        speech: `Which do you mean - ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}?`,
-        facts: `Nothing was added. What they named fits more than one product: ${target.designs.map((design) => `${design.design} (${design.range}) [${design.products.map((p) => p.id).join(', ')}]`).join('; ')}. Ask which one - never pick for them.`,
+        ok: false,
+        reason: target.products.length ? 'missing-option' : 'unavailable',
+        speech: `Which colour of the ${titleCaseWords(target.label)} would you like?`,
+        facts: target.products.length
+          ? `They mean the ${target.label} - one of: ${target.products.map((product) => `${product.title} [${product.id}]`).join(', ')}. ${proposed ? `${proposed.title} is not one of them. ` : ''}Ask which colour; never add another product.`
+          : `The ${target.label} is not made in the colour they asked for.${made.length ? ` It comes in: ${made.map((product) => colourwayName(product.title)).join(', ')}.` : ''} Say so, and ask which colour.`,
+        ...(target.products.length ? { pending: { type: 'add-product' as const, productIds: target.products.map((product) => product.id), awaiting: 'colour' as const } } : {}),
       };
     }
-    if (target.kind === 'bound' && !(proposed && target.products.some((product) => product.id === proposed.id))) {
-      const shown = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
-      const onScreen = target.products.filter((product) => shown.has(product.id));
-      const pick = target.products.length === 1 ? target.products[0]! : onScreen.length === 1 ? onScreen[0]! : null;
-      log.warn('identity.rejected_model_target', { ...diagnostics, corrected: pick?.title ?? null });
-      if (!pick) {
-        const made = target.products.length ? target.products : designMembers(proposed ?? productById(args.productId) ?? target.products[0]!).filter(Boolean);
-        return {
-          speech: `Which colour of the ${titleCaseWords(target.label)} would you like?`,
-          facts: target.products.length
-            ? `Nothing was added. They mean the ${target.label} - one of: ${target.products.map((product) => `${product.title} [${product.id}]`).join(', ')}. ${proposed ? `${proposed.title} is not one of them. ` : ''}Ask which colour; never add another product.`
-            : `Nothing was added. The ${target.label} is not made in the colour they asked for.${made.length ? ` It comes in: ${made.map((product) => colourwayName(product.title)).join(', ')}.` : ''} Say so, and ask which colour; never add another.`,
-        };
-      }
-      args = { ...args, productId: pick.id };
+    productId = pick.id;
+  }
+  const chosenProduct = productById(productId) ?? proposed;
+  log.info('cart.add_target', { ...diagnostics, resolved: chosenProduct?.title ?? productId, decision: 'bound' });
+
+  /*
+   * Which options. A click sends the pickers as they were when clicked.
+   * Otherwise: a size they say now; what they tapped on this card; the size
+   * the Caddie offered, when they said yes to it; the options a waiting add
+   * already had. A size nobody said is a guess, and a guessed size in the
+   * basket is the one rule that does not bend.
+   */
+  const offered = source === 'customer-confirmation' ? offeredAction(ctx) : null;
+  const saysSize = !!sizeInRequest(ctx.utterance ?? '');
+  const card = !ui && chosenProduct ? ctx.session.cardChoices?.[chosenProduct.id] : undefined;
+  let options: Record<string, string> | undefined = action.options;
+  if (!ui) {
+    if (card && !saysSize) {
+      options = {
+        ...Object.fromEntries(Object.entries(options ?? {}).filter(([name]) => !Object.keys(card.options).some((own) => own.toLowerCase() === name.toLowerCase()))),
+        ...card.options,
+      };
+      log.info('cart.card_choice_used', { sessionId: ctx.session.id, productId: chosenProduct!.id, options: card.options });
     }
-    log.info('cart.add_target', { ...diagnostics, resolved: productById(args.productId)?.title ?? args.productId, decision: target.kind === 'bound' ? 'bound' : 'model pick (nothing from the customer to bind to)' });
-    const onCard = productById(args.productId) ?? proposed;
-    const card = onCard ? ctx.session.cardChoices?.[onCard.id] : undefined;
-    const saysSize = !!sizeInRequest(ctx.utterance ?? '');
-    const options: Record<string, string> | undefined =
-      card && !saysSize
-        ? {
-            ...Object.fromEntries(Object.entries(args.options ?? {}).filter(([name]) => !Object.keys(card.options).some((picked) => picked.toLowerCase() === name.toLowerCase()))),
-            ...card.options,
-          }
-        : args.options;
-    if (card && !saysSize) log.info('cart.card_choice_used', { sessionId: ctx.session.id, productId: onCard!.id, options: card.options });
-    // A size nobody said is a guess, and a guessed size in the basket is the one rule that does not bend.
-    const invented = sizesNeverGiven(sizeValues(options), ctx, onCard?.id ?? args.productId);
+    const waiting = source === 'pending-action-continuation' ? ctx.session.pendingAction?.options : undefined;
+    if (waiting) options = { ...waiting, ...(options ?? {}) };
+    if (offered?.type === 'add-product' && offered.size && chosenProduct) {
+      const sizeOption = chosenProduct.options.find((option) => /size|waist/i.test(option.name) && option.values.length > 1)?.name;
+      if (sizeOption) options = { ...(options ?? {}), [sizeOption]: offered.size };
+    }
+    // A yes to "shall I add it in M?" is the customer choosing M.
+    const acceptedSize = offered?.type === 'add-product' ? offered.size : undefined;
+    const invented = sizesNeverGiven(sizeValues(options).filter((value) => !(acceptedSize && sameSize(value, acceptedSize))), ctx, chosenProduct?.id ?? productId);
     if (invented.length) {
       log.warn('cart.size_not_given', { sessionId: ctx.session.id, sizes: invented });
       return {
+        ok: false,
+        reason: 'missing-option',
         speech: 'What size would you like?',
-        facts: `Nothing was added. The customer never gave ${invented.join(', ')} - never choose a size for them. Ask, then add with the size they say.`,
+        facts: `The customer never gave ${invented.join(', ')} - never choose a size for them. Ask, then add with the size they say.`,
+        pending: { type: 'add-product', productIds: target.products.map((product) => product.id), awaiting: 'size' },
       };
     }
-    let product = await getProductDetails(args.productId, options);
-    // "The second one", "the navy one": what they can see, not an id to guess.
-    if (!product && !/^(gid:\/\/|\d+$)/.test(args.productId.trim())) {
-      const seen = resolveProduct(ctx.session, args.productId);
-      if (seen) product = await getProductDetails(seen.product.id, options);
-    }
-    if (!product) {
-      return { speech: 'I could not find that product. Let me search again rather than guess.' };
-    }
+  }
 
-    /*
-     * Which choices are still open - measured against what they actually
-     * named, not against how many things they named.
-     *
-     * Counting was the bug. A customer who says "large" on a polo that comes
-     * in six colours has chosen one of two things, and the old check saw a
-     * non-zero count and went ahead; variants[0] then picked their colour for
-     * them. The test store hides this completely - colour is baked into the
-     * product title there and every product carries a single option - but the
-     * real store has Size and Colour on nearly everything.
-     */
-    const named = new Set(Object.keys(options ?? {}).map((key) => key.toLowerCase()));
-    const stillOpen = product.options.filter(
-      (option) => option.values.length > 1 && !named.has(option.name.toLowerCase()),
-    );
+  const product = await getProductDetails(productId, options);
+  if (!product) return { ok: false, reason: 'not-found', speech: 'I could not find that product.', facts: `No product ${productId} in the catalogue.` };
 
-    if (stillOpen.length > 0) {
-      return {
-        speech: `Which ${stillOpen.map((option) => option.name.toLowerCase()).join(' and ')} would you like for the ${product.title}?`,
-        facts: `${product.title} needs a choice:\n${stillOpen
-          .map((option) => `- ${option.name}: ${option.values.join(', ')}`)
-          .join('\n')}`,
-      };
-    }
+  // Every option with a choice must be one they made - measured against what they named, not how many things they named.
+  const named = new Set(Object.keys(options ?? {}).map((key) => key.toLowerCase()));
+  const stillOpen = product.options.filter((option) => option.values.length > 1 && !named.has(option.name.toLowerCase()));
+  if (stillOpen.length > 0) {
+    return {
+      ok: false,
+      reason: 'missing-option',
+      speech: `Which ${stillOpen.map((option) => option.name.toLowerCase()).join(' and ')} would you like for the ${product.title}?`,
+      facts: `${product.title} needs a choice:\n${stillOpen.map((option) => `- ${option.name}: ${option.values.join(', ')}`).join('\n')}`,
+      pending: { type: 'add-product', productIds: [product.id], ...(options ? { options } : {}), awaiting: optionAwaiting(stillOpen[0]!.name) },
+    };
+  }
+  // Every option named and still several variants: the choices did not identify one. Never the first of them.
+  if (product.variants.length !== 1) {
+    return {
+      ok: false,
+      reason: 'missing-option',
+      speech: `Which ${product.options.map((option) => option.name.toLowerCase()).join(' and ')} would you like for the ${product.title}?`,
+      facts: `${product.variants.length} variants match for ${product.title}. Do not choose one for them.`,
+    };
+  }
+  const variant = product.variants[0]!;
+  if (!variant.available) {
+    const choice = Object.values(variant.options).filter((value) => value !== 'Default Title').join(', ');
+    return {
+      ok: false,
+      reason: 'sold-out',
+      speech: `The ${product.title}${choice ? ` in ${choice}` : ''} is out of stock. Shall I check another size?`,
+      facts: `Sold out: ${product.title} ${choice}. Other options: ${product.options.map((option) => `${option.name}: ${option.values.join(', ')}`).join('; ')}`,
+    };
+  }
 
-    /*
-     * Every option named and more than one garment still matching means the
-     * choices did not identify one. Ask again rather than take the first: a
-     * wrong colour in the basket is a return, and the customer does not find
-     * out until it arrives.
-     */
-    if (product.variants.length > 1) {
-      return {
-        speech: `I want to be certain which ${product.title} you mean before I add it - could you confirm the ${product.options
-          .map((option) => option.name.toLowerCase())
-          .join(' and ')}?`,
-        facts: `${product.variants.length} variants still match for ${product.title}. Do not choose one for them.`,
-      };
-    }
+  /*
+   * How many. A click says its own quantity; a yes is to what was offered;
+   * otherwise more than one only when their words say how many - never a
+   * number in the product's name, never the model's alone.
+   */
+  const quantity = ui
+    ? Math.max(1, Math.min(10, action.quantity ?? 1))
+    : offered?.type === 'add-product'
+      ? (quantityInWords(ctx.utterance ?? '')?.set ?? offered.quantity)
+      : quantityAsked(ctx, action.quantity);
+  if (action.quantity !== undefined && quantity !== action.quantity) log.warn('cart.quantity_not_asked', { sessionId: ctx.session.id, proposed: action.quantity, used: quantity });
 
-    const variant = product.variants[0];
-    if (!variant) {
-      return { speech: `I could not find that combination for the ${product.title}.` };
-    }
-    if (!variant.available) {
-      const choice = Object.values(variant.options).join(', ');
-      return {
-        speech: `The ${product.title} in ${choice} is out of stock. Shall I check another size?`,
-        facts: `Unavailable variant: ${product.title} ${choice}. Other options: ${product.options
-          .map((option) => `${option.name}: ${option.values.join(', ')}`)
-          .join('; ')}`,
-      };
-    }
+  const replacedIds = action.replaces
+    ? (ctx.session.basket ?? [])
+        .filter((line) => line.lineId === action.replaces || sameProduct(line.productId, action.replaces ?? ''))
+        .map((line) => line.productId)
+        .filter((id) => !sameProduct(id, product.id))
+    : [];
+  const next = await nextStep([product], { profile: ctx.session.shopper ?? {}, basketProductIds: (ctx.session.basket ?? []).map((line) => line.productId) });
+  const nextLine = next ? next.line : '';
+  // Chosen is liked; what it replaces is turned down - once it is in, never before.
+  const afterSuccess = async () => {
+    await rememberShopper(ctx.session.id, { liked: [product.id], ...(replacedIds.length ? { rejected: replacedIds } : {}) });
+  };
+  const choice = Object.values(variant.options).filter((value) => value !== 'Default Title').join(', ');
+  const charge = Number((variant.price.amount * quantity).toFixed(2));
 
-    /*
-     * Chosen is liked; what it replaces is turned down. The next suggestion is
-     * worked out now, from what they actually chose - never offered after
-     * "just the jacket".
-     */
-    const replacedIds = args.replaces
-      ? (ctx.session.basket ?? [])
-          .filter((line) => line.lineId === args.replaces || sameProduct(line.productId, args.replaces ?? ''))
-          .map((line) => line.productId)
-          .filter((id) => !sameProduct(id, product.id))
-      : [];
-    const shopper = await rememberShopper(ctx.session.id, { liked: [product.id], ...(replacedIds.length ? { rejected: replacedIds } : {}) });
-    const next = await nextStep([product], {
-      profile: shopper,
-      basketProductIds: (ctx.session.basket ?? []).map((line) => line.productId),
-    });
-    const nextLine = next ? `\n${next.line}` : '';
-
-    /*
-     * On the storefront the basket is the theme's cart, in the shopper's
-     * browser: the widget makes the change. Everything above - the variant,
-     * its stock, the choices still open - is decided here as before.
-     */
-    if (ctx.session.cartMode === 'theme') {
-      const outgoingLines = args.replaces
-        ? (ctx.session.basket ?? []).filter(
-            (line) =>
-              line.lineId === args.replaces || (sameProduct(line.productId, args.replaces ?? '') && !sameProduct(line.productId, product.id)),
-          )
-        : [];
-      const choice = Object.values(variant.options).filter((value) => value !== 'Default Title').join(', ');
-      return {
-        speech: outgoingLines.length
-          ? `Swapping the ${outgoingLines.map((line) => line.title).join(' and ')} for the ${product.title}${choice ? ` in ${choice}` : ''}.`
-          : `Adding the ${product.title}${choice ? ` in ${choice}` : ''} to your basket.`,
-        facts: `The widget makes this change in the store cart and shows the basket once it has. Say it is going in, not that the basket now holds it.${nextLine}`,
-        actions: [
-          {
-            type: 'add',
-            lines: [{ variantId: numericId(variant.id), quantity: args.quantity ?? 1 }],
-            ...(outgoingLines.length ? { removeKeys: outgoingLines.map((line) => line.lineId) } : {}),
-          },
-        ],
-      };
-    }
-
-    let cart = await addToCart(ctx.session.cartId, variant.id, args.quantity ?? 1);
-    await sessions.patch(ctx.session.id, { cartId: cart.id });
-
-    /*
-     * A swap, removed only now that the new piece is safely in. The other way
-     * round, a failed add would leave the customer with neither. Matching by
-     * product as well as line lets "change my S to an M" work: every other
-     * line of that product goes, the one just added stays.
-     */
-    const outgoing = args.replaces
-      ? cart.lines.filter(
-          (line) =>
-            line.variantId !== variant.id &&
-            (line.lineId === args.replaces || sameProduct(line.productId, args.replaces ?? '')),
+  // On the storefront the basket is the theme's cart: the widget makes the change.
+  if (ctx.session.cartMode === 'theme') {
+    const outgoingLines = action.replaces
+      ? (ctx.session.basket ?? []).filter(
+          (line) => line.lineId === action.replaces || (sameProduct(line.productId, action.replaces ?? '') && !sameProduct(line.productId, product.id)),
         )
       : [];
-    for (const line of outgoing) {
-      cart = await setLineQuantity(cart.id, line.lineId, 0);
-    }
+    return {
+      ok: true,
+      speech: outgoingLines.length
+        ? `Swapping the ${outgoingLines.map((line) => line.title).join(' and ')} for the ${product.title}${choice ? ` in ${choice}` : ''}.`
+        : `Adding ${quantity > 1 ? `${quantity} x ` : ''}the ${product.title}${choice ? ` in ${choice}` : ''} to your basket.`,
+      facts: `The widget makes this change in the store cart and shows the basket once it has. Say it is going in, not that the basket now holds it.${nextLine ? `\n${nextLine}` : ''}`,
+      actions: [
+        {
+          type: 'add',
+          lines: [{ variantId: numericId(variant.id), quantity }],
+          ...(outgoingLines.length ? { removeKeys: outgoingLines.map((line) => line.lineId) } : {}),
+        },
+      ],
+      afterSuccess,
+      productId: product.id,
+      variantId: variant.id,
+      quantity,
+      charge,
+    };
+  }
 
-    const total = `Your basket is ${money(cart.subtotal.amount, cart.subtotal.currency)} for ${cart.totalQuantity} ${
-      cart.totalQuantity === 1 ? 'item' : 'items'
-    }.`;
-    const speech = outgoing.length
-      ? `Swapped the ${outgoing.map((line) => line.title).join(' and ')} for the ${product.title}. ${total}`
-      : args.replaces
-        ? `Added the ${product.title}, but I could not find the item it was replacing in your basket, so nothing was removed. ${total}`
-        : `Added. ${total}`;
-    return { speech, facts: `${cartFacts(cart)}${nextLine}`, attachment: { kind: 'cart', cart } };
-  },
-});
+  return {
+    ok: true,
+    speech: action.replaces ? `Swapped in the ${product.title}${choice ? ` in ${choice}` : ''}.` : `Added the ${product.title}${choice ? ` in ${choice}` : ''}.`,
+    ...(nextLine ? { facts: nextLine } : {}),
+    // A swap: the old piece removed only once the new one is safely in.
+    storefront: async () => {
+      let cart = await addToCart(ctx.session.cartId, variant.id, quantity);
+      const outgoing = action.replaces
+        ? cart.lines.filter((line) => line.variantId !== variant.id && (line.lineId === action.replaces || sameProduct(line.productId, action.replaces ?? '')))
+        : [];
+      for (const line of outgoing) cart = await setLineQuantity(cart.id, line.lineId, 0);
+      return cart;
+    },
+    afterSuccess,
+    productId: product.id,
+    variantId: variant.id,
+    quantity,
+    charge,
+  };
+}
+
+/**
+ * A basket line changed or removed. The line the customer means - named,
+ * "it" for what they just added, or the only one - never the model's pick
+ * alone; the quantity their words give; a pack's pieces only ever as a whole.
+ */
+async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: ActionSource): Promise<ActionPlan> {
+  if (action.type !== 'update-line') throw new Error('planUpdateLine: wrong action');
+  const theme = ctx.session.cartMode === 'theme';
+  const cart = !theme && ctx.session.cartId ? await getCart(ctx.session.cartId) : null;
+  const lines = theme
+    ? (ctx.session.basket ?? [])
+    : (cart?.lines ?? []).map((line) => ({ lineId: line.lineId, productId: line.productId, title: line.title, variantTitle: line.variantTitle, quantity: line.quantity, bundle: undefined as string | undefined }));
+  if (lines.length === 0) return { ok: false, reason: 'not-found', speech: 'Your basket is empty at the moment.', facts: 'There is nothing in the basket to change.' };
+
+  const said = ctx.utterance ?? '';
+  let line: (typeof lines)[number] | undefined;
+  if (source === 'ui-cart-change') {
+    line = lines.find((entry) => entry.lineId === action.lineId);
+  } else {
+    const identity = resolveCustomerProductIdentity(said);
+    const offered = source === 'customer-confirmation' ? offeredAction(ctx) : null;
+    const byIds = (ids: string[]) => lines.filter((entry) => ids.some((id) => sameProduct(entry.productId, id)));
+    let candidates = byIds(identityProducts(identity).map((product) => product.id));
+    if (!candidates.length && offered?.type === 'update-line' && offered.productIds) candidates = byIds(offered.productIds);
+    if (!candidates.length && identity.status === 'none') {
+      // "The polo": the lines of that kind.
+      const kinds = categoriesAsked(said);
+      if (kinds.length) candidates = lines.filter((entry) => { const own = productById(entry.productId); return !!own && isCategory(own, kinds); });
+    }
+    if (!candidates.length && identity.status === 'none' && !categoriesAsked(said).length) {
+      // "It", "that": the one they just added, or the one they are shopping for - or the only line there is.
+      const recent = ctx.session.lastAdded?.productId;
+      const held = ctx.session.activeShoppingContext?.productId;
+      candidates = recent ? byIds([recent]) : [];
+      if (!candidates.length && held) candidates = byIds(designMembers(productById(held) ?? ({ id: held } as Product)).map((p) => p.id));
+      if (!candidates.length && lines.length === 1) candidates = lines;
+    }
+    // Two lines it could be (two sizes of one polo): ask - the model's pick between them is still a guess.
+    line = candidates.length === 1 ? candidates[0] : undefined;
+    if (!line) {
+      const listed = (candidates.length ? candidates : lines).map((entry) => `${entry.title} (${entry.variantTitle}) [line ${entry.lineId}]`).join('; ');
+      return {
+        ok: false,
+        reason: candidates.length > 1 ? 'ambiguous-target' : 'no-target',
+        speech: 'Which item in your basket do you mean?',
+        facts: `Which line they mean is not certain. In the basket: ${listed}. Ask which - never change one for them.`,
+      };
+    }
+    if (line.lineId !== action.lineId) log.warn('identity.rejected_model_target', { sessionId: ctx.session.id, tool: 'update_cart_item', proposed: action.lineId, corrected: line.lineId });
+  }
+  if (!line) return { ok: false, reason: 'not-found', speech: 'I cannot find that in your basket.', facts: cartSummary(ctx.session.basket ?? []) };
+
+  // How many: a click's own number; "remove" is none; otherwise the number their words give.
+  let quantity: number;
+  if (source === 'ui-cart-change') quantity = action.quantity;
+  else if (asksToRemove(said)) quantity = 0;
+  else {
+    const offered = source === 'customer-confirmation' ? offeredAction(ctx) : null;
+    const amount = quantityInWords(said);
+    if (amount?.more) quantity = line.quantity + amount.more;
+    else if (amount?.set !== undefined) quantity = amount.set;
+    else if (offered?.type === 'update-line' && offered.quantity !== undefined) quantity = offered.quantity;
+    else return { ok: false, reason: 'missing-option', speech: `How many of the ${line.title} would you like?`, facts: 'They did not say how many. Ask.' };
+  }
+  if (quantity !== action.quantity) log.warn('cart.quantity_not_asked', { sessionId: ctx.session.id, proposed: action.quantity, used: quantity });
+  quantity = Math.max(0, Math.min(10, quantity));
+
+  // A pack is priced as a whole: a piece comes out with its pack, and never changes quantity on its own.
+  if (line.bundle) {
+    const pack = lines.filter((entry) => entry.bundle === line!.bundle);
+    if (quantity !== 0) return { ok: false, reason: 'unavailable', speech: 'Pieces in a pack come one of each - to change one, rebuild the pack instead.', facts: 'A pack piece cannot change quantity on its own.' };
+    return {
+      ok: true,
+      speech: `That piece is part of a pack, so I am taking the whole pack out - ${pack.length} pieces.`,
+      actions: pack.map((entry) => ({ type: 'change' as const, lineKey: entry.lineId, quantity: 0 })),
+      productId: line.productId,
+      quantity: 0,
+    };
+  }
+  // More of it only when more is in stock.
+  if (quantity > line.quantity) {
+    const own = productById(line.productId);
+    const variant = own?.variants.find((entry) => entry.title === line!.variantTitle || Object.values(entry.options).join(' / ') === line!.variantTitle);
+    if (variant && !variant.available) return { ok: false, reason: 'sold-out', speech: `The ${line.title} is sold out, so I can't add more.`, facts: `${line.title} ${line.variantTitle} is sold out.` };
+  }
+  const speech = quantity === 0 ? `Taking the ${line.title} out of your basket.` : `Changing the ${line.title} to ${quantity}.`;
+  if (theme) return { ok: true, speech, actions: [{ type: 'change', lineKey: line.lineId, quantity }], productId: line.productId, quantity };
+  return { ok: true, speech, storefront: () => setLineQuantity(ctx.session.cartId!, line!.lineId, quantity), productId: line.productId, quantity };
+}
+
+registerPlanner('add-product', planAddProduct);
+registerPlanner('update-line', planUpdateLine);
 
 const updateCartSchema = z.object({
   lineId: z.string().min(1),
@@ -3146,38 +3294,7 @@ const updateCartTool = defineTool({
     required: ['lineId', 'quantity'],
   },
   async run(args, ctx): Promise<ToolResult> {
-    if (ctx.session.cartMode === 'theme') {
-      const lines = ctx.session.basket ?? [];
-      const line = lines.find((entry) => entry.lineId === args.lineId);
-      if (!line) return { speech: 'I cannot find that in your basket.', facts: cartSummary(lines) };
-      /*
-       * A pack is priced as a whole. Taking one piece out leaves the rest
-       * marked as a bundle the discount no longer matches, so they would
-       * quietly go back to full price - it comes out whole, and says so.
-       */
-      if (line.bundle) {
-        const pack = lines.filter((entry) => entry.bundle === line.bundle);
-        if (args.quantity === 0) {
-          return {
-            speech: `That piece is part of a pack, so I have taken the whole pack out - ${pack.length} pieces.`,
-            actions: pack.map((entry) => ({ type: 'change' as const, lineKey: entry.lineId, quantity: 0 })),
-          };
-        }
-        return { speech: 'Pieces in a pack come one of each - to change one, rebuild the pack instead.' };
-      }
-      return {
-        speech: args.quantity === 0 ? `Taking the ${line.title} out of your basket.` : `Changing the ${line.title} to ${args.quantity}.`,
-        actions: [{ type: 'change', lineKey: line.lineId, quantity: args.quantity }],
-      };
-    }
-    if (!ctx.session.cartId) return { speech: 'There is nothing in your basket yet.' };
-    // Quantity 0 removes the line - setLineQuantity handles both cases.
-    const cart = await setLineQuantity(ctx.session.cartId, args.lineId, args.quantity);
-    return {
-      speech: `Basket updated - ${money(cart.subtotal.amount, cart.subtotal.currency)}.`,
-      facts: cartFacts(cart),
-      attachment: { kind: 'cart', cart },
-    };
+    return fromOutcome(await executeCommerceAction(ctx, { type: 'update-line', lineId: args.lineId, quantity: args.quantity }));
   },
 });
 
@@ -3410,138 +3527,179 @@ const addPackTool = defineTool({
     required: [],
   },
   async run(args, ctx): Promise<ToolResult> {
-    const shown = ctx.session.lastShown;
-    const onScreen =
-      shown?.kind === 'pack' && shown.bundle ? allDeals().find((entry) => entry.handle === shown.bundle) : undefined;
+    const outcome = await executeCommerceAction(ctx, { type: 'add-pack', ...(args.pack ? { pack: args.pack } : {}) });
+    // Refused for want of a request: where the pack stands, so the model cannot claim sizes as chosen.
+    if (!outcome.ok && outcome.reason === 'not-authorized') {
+      const handle = ctx.session.lastShown?.kind === 'pack' ? ctx.session.lastShown.bundle : ctx.session.packInFocus;
+      const standing = handle ? packStatusFacts(packStatus(ctx.session, handle)) : '';
+      return fromOutcome(outcome, `And never say a size was selected that the status below does not confirm.${standing ? `\n${standing}` : ''}`);
+    }
+    return fromOutcome(outcome);
+  },
+});
+
+/**
+ * A pack added to the basket - from chat, or its card's Add button. The pack
+ * the customer sees, every piece a real variant in stock, the price checkout
+ * will charge, and one pack in the basket, not two. The only difference
+ * between chat and the button is who authorised it.
+ */
+async function planAddPack(ctx: ToolContext, action: CommerceAction, source: ActionSource): Promise<ActionPlan> {
+  if (action.type !== 'add-pack') throw new Error('planAddPack: wrong action');
+  const ui = source === 'ui-add';
+  let deal: DealRecipe | undefined;
+  let products: Array<Product | null>;
+  let session = ctx.session;
+
+  if (ui) {
+    deal = allDeals().find((entry) => entry.handle === action.handle);
+    if (!deal) return { ok: false, reason: 'not-found', speech: "That pack isn't available right now.", facts: `No deal ${action.handle}.` };
     /*
-     * "Add the Prestige Pack in L" with nothing on screen yet is a natural
-     * thing to say, and it used to go nowhere. Named, and not the one on
-     * screen, the pack is built here - one piece per step, in their size.
+     * The pack the customer sees - the pieces on its card, as the server last
+     * showed them. A card older than the pack now on the session is not added
+     * as if it were current.
      */
+    const shownIds = ctx.session.packsShown?.[deal.handle]?.items.map((item) => item.id) ?? [];
+    const clicked = (action.pieces ?? []).map((piece) => piece.productId);
+    if (!shownIds.length || shownIds.length !== clicked.length || shownIds.some((id, i) => !sameProduct(id, clicked[i]!))) {
+      return { ok: false, reason: 'not-ready', speech: 'This pack has changed since it was shown - take another look before adding it.', facts: `The pieces sent do not match the ${deal.title} last shown.` };
+    }
+    products = shownIds.map((id) => productById(id));
+    // The pickers at the click are the customer's choices for this add - real options only.
+    const taps: NonNullable<typeof session.cardChoices> = {};
+    for (const piece of action.pieces ?? []) {
+      const product = productById(piece.productId);
+      if (!product) continue;
+      const options: Record<string, string> = {};
+      for (const [name, value] of Object.entries(piece.options)) {
+        const option = product.options.find((own) => own.name.toLowerCase() === name.toLowerCase());
+        const real = option?.values.find((own) => own.toLowerCase() === String(value).toLowerCase());
+        if (option && real) options[option.name] = real;
+      }
+      taps[product.id] = { options, at: Date.now() };
+    }
+    session = { ...ctx.session, cardChoices: { ...(ctx.session.cardChoices ?? {}), ...taps } };
+  } else {
+    const shown = ctx.session.lastShown;
+    const onScreen = shown?.kind === 'pack' && shown.bundle ? allDeals().find((entry) => entry.handle === shown.bundle) : undefined;
     // An Ambassador Pack named without its conditions is the one on screen, never a guess at one.
     const weather = readIntent(ctx.utterance ?? '').weather ?? ctx.session.shopper?.weather;
-    const choice = args.pack ? chooseDeal(`${args.pack} ${ctx.utterance ?? ''}`, dealRange(ctx), weather) : null;
+    const choice = action.pack ? chooseDeal(`${action.pack} ${ctx.utterance ?? ''}`, dealRange(ctx), weather) : null;
     const named = choice && 'deal' in choice ? choice.deal : null;
-    const deal = named && named.handle !== onScreen?.handle ? named : onScreen;
+    deal = named && named.handle !== onScreen?.handle ? named : onScreen;
     if (!deal && choice && 'ask' in choice) {
       return {
+        ok: false,
+        reason: 'missing-option',
         speech: `Which conditions is the Ambassador Pack for - ${choice.ask.map((d) => titleCaseWords(d.conditionTitle ?? d.title)).join(', ')}?`,
         facts: 'Ask which, then call recommend_pack with the condition to build it before adding.',
       };
     }
-    if (!deal) return { speech: 'Which pack would you like - the Ambassador Pack, the Prestige Pack or another?' };
+    if (!deal) return { ok: false, reason: 'no-target', speech: 'Which pack would you like - the Ambassador Pack, the Prestige Pack or another?', facts: 'No pack is on screen or named.' };
     /*
-     * The pack as they last saw it, even after a search has taken the screen:
-     * rebuilding it here swapped pieces they had never been shown. Built
-     * fresh only when they have not seen it at all.
+     * The pack as they last saw it, even after a search has taken the screen.
+     * One they have never seen is shown, not added: adding a pack in the same
+     * breath as building it put pieces in the basket nobody had looked at.
      */
     const seen = deal === onScreen && shown ? null : ctx.session.packsShown?.[deal.handle]?.items.map((item) => (item.id ? productById(item.id) : null));
-    const built = deal === onScreen && shown ? null : seen?.length && seen.every(Boolean) ? null : fillDeal(deal, { size: ctx.session.sizeProfile.usualSize });
-    if (built) await showDeal(deal, built, ctx, storeCurrency(), args.pack ?? deal.title);
-
-    const products = built ?? seen ?? (shown?.items ?? []).map((item) => (item.id ? productById(item.id) : null));
-    if (products.some((product) => !product)) {
-      return { speech: `One of the ${deal.title} steps has nothing in stock that fits, so it is best finished on the pack page.`, facts: deal.url };
+    if (!(deal === onScreen && shown) && !(seen?.length && seen.every(Boolean))) {
+      const built = fillDeal(deal, { size: ctx.session.sizeProfile.usualSize });
+      const shownDeal = await showDeal(deal, built, ctx, storeCurrency(), action.pack ?? deal.title);
+      return { ok: false, reason: 'not-ready', speech: `${shownDeal.speech} Take a look first.`.trim(), facts: `The ${deal.title} had not been shown - it is on screen now. Nothing was added; ask if they want it.\n${shownDeal.facts ?? ''}` };
     }
-
+    products = seen ?? (shown?.items ?? []).map((item) => (item.id ? productById(item.id) : null));
+    if (products.some((product) => !product)) {
+      return { ok: false, reason: 'unavailable', speech: `One of the ${deal.title} steps has nothing in stock that fits, so it is best finished on the pack page.`, facts: deal.url };
+    }
     /*
-     * Only what the customer chose. The model's size and options are
-     * proposals: told "select the white clima trousers", it added the pack in
-     * L, waist 34, leg 32 - sizes nobody had said. Their words this turn are
-     * read into the pack's choices, then every piece is resolved from what is
-     * confirmed - a real variant, in stock - or the one thing still open is
-     * asked, and nothing is added. See packState.ts.
+     * Only what the customer chose - their words this turn read into the
+     * pack's choices, then every piece resolved from what is confirmed. The
+     * model's size and options are never read. See packState.ts.
      */
     const fresh = await sessions.getOrCreate(ctx.session.id);
     const lastReply = [...fresh.messages].reverse().find((message) => message.role === 'assistant')?.text ?? '';
     const choices = readPackChoices(ctx.utterance ?? '', lastReply, products as Product[], fresh.packChoices?.[deal.handle] ?? {});
-    await sessions.patch(ctx.session.id, { packChoices: { ...(fresh.packChoices ?? {}), [deal.handle]: choices } });
-    const status = packStatus(await sessions.getOrCreate(ctx.session.id), deal.handle, products as Product[]);
-    if (!status.ready) {
-      return { speech: status.next, facts: `Nothing was added. ${packStatusFacts(status)}` };
-    }
-    const pieces = status.pieces.map((plan) => ({ product: plan.product, variant: plan.variant! }));
+    session = await sessions.patch(ctx.session.id, { packChoices: { ...(fresh.packChoices ?? {}), [deal.handle]: choices } });
+  }
 
-    if (ctx.session.cartMode !== 'theme') {
+  const status = packStatus(session, deal.handle, products as Product[]);
+  if (!status.ready) return { ok: false, reason: 'not-ready', speech: status.next, facts: packStatusFacts(status) };
+  const pieces = status.pieces.map((plan) => ({ product: plan.product, variant: plan.variant! }));
+
+  if (ctx.session.cartMode !== 'theme') {
+    return { ok: false, reason: 'unavailable', speech: `The ${deal.title} price is applied in the store's own basket, so it is added from the pack page on the website.`, facts: `Pack page: ${deal.url}` };
+  }
+
+  const bundle = toBundleDeal(deal, pieces.map((piece) => piece.product));
+  /*
+   * What checkout will charge, known before anything is added: the pack
+   * price, or the pieces' own total when that is lower. A condition pack
+   * whose price checkout does not apply is not added at all.
+   */
+  let charge = deal.prices.GBP ?? 0;
+  if (deal.format === 'plus') {
+    const verdict = await packPriceHolds(deal, pieces.map((piece) => piece.variant.id));
+    if (verdict === 'cheaper') charge = piecesTotal(pieces.map((piece) => piece.variant.id));
+    if (verdict !== 'ok' && verdict !== 'cheaper') {
+      const warm = allDeals().find((d) => d.range === deal!.range && d.condition === 'warm' && d.handle !== deal!.handle);
       return {
-        speech: `The ${deal.title} price is applied in the store's own basket, so it is added from the pack page on the website.`,
-        facts: `Pack page: ${deal.url}`,
+        ok: false,
+        reason: 'price-check',
+        speech:
+          verdict === 'wrong'
+            ? `I can't add the ${deal.title} at its £${deal.prices.GBP} pack price yet - the checkout isn't applying it.${warm ? ` I can add the ${warm.conditionTitle ? titleCaseWords(warm.conditionTitle) : warm.title} pack instead, or you can build it on the pack page.` : ' You can build it on the pack page.'}`
+            : `I can't confirm the ${deal.title} price at checkout right now, so I would rather not add it. You can build it on the pack page.`,
+        facts: `Checkout ${verdict === 'wrong' ? 'did not apply the pack price' : 'could not be checked'} for ${deal.title}. Pack page: ${deal.url}`,
       };
     }
+  }
 
-    const bundle = toBundleDeal(deal, pieces.map((piece) => piece.product));
+  /*
+   * The same pack again is a change to it, not a second one (the rule the
+   * Caddie has always followed): an earlier pack of this deal - in the basket
+   * as the widget reports it, or sent moments ago - is replaced once the new
+   * one is in. The same for chat and the button.
+   */
+  const earlier = new Set<string>([
+    ...(ctx.session.basket ?? []).filter((line) => line.bundleName === deal!.handle && line.bundle).map((line) => line.bundle!),
+    ...(ctx.session.packsAdded ?? []).filter((pack) => pack.handle === deal!.handle).map((pack) => pack.bundleId),
+  ]);
+  const bundleId = newBundleId(Date.now());
+  const handle = deal.handle;
+  return {
+    ok: true,
+    speech: earlier.size
+      ? `Updating your ${deal.title} with those choices - still ${pieces.length} pieces for ${pounds(charge)}.`
+      : `Adding the ${deal.title} to your basket for ${pounds(charge)}.`,
+    facts: earlier.size
+      ? 'This replaces the pack already in their basket - there is still only one. The widget makes the change once you answer.'
+      : 'The widget adds the pack to the store cart as one bundle and shows the basket once it has.',
+    actions: [
+      {
+        type: 'add-bundle',
+        bundle,
+        bundleId,
+        ...(earlier.size ? { replaceBundles: [...earlier] } : {}),
+        pieces: pieces.map((piece) => ({
+          variantId: numericId(piece.variant.id),
+          productId: numericId(piece.product.id),
+          price: piece.variant.price.amount,
+          compareAtPrice: null,
+          // The condition packs write the product handle on each line, as the theme does.
+          handle: /\/products\/([^/?#]+)/.exec(piece.product.url)?.[1] ?? '',
+        })),
+      },
+    ],
+    // Recorded once it is on its way - the replacement rule reads it on the next add.
+    afterSuccess: async () => {
+      const now = await sessions.getOrCreate(ctx.session.id);
+      await sessions.patch(ctx.session.id, { packsAdded: [...(now.packsAdded ?? []).filter((pack) => pack.handle !== handle), { handle, bundleId }] });
+    },
+    charge,
+  };
+}
 
-    /*
-     * A condition pack is only added once checkout has been seen to charge its
-     * pack price. Its price comes from a discount Function keyed on the pack's
-     * trigger, and the theme ships triggers before the Function knows them:
-     * Mixed Conditions and Cool & Wet priced at the sum of their pieces in a
-     * test cart. Adding them would charge the customer something other than
-     * what the Caddie just quoted.
-     */
-    // What they will actually pay: the pack price, or the pieces' own total when that is lower.
-    let charge = deal.prices.GBP ?? 0;
-    if (deal.format === 'plus') {
-      const verdict = await packPriceHolds(deal, pieces.map((piece) => piece.variant.id));
-      if (verdict === 'cheaper') charge = piecesTotal(pieces.map((piece) => piece.variant.id));
-      if (verdict !== 'ok' && verdict !== 'cheaper') {
-        const warm = allDeals().find((d) => d.range === deal.range && d.condition === 'warm' && d.handle !== deal.handle);
-        return {
-          speech:
-            verdict === 'wrong'
-              ? `I can't add the ${deal.title} at its £${deal.prices.GBP} pack price yet - the checkout isn't applying it.${warm ? ` I can add the ${warm.conditionTitle ? titleCaseWords(warm.conditionTitle) : warm.title} pack instead, or you can build it on the pack page.` : ' You can build it on the pack page.'}`
-              : `I can't confirm the ${deal.title} price at checkout right now, so I would rather not add it. You can build it on the pack page.`,
-          facts: `Checkout ${verdict === 'wrong' ? 'did not apply the pack price' : 'could not be checked'} for ${deal.title}. Nothing was added. Never say it was. Pack page: ${deal.url}`,
-        };
-      }
-    }
-
-    /*
-     * The same pack again is a change to it, not a second one. Asked "L/XL for
-     * the belt" after the pack had gone in, the Caddie added the whole
-     * Ambassador Pack a second time. The old one is replaced - found both
-     * from what the widget has reported and from what we have already sent,
-     * since a quick follow-up can arrive before the basket is reported back.
-     */
-    const earlier = new Set<string>([
-      ...(ctx.session.basket ?? []).filter((line) => line.bundleName === deal.handle && line.bundle).map((line) => line.bundle!),
-      ...(ctx.session.packsAdded ?? []).filter((pack) => pack.handle === deal.handle).map((pack) => pack.bundleId),
-    ]);
-    const now = Date.now();
-    const bundleId = newBundleId(now);
-    await sessions.patch(ctx.session.id, {
-      packsAdded: [
-        ...(ctx.session.packsAdded ?? []).filter((pack) => pack.handle !== deal.handle),
-        { handle: deal.handle, bundleId },
-      ],
-    });
-
-    return {
-      speech: earlier.size
-        ? `Updating your ${deal.title} with those choices - still ${pieces.length} pieces for £${charge.toFixed(2)}.`
-        : `Adding the ${deal.title} to your basket for ${pounds(charge)}.`,
-      facts: earlier.size
-        ? 'This replaces the pack already in their basket - there is still only one. The widget makes the change once you answer.'
-        : 'The widget adds the pack to the store cart as one bundle and shows the basket once it has.',
-      actions: [
-        {
-          type: 'add-bundle',
-          bundle,
-          bundleId,
-          ...(earlier.size ? { replaceBundles: [...earlier] } : {}),
-          pieces: pieces.map((piece) => ({
-            variantId: numericId(piece.variant.id),
-            productId: numericId(piece.product.id),
-            price: piece.variant.price.amount,
-            compareAtPrice: null,
-            // The condition packs write the product handle on each line, as the theme does.
-            handle: /\/products\/([^/?#]+)/.exec(piece.product.url)?.[1] ?? '',
-          })),
-        },
-      ],
-    };
-  },
-});
+registerPlanner('add-pack', planAddPack);
 
 const viewCartTool = defineTool({
   name: 'view_cart',
@@ -3913,53 +4071,12 @@ export async function runTool(name: string, rawArgs: unknown, ctx: ToolContext):
   }
 
   /*
-   * An add to the basket needs the customer to have asked for it - see
-   * cartAuthorization.ts. Checked here, so every way in - the model, an
-   * outfit swap, the Add button - goes through it.
+   * Basket changes are authorised and validated by the Action Gateway
+   * (actionGateway.ts), inside the tools that request them - every way in,
+   * the model, an outfit swap, the widget's buttons, goes through it.
    */
-  let data = parsed.data;
-  if (name === 'add_pack_to_cart') {
-    const auth = cartAuthorization(ctx);
-    if (!auth.authorized) {
-      log.warn('cart.unauthorized_add_attempt', { sessionId: ctx.session.id, pack: (data as { pack?: string }).pack ?? ctx.session.lastShown?.bundle ?? null, utterance: (ctx.utterance ?? '').slice(0, 160) });
-      const handle = ctx.session.lastShown?.kind === 'pack' ? ctx.session.lastShown.bundle : ctx.session.packInFocus;
-      const standing = handle ? packStatusFacts(packStatus(ctx.session, handle)) : '';
-      return {
-        speech: "I haven't added the pack to your basket.",
-        facts: `Basket unchanged. The customer did not ask to add the pack - their words were "${(ctx.utterance ?? '').slice(0, 160)}". Do not say it was added, and never say a size was selected that the status below does not confirm.${standing ? `\n${standing}` : ''}`,
-      };
-    }
-  }
-  if (name === 'add_to_cart') {
-    const args = data as { productId: string; options?: Record<string, string>; quantity?: number; replaces?: string };
-    const auth = cartAuthorization(ctx, { ...(args.replaces ? { replaces: args.replaces } : {}) });
-    if (!auth.authorized) {
-      log.warn('cart.unauthorized_add_attempt', {
-        sessionId: ctx.session.id,
-        productId: args.productId,
-        options: args.options ?? null,
-        utterance: (ctx.utterance ?? '').slice(0, 160),
-      });
-      return {
-        speech: "I haven't added anything to your basket.",
-        facts: `Basket unchanged. The customer did not ask to add anything - their words were "${(ctx.utterance ?? '').slice(0, 160)}". Do not say anything was added, and add nothing until they ask.`,
-      };
-    }
-    const quantity = quantityAsked(ctx, args.quantity);
-    if (args.quantity !== undefined && quantity !== args.quantity) log.warn('cart.quantity_not_asked', { sessionId: ctx.session.id, proposed: args.quantity });
-    data = { ...args, ...(args.quantity !== undefined ? { quantity } : {}) } as typeof data;
-  }
-  // What this add is for, read before the tool runs - so a waiting add remembers the product, not whatever the model passed.
-  const bound = name === 'add_to_cart' && !ctx.direct ? actionTarget(ctx) : null;
+  const data = parsed.data;
   const result = await tool.run(data, ctx);
-
-  if ((name === 'add_to_cart' || name === 'add_pack_to_cart') && !ctx.direct) {
-    const added = (result.actions?.length ?? 0) > 0 || result.attachment?.kind === 'cart';
-    const productId = name === 'add_pack_to_cart' ? `pack:${ctx.session.lastShown?.bundle ?? ctx.session.packInFocus ?? ''}` : (data as { productId: string }).productId;
-    const productIds = bound?.kind === 'bound' ? bound.products.map((product) => product.id) : bound?.kind === 'ambiguous' ? bound.designs.flatMap((design) => design.products.map((product) => product.id)) : [productId];
-    // Asked to add, waiting on a size or colour: their answer next turn finishes it - for that product. Added: nothing waits.
-    await sessions.patch(ctx.session.id, added ? { pendingAdd: undefined } : { pendingAdd: { productId: productIds[0] ?? productId, turn: turnNow(ctx), productIds } });
-  }
 
   /*
    * Every basket any tool hands back is remembered, whoever asked for it.

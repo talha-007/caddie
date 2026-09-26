@@ -14,18 +14,8 @@ import type {
   SizeInput,
   SizeRecommendation,
 } from '@caddie/shared';
-import { openEventStream, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, syncBasket } from './api.js';
-import {
-  addBundleToThemeCart,
-  addToThemeCart,
-  announceToTheme,
-  basketSync,
-  changeThemeCartLine,
-  onStorefront,
-  setThemeCartLines,
-  readCart,
-  runActions,
-} from './themeCart.js';
+import { addFromCard, addPackFromCard, changeCartLine, openEventStream, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, syncBasket } from './api.js';
+import { announceToTheme, basketSync, onStorefront, readCart, runActions } from './themeCart.js';
 import { announceCart } from './events.js';
 import { sameId } from './variants.js';
 
@@ -607,65 +597,46 @@ export function useCaddie(page: PageContext): CaddieState {
   );
 
   /**
-   * Adding goes through the same tools the AI uses, so the basket is always the
-   * real Shopify cart - never a local copy that can drift out of sync. Every
-   * item arrives here with a variant the customer chose (RULE 4).
+   * The Add button: through the server's Action Gateway, like every add the
+   * Caddie makes. The click is the customer's say-so; the server checks the
+   * variant the card's pickers make is real and in stock, and hands back the
+   * change to make in the store's cart (on the storefront) or makes it in its
+   * own cart (the dev harness). It used to write straight to the theme's
+   * cart, with nothing checked.
    */
   const addToBasket = useCallback(
     async (items: BasketItem[]): Promise<boolean> => {
       if (items.length === 0 || busyRef.current) return false;
-
-      // The store's own cart, straight from the card: the variant is the one the customer chose.
-      if (onStorefront()) {
-        const lines = items.filter((item) => item.variantId).map((item) => ({ variantId: numericId(item.variantId!), quantity: 1 }));
-        if (lines.length !== items.length) return false;
-        let ok = false;
-        await withBusy(null, async () => {
-          await addToThemeCart(lines);
-          const current = await readCart();
-          announceToTheme();
-          updateCart(current);
-          void syncBasket(sessionId, basketSync()).catch(() => undefined);
-          setMessages((prev) => [...prev, message('assistant', '', { local: { kind: 'added', count: lines.length, cart: current } })]);
-          ok = true;
-        });
-        return ok;
-      }
-
-      let added = 0;
-      let latest: Cart | null = null;
-
+      let ok = false;
       quietCart.current += 1;
       await withBusy(null, async () => {
         try {
-          for (const item of items) {
-            const result = await runTool(sessionId, 'add_to_cart', {
-              productId: item.productId,
-              options: item.options,
-              quantity: 1,
-            });
-            if (result.attachment?.kind !== 'cart') {
-              throw new Error(`${item.title} could not be added. ${result.speech}`);
-            }
-            latest = result.attachment.cart;
-            updateCart(latest);
-            added += 1;
+          const reply = await addFromCard(sessionId, { items: items.map((item) => ({ productId: item.productId, options: item.options, quantity: 1 })) });
+          let current: Cart | null = null;
+          if (reply.actions?.length && onStorefront()) {
+            current = await runActions(reply.actions);
+            void syncBasket(sessionId, basketSync()).catch(() => undefined);
+          } else if (reply.cart) {
+            current = reply.cart;
           }
+          if (current) {
+            updateCart(current);
+            const added = (reply.actions ?? []).reduce((sum, action) => sum + (action.type === 'add' ? action.lines.length : 0), 0) || (reply.ok ? items.length : 0);
+            const cartNow = current;
+            if (added > 0) setMessages((prev) => [...prev, message('assistant', '', { local: { kind: 'added', count: added, cart: cartNow } })]);
+          }
+          if (!reply.ok) setError(reply.message ?? 'That could not be added.');
+          ok = reply.ok;
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'That could not be added.');
         } finally {
-          const cartNow = latest as Cart | null;
-          if (added > 0 && cartNow) {
-            setMessages((prev) => [
-              ...prev,
-              message('assistant', '', { local: { kind: 'added', count: added, cart: cartNow } }),
-            ]);
-          }
           // Let the trailing SSE copies of these cart updates arrive before we listen again.
           setTimeout(() => {
             quietCart.current -= 1;
           }, 1500);
         }
       });
-      return added === items.length;
+      return ok;
     },
     [sessionId, updateCart, withBusy],
   );
@@ -689,62 +660,59 @@ export function useCaddie(page: PageContext): CaddieState {
   );
 
   /**
-   * A whole bundle deal into the store's cart, as the theme's own builder adds
-   * it, so the store charges the pack price. Every piece carries the variant
-   * the customer chose on its card.
+   * A pack's Add button: through the Action Gateway. The server adds the pack
+   * the customer sees, only once every piece is a real variant in stock, at
+   * the price checkout will charge, replacing the same pack if it is already
+   * in the basket - the same checks as "add the pack" in chat.
    */
   const addPack = useCallback(
     async (bundle: BundleDeal, items: BasketItem[]): Promise<boolean> => {
       if (!onStorefront() || busyRef.current) return false;
-      if (items.some((item) => !item.variantId || item.price === undefined)) return false;
       let ok = false;
       await withBusy('pack', async () => {
-        await addBundleToThemeCart(
-          bundle,
-          items.map((item) => ({
-            variantId: numericId(item.variantId!),
-            productId: numericId(item.productId),
-            price: item.price!,
-            compareAtPrice: null,
-          })),
-        );
-        const current = await readCart();
-        announceToTheme();
-        showStoreCart(current);
-        ok = true;
+        try {
+          const reply = await addPackFromCard(sessionId, { handle: bundle.handle, pieces: items.map((item) => ({ productId: item.productId, options: item.options })) });
+          if (reply.actions?.length) showStoreCart(await runActions(reply.actions));
+          if (!reply.ok) setError(reply.message ?? 'The pack could not be added.');
+          ok = reply.ok;
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'The pack could not be added.');
+        }
       });
       return ok;
     },
-    [showStoreCart, withBusy],
+    [sessionId, showStoreCart, withBusy],
   );
 
+  /**
+   * The basket's quantity and remove buttons: through the Action Gateway,
+   * which checks the line against the basket as it is now (a pack comes out
+   * whole) and hands back the change to make.
+   */
   const changeQuantity = useCallback(
     async (lineId: string, quantity: number) => {
       if (quantity < 0) return;
-      if (!onStorefront()) return quietCartCall('update_cart_item', { lineId, quantity });
+      quietCart.current += 1;
       try {
-        /*
-         * A piece of a pack is priced with its pack: removing one alone would
-         * leave the rest at full price. It comes out whole, and a pack piece's
-         * quantity does not go up on its own.
-         */
-        const lines = basketSync().lines;
-        const bundle = lines.find((line) => line.key === lineId)?.bundle;
-        if (bundle) {
-          if (quantity !== 0) return;
-          await setThemeCartLines(Object.fromEntries(lines.filter((entry) => entry.bundle === bundle).map((line) => [line.key, 0])));
-        } else {
-          await changeThemeCartLine(lineId, quantity);
+        // The server checks the line against the basket as it is right now.
+        if (onStorefront()) await syncBasket(sessionId, basketSync());
+        const reply = await changeCartLine(sessionId, { lineId, quantity });
+        if (reply.actions?.length && onStorefront()) {
+          updateCart(await runActions(reply.actions));
+          void syncBasket(sessionId, basketSync()).catch(() => undefined);
+        } else if (reply.cart) {
+          updateCart(reply.cart);
         }
-        const current = await readCart();
-        announceToTheme();
-        updateCart(current);
-        void syncBasket(sessionId, basketSync()).catch(() => undefined);
+        if (!reply.ok && reply.message) setError(reply.message);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not update your basket.');
+      } finally {
+        setTimeout(() => {
+          quietCart.current -= 1;
+        }, 1500);
       }
     },
-    [quietCartCall, sessionId, updateCart],
+    [sessionId, updateCart],
   );
 
   const refreshCart = useCallback(async () => {

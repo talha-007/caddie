@@ -1,5 +1,8 @@
 import { Router, type RequestHandler } from 'express';
-import type { BasketSync, CardChoice, ProfileRequest, SessionRestartResponse } from '@caddie/shared';
+import type { BasketSync, CardChoice, CartAction, ProfileRequest, SessionRestartResponse, UiActionResponse, UiAddRequest, UiCartLineRequest, UiPackAddRequest } from '@caddie/shared';
+import { z } from 'zod';
+import { noteCartMode } from '../lib/request.js';
+import { executeCommerceAction } from '../tools/actionGateway.js';
 import { rememberShopper } from '../shopper/remember.js';
 import { log } from '../lib/logger.js';
 import { LIMITS } from '../lib/rateLimit.js';
@@ -203,5 +206,89 @@ sessionRouter.post('/:id/basket', writeLimit, async (req, res, next) => {
     res.json({ ok: true, lines: lines.length });
   } catch (err) {
     next(err);
+  }
+});
+
+
+/*
+ * The widget's own basket changes - a card's Add button, a pack's Add button,
+ * the basket's quantity and remove buttons - through the Action Gateway, as
+ * every change the Caddie makes is. They used to write straight to the
+ * theme's cart: no server check that the variant was real or in stock, no
+ * pack price check, no pack replacement. The click is the customer's
+ * authority; the gateway checks everything else and hands back the changes
+ * for the widget to make in the store's cart.
+ */
+
+const optionsSchema = z.record(z.string().max(60)).refine((options) => Object.keys(options).length <= 6);
+
+const addSchema = z.object({
+  items: z.array(z.object({ productId: z.string().min(1).max(100), options: optionsSchema, quantity: z.number().int().min(1).max(10).optional() })).min(1).max(10),
+});
+
+sessionRouter.post('/:id/add', writeLimit, async (req, res, next) => {
+  const sessionId = req.params.id;
+  try {
+    const parsed = addSchema.safeParse((req.body ?? {}) as UiAddRequest);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+    await noteCartMode(req, await sessions.getOrCreate(sessionId), (id, change) => sessions.patch(id, change));
+    const actions: CartAction[] = [];
+    let reply: UiActionResponse = { ok: true };
+    for (const item of parsed.data.items) {
+      const outcome = await executeCommerceAction(
+        { session: await sessions.getOrCreate(sessionId), direct: true },
+        { type: 'add-product', productId: item.productId, options: item.options, ...(item.quantity ? { quantity: item.quantity } : {}) },
+      );
+      if (outcome.actions) actions.push(...outcome.actions);
+      if (outcome.cart) reply = { ...reply, cart: outcome.cart };
+      // The first that cannot go in stops the rest - and says why. What went in before it still goes in.
+      if (!outcome.ok) {
+        reply = { ...reply, ok: false, message: outcome.speech };
+        break;
+      }
+    }
+    return res.json({ ...reply, ...(actions.length ? { actions } : {}) });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+const packSchema = z.object({
+  handle: z.string().min(1).max(120),
+  pieces: z.array(z.object({ productId: z.string().min(1).max(100), options: optionsSchema })).min(1).max(12),
+});
+
+sessionRouter.post('/:id/add-pack', writeLimit, async (req, res, next) => {
+  const sessionId = req.params.id;
+  try {
+    const parsed = packSchema.safeParse((req.body ?? {}) as UiPackAddRequest);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+    await noteCartMode(req, await sessions.getOrCreate(sessionId), (id, change) => sessions.patch(id, change));
+    const outcome = await executeCommerceAction({ session: await sessions.getOrCreate(sessionId), direct: true }, { type: 'add-pack', handle: parsed.data.handle, pieces: parsed.data.pieces });
+    const reply: UiActionResponse = { ok: outcome.ok, ...(outcome.actions ? { actions: outcome.actions } : {}), ...(outcome.ok ? {} : { message: outcome.speech }) };
+    return res.json(reply);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+const lineSchema = z.object({ lineId: z.string().min(1).max(200), quantity: z.number().int().min(0).max(10) });
+
+sessionRouter.post('/:id/cart-line', writeLimit, async (req, res, next) => {
+  const sessionId = req.params.id;
+  try {
+    const parsed = lineSchema.safeParse((req.body ?? {}) as UiCartLineRequest);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+    await noteCartMode(req, await sessions.getOrCreate(sessionId), (id, change) => sessions.patch(id, change));
+    const outcome = await executeCommerceAction({ session: await sessions.getOrCreate(sessionId), direct: true }, { type: 'update-line', lineId: parsed.data.lineId, quantity: parsed.data.quantity });
+    const reply: UiActionResponse = {
+      ok: outcome.ok,
+      ...(outcome.actions ? { actions: outcome.actions } : {}),
+      ...(outcome.cart ? { cart: outcome.cart } : {}),
+      ...(outcome.ok ? {} : { message: outcome.speech }),
+    };
+    return res.json(reply);
+  } catch (err) {
+    return next(err);
   }
 });

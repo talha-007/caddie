@@ -135,7 +135,12 @@ describe('"add it" after tapping M', () => {
     // Then they move on to the Warrior jacket, by name.
     const session = await sessions.getOrCreate(id);
     await sessions.patch(id, {
-      messages: [...session.messages, { id: 'm1', role: 'user', text: 'Tell me about the Warrior jacket', createdAt: new Date(Date.now() + 1000).toISOString() }],
+      messages: [
+        ...session.messages,
+        { id: 'm1', role: 'user', text: 'Tell me about the Warrior jacket', createdAt: new Date(Date.now() + 1000).toISOString() },
+        // The Caddie's answer names it: that is what "add it" means next.
+        { id: 'a1', role: 'assistant', text: 'The Warrior Jacket in black is fully waterproof.', createdAt: new Date(Date.now() + 1500).toISOString() },
+      ],
       focusProductId: WARRIOR.id,
     });
     const asked = await add(id, { productId: WARRIOR.id }, 'Add it.');
@@ -159,6 +164,7 @@ describe('"add it" after tapping M', () => {
 describe('what the card merely shows is not a choice', () => {
   it('with no tap, "add it" asks for the size', async () => {
     const id = await shopper();
+    await sessions.patch(id, { lastShown: { kind: 'products', items: [{ id: TEX.id, title: TEX.title }] } });
     const { result, variantIds } = await add(id, { productId: TEX.id }, 'Add it.');
     expect(variantIds).toEqual([]);
     expect(result.speech).toMatch(/which size/i);
@@ -182,6 +188,7 @@ describe('focus', () => {
 describe('the typed flow is unchanged', () => {
   it('a size they said, with no card touched', async () => {
     const id = await shopper();
+    await sessions.patch(id, { lastShown: { kind: 'products', items: [{ id: TEX.id, title: TEX.title }] } });
     const session = await sessions.getOrCreate(id);
     await sessions.patch(id, { messages: [...session.messages, { id: 'm1', role: 'user', text: 'XL', createdAt: new Date().toISOString() }] });
     const { variantIds } = await add(id, { productId: TEX.id, options: { Size: 'XL' } }, 'Add it.');

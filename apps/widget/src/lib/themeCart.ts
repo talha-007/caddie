@@ -225,4 +225,4 @@ export async function runActions(actions: CartAction[]): Promise<Cart> {
   return cart;
 }
 
-export { addLines as addToThemeCart, addBundle as addBundleToThemeCart, changeLine as changeThemeCartLine, setLines as setThemeCartLines };
+// Nothing else is exported that changes the cart: every change is one the server's Action Gateway handed back (runActions).

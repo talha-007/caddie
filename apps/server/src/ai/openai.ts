@@ -394,6 +394,8 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
   const keepEvidence = () =>
     sessions.patch(sessionId, { recentEvidence: [...toolEvidence, session.recentEvidence ?? ''].join('\n').slice(0, 8000) });
   let lastToolSpeech = '';
+  // What the Action Gateway said about each basket action this turn - whether it happened is its word, not the model's.
+  const outcomes: Array<{ ok: boolean; action: string; reason?: string; speech: string }> = [];
   // A sentence a tool said the reply must open with - see ToolResult.lead.
   let lead: { text: string; unless: RegExp } | undefined;
   let rewrote = false;
@@ -530,6 +532,28 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
           'The catalogue check covered every product: Druids does not sell it. Say "we don\'t stock the [name]" plainly, then offer the closest options. Do not ask them to check or confirm the name.',
       });
       continue;
+    }
+    /*
+     * "I've added it" after the gateway refused the add. The tool said nothing
+     * changed and why; a reply that says otherwise is sent back once, and if
+     * it still claims the change, the gateway's own words are what is said.
+     */
+    const refused = outcomes.filter((outcome) => !outcome.ok);
+    const claimsDone =
+      /\b(i'?ve|i have|i'?m|i am|it'?s|they'?re|is|are|has been|have been)\s+(now\s+)?(added|adding|put|putting|placed|placing|removed|removing|taken|taking|updated|updating|changed|changing|swapped|swapping)\b|\b(going|gone|goes)\s+(in|into)\s+(your|the)\s+(basket|cart|bag)\b|\bin your (basket|cart|bag)( now)?\b/i;
+    if (calls.length === 0 && refused.length && !outcomes.some((outcome) => outcome.ok) && claimsDone.test(finalText)) {
+      if (!rewrote) {
+        rewrote = true;
+        log.warn('reply.claimed_refused_action', { sessionId, reasons: refused.map((outcome) => outcome.reason) });
+        messages.push({ role: 'assistant', content: finalText });
+        messages.push({
+          role: 'system',
+          content: `Nothing changed in the basket - the ${refused.map((outcome) => outcome.action).join(' and ')} was not made (${refused.map((outcome) => outcome.reason ?? 'refused').join(', ')}). Never say it was added, changed or removed. Say what the tool said and ask only what it asked: "${refused[refused.length - 1]!.speech}"`,
+        });
+        continue;
+      }
+      log.warn('reply.claimed_refused_action_after_rewrite', { sessionId });
+      finalText = refused[refused.length - 1]!.speech;
     }
     if (calls.length === 0 && finalText) {
       const violations = verifyReply(finalText, evidence.join('\n'), attachment, userText);
@@ -718,6 +742,7 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
        */
       const { result } = entry;
       if (result.actions) actions.push(...result.actions);
+      if (result.outcome) outcomes.push({ ...result.outcome, speech: result.speech });
       if (result.attachment) {
         const weight = cardWeight(result.attachment, writesToCart(entry.call.function.name));
         /*

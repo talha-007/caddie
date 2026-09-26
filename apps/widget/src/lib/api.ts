@@ -1,4 +1,19 @@
-import type { BasketSync, CaddieAttachment, CaddieMessage, CardChoice, CartAction, ChatRequest, PageContext, ProfileRequest, SessionRestartResponse, ShopperSizes } from '@caddie/shared';
+import type {
+  BasketSync,
+  CaddieAttachment,
+  CaddieMessage,
+  CardChoice,
+  CartAction,
+  ChatRequest,
+  PageContext,
+  ProfileRequest,
+  SessionRestartResponse,
+  ShopperSizes,
+  UiActionResponse,
+  UiAddRequest,
+  UiCartLineRequest,
+  UiPackAddRequest,
+} from '@caddie/shared';
 import { onStorefront } from './themeCart.js';
 
 const BASE = (import.meta.env.VITE_CADDIE_API_URL ?? 'http://localhost:8787').replace(/\/$/, '');
@@ -66,6 +81,25 @@ export interface ToolResponse {
   speech: string;
   attachment?: CaddieAttachment;
   actions?: CartAction[];
+}
+
+/**
+ * The basket buttons, through the server's Action Gateway: a card's Add, a
+ * pack's Add, and the basket's quantity and remove buttons. The server
+ * checks the variant, its stock and a pack's price, and hands back the
+ * changes for the widget to make in the store's cart - the only way the
+ * widget changes it.
+ */
+export function addFromCard(sessionId: string, request: UiAddRequest) {
+  return post<UiActionResponse>(`/api/session/${encodeURIComponent(sessionId)}/add`, request);
+}
+
+export function addPackFromCard(sessionId: string, request: UiPackAddRequest) {
+  return post<UiActionResponse>(`/api/session/${encodeURIComponent(sessionId)}/add-pack`, request);
+}
+
+export function changeCartLine(sessionId: string, request: UiCartLineRequest) {
+  return post<UiActionResponse>(`/api/session/${encodeURIComponent(sessionId)}/cart-line`, request);
 }
 
 export function runTool(sessionId: string, name: string, args: Record<string, unknown>) {

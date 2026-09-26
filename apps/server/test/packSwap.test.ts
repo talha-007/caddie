@@ -293,7 +293,8 @@ describe('sizes in the basket', () => {
     const session = await sessions.getOrCreate(id);
     // Sizes said, and the add asked for (Task 28: sizes alone are not an add).
     const result = await runTool('add_pack_to_cart', { size: 'L', options: { waist: '34', leg: '32' } }, { session, utterance: "I'm a large, 34 waist, 32 leg - add the pack please" });
-    expect(result.facts ?? '').not.toMatch(/Nothing was added|Basket unchanged/);
+    // Not refused as unasked or incomplete. (This harness keeps the basket itself, where a pack is added from its page.)
+    expect(result.facts ?? '').not.toMatch(/\((not-ready|not-authorized)\)|Basket unchanged/);
   });
 
   it('"I\'m" is not a size M', async () => {
