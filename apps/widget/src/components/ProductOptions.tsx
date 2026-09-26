@@ -46,6 +46,12 @@ export function useProductChoice(product: Product): ProductChoice {
   };
 
   const [selection, setSelection] = useState<Selection>(() => (full ? initialSelection(full, hints) : {}));
+  /*
+   * What the customer has picked on this card themselves. The card opens on
+   * a sensible size - ours, not theirs - so only a tap or a change counts,
+   * and only these are sent to the Caddie.
+   */
+  const [picked, setPicked] = useState<Selection>({});
   const [loading, setLoading] = useState(false);
 
   // Variants arrived after the first render - start from the same sensible defaults.
@@ -69,9 +75,17 @@ export function useProductChoice(product: Product): ProductChoice {
     }
   }, [product, shop]);
 
-  const choose = useCallback((name: string, value: string) => {
-    setSelection((prev) => ({ ...prev, [name]: value }));
-  }, []);
+  const { chooseOnCard } = shop;
+  const choose = useCallback(
+    (name: string, value: string) => {
+      setSelection((prev) => ({ ...prev, [name]: value }));
+      const next = { ...picked, [name]: value };
+      setPicked(next);
+      const variant = full ? matchVariant(full, { ...selection, [name]: value }) : null;
+      chooseOnCard({ productId: product.id, options: next, ...(variant ? { variantId: variant.id } : {}) });
+    },
+    [chooseOnCard, full, picked, product.id, selection],
+  );
 
   /*
    * The server sends every option but only the variant matching what has been

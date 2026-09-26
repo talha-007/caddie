@@ -1,6 +1,7 @@
 import type { CaddieMessage, PageContext, SizeInput } from '@caddie/shared';
 import { redisEnabled, redisUsable } from '../lib/redis.js';
 import type { ShopperProfile } from '../shopper/profile.js';
+import type { ShoppingFocus } from './focus.js';
 import { RedisSessionStore } from './redisStore.js';
 
 /**
@@ -73,6 +74,41 @@ export interface CaddieSession {
    * another.
    */
   recentShown?: string[];
+  /**
+   * What the last search was for, as resolved from the customer (see
+   * tools/searchIntent.ts): a follow-up - "another one", "cheaper" - carries
+   * its kind, range and colour; a new request does not.
+   */
+  lastSearch?: { categories: string[]; range?: 'men' | 'women' | 'kids'; colour?: string };
+  /**
+   * Options the customer picked on a product card themselves, by product id
+   * (see CardChoice). Theirs for that product only - never their usual size.
+   */
+  cardChoices?: Record<string, { options: Record<string, string>; variantId?: string; at: number }>;
+  /**
+   * The card the customer last touched - the product "add it" means. Kept
+   * apart from focusProductId, which the model moves whenever it looks a
+   * product up; only a new screen of results or another tap moves this.
+   */
+  cardFocus?: string;
+  /**
+   * An add the customer asked for that is waiting on a choice ("add it" -
+   * "what size?"): their size answer finishes it without another "add it".
+   * `turn` is how many of their messages there were when they asked.
+   */
+  pendingAdd?: { productId: string; turn: number };
+  /**
+   * What the customer has chosen for each pack, by handle (see
+   * tools/packState.ts): confirmed values only, and what they asked for that
+   * the pack does not come in. Never a card's default or a model's guess.
+   */
+  packChoices?: Record<string, { top?: string; waist?: string; leg?: string; requested?: { top?: string; waist?: string; leg?: string } }>;
+  /**
+   * What the customer is shopping for now - the kind, range, product and
+   * colours they last asked for, read from their own words (session/focus.ts).
+   * Short follow-ups inherit it; what is on screen never moves it.
+   */
+  activeShoppingContext?: ShoppingFocus;
   /** The product the last search led with, and its colour, so the next lead can vary. */
   lastLead?: { id: string; colour: string };
   /** The product last talked about, so "how much is it in 2XL?" follows "what colours does the first one come in?". */
@@ -95,7 +131,7 @@ export interface CaddieSession {
    * "change the polo in the mixed pack" changes that pack even when Warm
    * Rounds is the one on screen.
    */
-  packsShown?: Record<string, { items: Array<{ id: string; title: string }>; colour?: string }>;
+  packsShown?: Record<string, { items: Array<{ id: string; title: string }>; colour?: string; total?: number }>;
   /**
    * The storefront page the customer is on, from the last message that told
    * us. Held on the session because voice carries no context of its own - a
@@ -221,6 +257,10 @@ export class MemorySessionStore implements SessionStore {
     Object.assign(session, defined(patch), { sizeProfile, preferences });
     // A new screen: "it" no longer means the product talked about on the last one.
     if (patch.lastShown && patch.focusProductId === undefined) delete session.focusProductId;
+    // Nor the card they touched on it.
+    if (patch.lastShown && patch.cardFocus === undefined) delete session.cardFocus;
+    // A finished (or abandoned) add clears what it was waiting on.
+    if ('pendingAdd' in patch && patch.pendingAdd === undefined) delete session.pendingAdd;
     await this.save(session);
     return session;
   }
@@ -276,6 +316,10 @@ class ResilientSessionStore implements SessionStore {
     Object.assign(session, defined(patch), { sizeProfile, preferences });
     // A new screen: "it" no longer means the product talked about on the last one.
     if (patch.lastShown && patch.focusProductId === undefined) delete session.focusProductId;
+    // Nor the card they touched on it.
+    if (patch.lastShown && patch.cardFocus === undefined) delete session.cardFocus;
+    // A finished (or abandoned) add clears what it was waiting on.
+    if ('pendingAdd' in patch && patch.pendingAdd === undefined) delete session.pendingAdd;
     await this.save(session);
     return session;
   }
@@ -289,3 +333,19 @@ class ResilientSessionStore implements SessionStore {
 
 /** Resilient when Redis is configured; memory alone when it is not. */
 export const sessions: SessionStore = redisEnabled() ? new ResilientSessionStore() : new MemorySessionStore();
+
+/**
+ * The card the customer touched, while it is still what they are talking
+ * about: tapped since they last spoke, or every question since has been about
+ * that same product ("is it waterproof?" - then "add it"). Once the talk moves
+ * to another product ("tell me about the Warrior jacket"), "it" is that one
+ * and the tap no longer speaks for them.
+ */
+export function tappedSinceLastSaid(session: CaddieSession): string | undefined {
+  const id = session.cardFocus;
+  const choice = id ? session.cardChoices?.[id] : undefined;
+  if (!id || !choice) return undefined;
+  const said = session.messages.filter((message) => message.role === 'user').map((message) => Date.parse(message.createdAt) || 0);
+  if (choice.at > Math.max(0, ...said)) return id;
+  return session.focusProductId === id ? id : undefined;
+}

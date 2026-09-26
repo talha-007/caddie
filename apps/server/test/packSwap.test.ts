@@ -283,21 +283,24 @@ describe('sizes in the basket', () => {
     await pack({ colour: 'navy' }, 'show me the ambassador pack in navy');
     const session = await sessions.getOrCreate(id);
     const result = await runTool('add_pack_to_cart', { size: 'L', options: { waist: '34', leg: '32' } }, { session, utterance: 'okay, select the white trousers' });
-    expect(result.facts).toMatch(/Nothing was added/);
+    // Since Task 28 this is refused even earlier: choosing trousers is not asking to add the pack.
+    expect(result.facts).toMatch(/Nothing was added|Basket unchanged/);
     expect(result.actions ?? []).toEqual([]);
   });
 
   it('takes sizes they said, in words', async () => {
     await pack({ colour: 'navy' }, 'show me the ambassador pack in navy');
     const session = await sessions.getOrCreate(id);
-    const result = await runTool('add_pack_to_cart', { size: 'L', options: { waist: '34', leg: '32' } }, { session, utterance: "I'm a large, 34 waist, 32 leg" });
-    expect(result.facts ?? '').not.toMatch(/Nothing was added/);
+    // Sizes said, and the add asked for (Task 28: sizes alone are not an add).
+    const result = await runTool('add_pack_to_cart', { size: 'L', options: { waist: '34', leg: '32' } }, { session, utterance: "I'm a large, 34 waist, 32 leg - add the pack please" });
+    expect(result.facts ?? '').not.toMatch(/Nothing was added|Basket unchanged/);
   });
 
   it('"I\'m" is not a size M', async () => {
     const session = await sessions.getOrCreate(id);
     const result = await runTool('add_to_cart', { productId: POLO_NAVY.id, options: { Size: 'M' } }, { session, utterance: "I'm happy with that one" });
-    expect(result.facts).toMatch(/Nothing was added/);
+    // Nothing added either way - since Task 27 because they never asked to add it, before the size is even looked at.
+    expect(result.facts).toMatch(/Nothing was added|Basket unchanged/);
   });
 });
 

@@ -19,7 +19,7 @@ import { allProducts, catalogueVersion } from '../catalog/sync.js';
 
 export interface Violation {
   /** `wording`: ranking talk or overclaiming, reworded. `offer`: offering to show what is already on screen, dropped. */
-  kind: 'price' | 'product' | 'count' | 'colour' | 'attribute' | 'wording' | 'offer';
+  kind: 'price' | 'product' | 'count' | 'colour' | 'attribute' | 'wording' | 'offer' | 'comparison' | 'length' | 'status' | 'pricing';
   claim: string;
 }
 
@@ -61,7 +61,7 @@ function cardProducts(attachment?: CaddieAttachment): Product[] {
   return [];
 }
 
-export function verifyReply(reply: string, evidence: string, attachment?: CaddieAttachment): Violation[] {
+export function verifyReply(reply: string, evidence: string, attachment?: CaddieAttachment, customerSaid?: string): Violation[] {
   const violations: Violation[] = [];
   const known = amounts(evidence);
   const close = (a: number, b: number) => Math.abs(a - b) < 0.011;
@@ -88,6 +88,9 @@ export function verifyReply(reply: string, evidence: string, attachment?: Caddie
   const products = cardProducts(attachment);
   if (products.length) {
     for (const match of reply.matchAll(COUNT)) {
+      // "Leg 34 for the trousers" is a size, not thirty-four pairs of trousers.
+      const between = match[0].slice(match[1]!.length, -match[2]!.length);
+      if (/\b(for|the|in|of|with|on)\b/i.test(between) || /\b(leg|waist|size|length|inseam)\s*$/i.test(reply.slice(0, match.index))) continue;
       const n = NUMBER_WORDS[match[1]!.toLowerCase()] ?? Number(match[1]);
       const kind = KIND_OF[match[2]!.toLowerCase()];
       const onCard = kind ? products.filter((product) => kind.test(product.title)).length : products.length;
@@ -98,7 +101,107 @@ export function verifyReply(reply: string, evidence: string, attachment?: Caddie
   // What each product is said to be - features, fit - held to its own data, never to what was asked.
   violations.push(...unsupportedAttributes(reply, productsInEvidence(products, evidence), products[0]));
   violations.push(...salesWording(reply, products));
+  violations.push(...priceComparisons(reply, evidence));
+  violations.push(...packReadiness(reply, evidence));
+  violations.push(...packPricing(reply, evidence));
+  if (customerSaid !== undefined) violations.push(...replyShape(reply, customerSaid, products));
   return violations;
+}
+
+/* ---------------- Short, for chat and for voice ---------------- */
+
+/*
+ * A demo reply read out the six pieces of a pack, their colours and prices,
+ * and asked for the top size and the leg in one breath - all of it already on
+ * the card. Spoken, that is thirty seconds of listening. The default is two
+ * short sentences and one question; more only when the customer asks for it.
+ */
+const DETAIL_ASKED = /\b(tell me more|more about|more detail|what'?s (included|in it|in the)|what is (included|in)|what does it (include|come with)|compare|explain|details?|describe|everything about|list)\b/i;
+const MAX_SENTENCES = 2;
+const MAX_WORDS = 45;
+
+export function replyShape(reply: string, said: string, cards: Product[] = []): Violation[] {
+  if (DETAIL_ASKED.test(said)) return [];
+  const found: Violation[] = [];
+  const sentences = reply.split(/(?<=[.!?])\s+/).filter((sentence) => /[a-z]/i.test(sentence));
+  const words = reply.split(/\s+/).filter(Boolean).length;
+  if (sentences.length > MAX_SENTENCES || words > MAX_WORDS) found.push({ kind: 'length', claim: `${sentences.length} sentences, ${words} words` });
+  if ((reply.match(/\?/g) ?? []).length > 1) found.push({ kind: 'length', claim: 'more than one question' });
+  // Three or more of the cards named: reading the screen aloud.
+  const text = normalise(reply);
+  const named = new Set(cards.map((product) => designKey(product)).filter((key) => key.trim().length > 2 && text.includes(key)));
+  if (named.size >= 3) found.push({ kind: 'length', claim: 'lists the cards' });
+  return found;
+}
+
+/* ---------------- What a pack costs ---------------- */
+
+/*
+ * The Caddie said the Cool & Wet pack was £159.99, then the card showed £156:
+ * these pieces cost less on their own, and checkout charges that. The listed
+ * price is only ever said as listed, and a saving only when there is one.
+ */
+const SAVING_WORDS = /\b(?:you(?:'d| would)? save|saves? you|saving|savings|saved|discount(?:ed)?|(?:good|great|special|better) deal|deal price|bargain)\b/i;
+
+export function packPricing(reply: string, evidence: string): Violation[] {
+  const lines = [...evidence.matchAll(/Pack price: pays £([\d.]+); listed £([\d.]+); saving (£[\d.]+|none)\./g)];
+  const last = lines[lines.length - 1];
+  if (!last) return [];
+  const pays = Number(last[1]);
+  const listed = Number(last[2]);
+  const found: Violation[] = [];
+  if (Math.abs(listed - pays) > 0.005) {
+    for (const match of reply.matchAll(/£\s?(\d+(?:\.\d{1,2})?)/g)) {
+      if (Math.abs(Number(match[1]) - listed) > 0.005) continue;
+      // Said as listed, next to what they pay, is the one allowed explanation.
+      if (!/\blisted\b/i.test(reply) || !reply.includes(`£${pays}`)) found.push({ kind: 'pricing', claim: match[0] });
+    }
+  }
+  const saving = last[3] === 'none' ? SAVING_WORDS.exec(reply) : null;
+  if (saving) found.push({ kind: 'pricing', claim: saving[0] });
+  return found;
+}
+
+/* ---------------- "The pack is ready" ---------------- */
+
+/** Ready, complete, all set - said only when the pack's state says so (tools/packState.ts). */
+const READY_CLAIM = /\b(pack|it|everything)\s*(?:'s|is)\s+(?:now\s+)?(ready|complete|all set|good to go)\b|\byour pack is (ready|complete|set)\b/i;
+
+export function packReadiness(reply: string, evidence: string): Violation[] {
+  if (!/Pack status: NOT READY/.test(evidence) || /Pack status: READY/.test(evidence.split('Pack status: NOT READY').pop() ?? '')) return [];
+  const claim = READY_CLAIM.exec(reply);
+  return claim ? [{ kind: 'status', claim: claim[0] }] : [];
+}
+
+/* ---------------- Cheapest and cheaper ---------------- */
+
+/*
+ * "The Thunder Rain Jacket at £80 is the cheapest waterproof jacket we have"
+ * - with a £16 one in the catalogue - and "the Blake Gilet at £36 is a more
+ * affordable option" beside a £36 gilet. Which is cheapest, and what is
+ * cheaper, is computed by the search and stated in the facts ("Price
+ * ordering", "Price comparison"). Without that line, the claim is the
+ * model's guess.
+ */
+const SUPERLATIVE = /\b(cheapest|lowest[- ]?priced?|lowest[- ]cost|least expensive|most affordable|best price)\b/i;
+const COMPARATIVE = /\b(cheaper|less expensive|more affordable|lower[- ]?priced|less pricey|better value)\b/i;
+/** About what they asked for, not a claim: "you wanted something cheaper". */
+const ABOUT_THEM = /\b(you|you'?re|you'?ve)\s+(asked|want|wanted|are looking|were looking|looking|after|said|need)\b/i;
+/** "Nothing cheaper fits", "I couldn't find anything cheaper": the honest answer, not a claim. */
+const NONE_OF_IT = /\b(no|nothing|not|none|couldn'?t|can'?t|cannot|isn'?t|aren'?t|unable)\b/i;
+
+export function priceComparisons(reply: string, evidence: string): Violation[] {
+  const ordered = evidence.includes('Price ordering:');
+  const compared = ordered || evidence.includes('Price comparison:');
+  const found: Violation[] = [];
+  for (const sentence of reply.split(/(?<=[.!?])\s+/)) {
+    if (ABOUT_THEM.test(sentence) || NONE_OF_IT.test(sentence)) continue;
+    const superlative = SUPERLATIVE.exec(sentence);
+    if (superlative && !ordered) found.push({ kind: 'comparison', claim: superlative[0] });
+    const comparative = COMPARATIVE.exec(sentence);
+    if (comparative && !compared) found.push({ kind: 'comparison', claim: comparative[0] });
+  }
+  return found;
 }
 
 /* ---------------- How it is said ---------------- */
@@ -223,6 +326,23 @@ export function shapesSaid(text: string): string[] {
 
 /** Features whose wording is judged as a shape instead, so a hoodie's title counts. */
 const SHAPE_FEATURES = new Set<string>(['hooded', 'quarter-zip', 'full-zip']);
+
+/** The shapes a product's own data supports - the rule replies are checked against. */
+export function shapesOf(product: Product): string[] {
+  return SHAPES.filter((shape) => shape.shown(shapeText(product))).map((shape) => shape.label);
+}
+
+/** "Insulated", "thermal", "padded"... - the words that say more than warm, as a question or reply uses them. */
+export function strongerSaid(text: string): string[] {
+  const said = normalise(text);
+  return STRONGER.filter(([, pattern]) => pattern.test(said)).map(([word]) => word);
+}
+
+/** Which of those a product's own text states. */
+export function strongerOf(product: Product): string[] {
+  const own = `${product.title} ${product.productType ?? ''} ${product.description ?? ''}`.toLowerCase();
+  return STRONGER.filter(([, pattern]) => pattern.test(own)).map(([word]) => word);
+}
 
 function shapeText(product: Product): { all: string; named: string } {
   const named = normalise(`${product.title} ${product.productType ?? ''}`);
@@ -365,7 +485,10 @@ export function withoutClaims(reply: string, violations: Violation[]): string {
     );
   const bad = (sentence: string) =>
     violations.some((violation) =>
-      violation.kind === 'wording'
+      // Too long is rewritten once, never cut: a factual answer is not truncated mid-thought.
+      violation.kind === 'length'
+        ? false
+        : violation.kind === 'wording'
         ? false
         : violation.kind === 'attribute' ? attributesSaid(sentence).has(violation.claim.toLowerCase()) : sentence.toLowerCase().includes(violation.claim.toLowerCase()),
     );

@@ -268,9 +268,12 @@ describe('a description is never taken for a product name', () => {
 });
 
 describe('search_products with a product name and no query', () => {
+  // What the customer said: the name, and any colour or size, unless the test says otherwise (Task 22: a model's arguments alone are not rules).
   async function byName(args: Record<string, unknown>, utterance = '') {
     const session = await sessions.getOrCreate(`name-only-${Math.random()}`);
-    const result = await runTool('search_products', args, { session, utterance });
+    const asked = [args.productName ?? args.query, args.colour ? `in ${args.colour}` : '', args.size ? `in ${args.size}` : ''].filter(Boolean).join(' ');
+    const said = utterance || (asked ? `Do you have the ${asked}?` : '');
+    const result = await runTool('search_products', args, { session, utterance: said });
     const shown = result.attachment?.kind === 'products' ? result.attachment.products.map((p) => p.title) : [];
     return { result, shown, diagnostics: lastHybridDiagnostics() };
   }

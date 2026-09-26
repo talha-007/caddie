@@ -30,7 +30,8 @@ toolsRouter.post('/:name', async (req, res, next) => {
     const session = await noteCartMode(req, await sessions.getOrCreate(sessionId), (id, change) => sessions.patch(id, change));
     const args = req.body?.args ?? req.body ?? {};
 
-    const result = await runTool(req.params.name, args, { session });
+    // No model in between: these arguments are the caller's own choice.
+    const result = await runTool(req.params.name, args, { session, direct: true });
     if (result.attachment) {
       publish({ type: 'attachment', sessionId, attachment: result.attachment });
     }

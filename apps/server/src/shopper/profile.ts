@@ -134,6 +134,8 @@ const FIT_REGULAR = /\b(regular|normal|standard|true to size) (fit|cut)\b/i;
 const LAYERING = /\b(layer(ing)? (it |something |a \w+ )?(under|underneath)|wear (it |a \w+ |something )?(under|over|underneath)|over (a|my) (hoodie|jumper|midlayer|polo|sweater|layer)|room (to|for) (layer|a layer)|with (a )?layers? underneath)\b/i;
 
 const USUAL_SIZE = /\b(?:i'?m|i am|usually|normally|i wear|i take|typically|always)\s+(?:a\s+|an\s+|size\s+|in\s+(?:a\s+)?)*(xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|small|medium|large|x-?large|extra large|extra small)\b(?!\s*(?:chest|waist|cm|in\b|inch))/i;
+/** "My normal polo size is L", "my usual size's XL", "I generally wear a medium". */
+const USUAL_NAMED = /\b(?:my\s+)?(?:usual|normal|regular|typical|standard)\s+(?:\w+\s+)?size(?:\s+is|'s|\s*=|\s*:)?\s+(?:a\s+|an\s+)?(xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|small|medium|large|x-?large|extra large|extra small)\b|\b(?:generally|mostly|normally|usually|typically)\s+wear\s+(?:a\s+|an\s+|size\s+)?(xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|small|medium|large|x-?large|extra large|extra small)\b/i;
 const USUAL_UK = /\b(?:i'?m|i am|usually|normally|i wear|i take|typically)\s+(?:a\s+)?(?:size\s+|uk\s+)(\d{1,2})\b(?!\s*(?:cm|in\b|inch|"|waist|chest))/i;
 
 const WEATHER_WORDS: Array<[Weather, RegExp]> = [
@@ -175,19 +177,28 @@ export function readIntent(text: string): Intent {
     out.coloursStanding = PREFER.test(rest) || REQUIRE.test(rest);
   }
 
-  if (FIT_RELAXED.test(lower)) out.fit = 'relaxed';
-  else if (FIT_TIGHT.test(lower)) out.fit = 'tight';
-  else if (FIT_REGULAR.test(lower)) out.fit = 'regular';
+  // "Relaxed-fit" is "relaxed fit": the patterns read words, and a hyphen joined them into one.
+  const fitText = lower.replace(/\b(relaxed|loose|roomy|slim|tight|fitted|athletic|tailored|regular|normal|standard|classic)-(fit|cut)\b/g, '$1 $2');
+  if (FIT_RELAXED.test(fitText)) out.fit = 'relaxed';
+  else if (FIT_TIGHT.test(fitText)) out.fit = 'tight';
+  else if (FIT_REGULAR.test(fitText)) out.fit = 'regular';
   if (LAYERING.test(lower)) out.layering = true;
 
-  const usual = USUAL_SIZE.exec(lower)?.[1] ?? USUAL_UK.exec(lower)?.[1];
+  const named = USUAL_NAMED.exec(lower);
+  const usual = USUAL_SIZE.exec(lower)?.[1] ?? (named ? (named[1] ?? named[2]) : undefined) ?? USUAL_UK.exec(lower)?.[1];
   const size = usual ? normaliseSize(usual.replace(/^x-?large$/, 'xl')) : null;
   if (size) out.usualSize = size;
 
   // "a 34 waist", "waist size 34", "34 inch waist" - trouser sizes run 26 to 46.
   const waist = /\b(\d{2})\s?(?:"|in|inch|inches)?\s?waist\b|\bwaist\s?(?:size\s?)?(?:is\s|of\s)?(\d{2})\b(?!\s?cm)/.exec(lower);
   const waistSize = Number(waist?.[1] ?? waist?.[2]);
-  if (waistSize >= 26 && waistSize <= 46) out.waist = String(waistSize);
+  /*
+   * Not a waist they are buying: "add the 34 waist" is one pair, and
+   * remembered as their waist it would size every later pair of trousers.
+   * "I have a 34 waist", "waist size 36" are about them.
+   */
+  const buying = /\b(add|buy|order|put|pop|basket|cart|get me|i'?ll take|the\s+\d{2}\s?(?:"|in|inch|inches)?\s?waist)\b/.test(lower);
+  if (waistSize >= 26 && waistSize <= 46 && !buying) out.waist = String(waistSize);
 
   const asked = featuresAsked(lower);
   if (asked.length) {

@@ -145,7 +145,7 @@ export function initialSelection(
     }
     // Their size, already chosen - they can still tap another.
     if (option.kind === 'size' && !pageVariant) {
-      const match = matchSize(option.values, [hints.size, hints.waist]);
+      const match = matchSize(option.values, sizeHintsFor(option.name, hints));
       if (match) selection[option.name] = match;
     }
   }
@@ -153,11 +153,23 @@ export function initialSelection(
   // The page variant's size is what they were looking at, but their own size wins.
   if (pageVariant && (hints.size || hints.waist)) {
     const sizeOption = options.find((option) => option.kind === 'size');
-    const match = sizeOption ? matchSize(sizeOption.values, [hints.size, hints.waist]) : undefined;
+    const match = sizeOption ? matchSize(sizeOption.values, sizeHintsFor(sizeOption.name, hints)) : undefined;
     if (sizeOption && match) selection[sizeOption.name] = match;
   }
 
   return selection;
+}
+
+/*
+ * Which of their sizes can start an option. A leg length is never one: we
+ * have no leg size for them, and their 34 waist was being put into the leg
+ * picker too - the trousers read "34 / 34" before any leg had been chosen.
+ * A waist goes only to a waist; a top size to anything else.
+ */
+function sizeHintsFor(name: string, hints: { size?: string | null; waist?: string | null }): Array<string | null | undefined> {
+  if (/leg|length|inseam/i.test(name)) return [];
+  if (/waist/i.test(name)) return [hints.waist];
+  return [hints.size, hints.waist];
 }
 
 function escapeRegExp(value: string): string {

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect } from 'react';
-import type { BundleDeal, Cart, Journey, PageContext, Product, ProductVariant, ShopperSizes, SizeRecommendation } from '@caddie/shared';
+import type { BundleDeal, Cart, CardChoice, Journey, PageContext, Product, ProductVariant, ShopperSizes, SizeRecommendation } from '@caddie/shared';
 import type { BasketItem } from '../lib/useCaddie.js';
 import { sameId } from '../lib/variants.js';
 
@@ -12,6 +12,8 @@ export interface Shop {
   details: Record<string, Product>;
   loadProduct: (product: Product) => Promise<Product | null>;
   resolveVariant: (productId: string, selection: Record<string, string>) => Promise<ProductVariant | null>;
+  /** Tells the Caddie what the customer picked on a card themselves, so "add it" knows. */
+  chooseOnCard: (choice: CardChoice) => void;
   size: SizeRecommendation | null;
   /** Their sizes from the quick start or the chat - the picker's starting point. */
   sizes: ShopperSizes | null;

@@ -2,6 +2,8 @@ import type { Product, ProductVariant } from '@caddie/shared';
 import { colourwayName, otherColourways } from '../catalog/colourways.js';
 import { matchesColourText, parseColours } from '../catalog/colour.js';
 import { normaliseSize, optionValueMatches } from './sizeWords.js';
+import { FEATURE_LABEL, attributesOf, featuresAsked, featuresStatedIn, fitStatedIn, hasFeature, type Feature, type ProductFit } from '../catalog/attributes.js';
+import { shapesOf, shapesSaid, strongerOf, strongerSaid } from '../ai/verify.js';
 
 /**
  * Everything a customer can ask about one product - which sizes, which
@@ -133,15 +135,128 @@ export interface Answer {
   facts: string;
 }
 
+/*
+ * What the product is like, from its own data - read by the same code that
+ * decides what search may call it and what a reply may say about it
+ * (catalog/attributes.ts, the verifier's shape and "stronger than warm"
+ * rules). "Is it waterproof?" about the Tex Rain Jacket - waterproof in
+ * search, waterproof in its description - was answered "its description does
+ * not state that it is waterproof": the facts here held sizes, stock and
+ * price, and nothing about the product at all.
+ */
+
+/** Everything its own data states: features, cut, shape, and the stronger-than-warm words. */
+export function verifiedFacts(product: Product): string {
+  const { features, fit } = attributesOf(product);
+  const labels = features.map((feature) => FEATURE_LABEL[feature]);
+  // Waterproof covers water-resistant: say so, so neither reads as missing.
+  if (features.includes('waterproof')) labels.splice(labels.indexOf(FEATURE_LABEL.waterproof) + 1, 0, 'water-resistant (it is waterproof)');
+  const shapes = shapesOf(product);
+  const stronger = strongerOf(product);
+  return [
+    `Verified from its own description: ${labels.length ? labels.join(', ') : 'no features stated'}.`,
+    `Cut: ${fit ?? 'not stated'}.`,
+    shapes.length ? `Shape: ${shapes.join(', ')}.` : '',
+    stronger.length ? `Also stated, in these words: ${stronger.join(', ')} - not any other (insulated, fleece, quilted...) that is not listed.` : '',
+    'Anything not listed here is not stated - say "its description doesn\'t say", never "no".',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** One asked-about attribute, answered in one of three ways. */
+interface AttributeAnswer {
+  asked: string;
+  /** yes - its data states it; other - it states something else in its place; unstated - nothing either way. */
+  state: 'yes' | 'other' | 'unstated';
+  /** What it states instead, for `other`. */
+  instead?: string;
+  /**
+   * Set when what it states neither confirms nor rules out what was asked:
+   * thermal is not a no to insulated. Unset for a real difference - water-
+   * resistant is not waterproof, a slim cut is not a relaxed one.
+   */
+  unsaid?: boolean;
+}
+
+const FIT_WORDS: Record<ProductFit, string> = { athletic: 'an athletic cut', slim: 'a slim cut', tailored: 'a tailored cut', regular: 'a regular cut', relaxed: 'a relaxed cut' };
+
+/** The attributes a question asks about, each answered from the product's own data. */
+export function attributesAsked(product: Product, question: string): AttributeAnswer[] {
+  const answers: AttributeAnswer[] = [];
+  const { fit } = attributesOf(product);
+
+  const stronger = strongerSaid(question);
+  const statedStronger = strongerOf(product);
+  for (const word of stronger) {
+    const alongside = statedStronger.filter((other) => other !== word);
+    if (statedStronger.includes(word)) answers.push({ asked: word, state: 'yes' });
+    // "Insulated?" of a gilet described as thermal with a padded front: those are its words; insulated is not.
+    else if (alongside.length) answers.push({ asked: word, state: 'other', instead: alongside.join(' and '), unsaid: true });
+    // Or only warm: warm is what it says.
+    else if (hasFeature(product, 'warm')) answers.push({ asked: word, state: 'other', instead: 'warm', unsaid: true });
+    else answers.push({ asked: word, state: 'unstated' });
+  }
+
+  const features = new Set<Feature>([...featuresStatedIn(question), ...featuresAsked(question)]);
+  // "Warm" inside "insulated" is answered above; "hooded" and the zips are shapes, below.
+  if (stronger.length) features.delete('warm');
+  for (const feature of ['hooded', 'quarter-zip', 'full-zip'] as Feature[]) features.delete(feature);
+  for (const feature of features) {
+    const label = FEATURE_LABEL[feature];
+    if (hasFeature(product, feature)) answers.push({ asked: label, state: 'yes' });
+    else if (feature === 'waterproof' && hasFeature(product, 'water-resistant')) answers.push({ asked: label, state: 'other', instead: 'water-resistant' });
+    else answers.push({ asked: label, state: 'unstated' });
+  }
+
+  const fitAsked = fitStatedIn(question) ?? (/\b(relaxed|loose|roomy)\b/i.test(question) ? 'relaxed' : /\bslim\b/i.test(question) ? 'slim' : undefined);
+  if (fitAsked) {
+    if (fit === fitAsked) answers.push({ asked: `${fitAsked} fit`, state: 'yes' });
+    else if (fit) answers.push({ asked: `${fitAsked} fit`, state: 'other', instead: FIT_WORDS[fit] });
+    else answers.push({ asked: `${fitAsked} fit`, state: 'unstated' });
+  }
+
+  const shapes = shapesOf(product);
+  for (const shape of shapesSaid(question)) answers.push({ asked: shape, state: shapes.includes(shape) ? 'yes' : 'unstated' });
+  return answers;
+}
+
+/** The answer to a direct "is it...?" - said first, from the data, never a sales question in its place. */
+export function sayAttributes(name: string, answers: AttributeAnswer[]): string {
+  return answers
+    .map((answer, index) => {
+      const subject = index === 0 ? `the ${name}` : 'it';
+      if (answer.state === 'yes') return `${index === 0 ? 'Yes - ' : ''}${subject} is described as ${answer.asked}`;
+      // Warm, or thermal, is not evidence either way for insulated: what it does state, and that the rest is not stated.
+      if (answer.state === 'other' && answer.unsaid) return `${subject}'s description says ${answer.instead}, but doesn't state that it's ${answer.asked}`;
+      if (answer.state === 'other') return `${subject}'s description says ${answer.instead}, not ${answer.asked}`;
+      return `${subject}'s product data doesn't state that it's ${answer.asked}`;
+    })
+    .map((sentence) => sentence.charAt(0).toUpperCase() + sentence.slice(1))
+    .join('. ')
+    .concat('.');
+}
+
 /**
  * The question, answered. Unrecognised questions still get the whole
  * picture in the facts, so the model answers from data either way.
  */
 export function answerAbout(product: Product, question: string): Answer {
   const picture = stockPicture(product);
-  const facts = describeStock(product, picture);
+  const facts = `${describeStock(product, picture)}\n${verifiedFacts(product)}`;
   const q = question.toLowerCase();
   const name = product.title;
+
+  // "Is it waterproof?", "is this relaxed fit?", "does it have a hood?" - answered before anything about sizes or colours.
+  const attributes = attributesAsked(product, question);
+  if (attributes.length) {
+    return {
+      speech: sayAttributes(titleCase(name), attributes),
+      facts: `${facts}\nAsked about: ${attributes
+        .map((answer) => `${answer.asked} - ${answer.state === 'yes' ? 'yes, its description states it' : answer.state === 'other' ? `its description says ${answer.instead}${answer.unsaid ? ` - ${answer.asked} itself is not stated (never say no)` : ' instead'}` : 'not stated (never say no)'}`)
+        .join('; ')}. Answer this first, before any other question.`,
+    };
+  }
 
   // "Does it come in green?" - its own colour option, then its other colourways.
   const colours = parseColours(q).colours.map((colour) => colour.word);
@@ -223,4 +338,9 @@ export function answerAbout(product: Product, question: string): Answer {
   }
 
   return { speech: `Here's what I have on the ${name}.`, facts };
+}
+
+/** "TEX RAIN JACKET - BLACK" -> "Tex Rain Jacket - Black", for saying aloud. */
+function titleCase(title: string): string {
+  return title.toLowerCase().replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
 }

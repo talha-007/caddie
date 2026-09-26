@@ -21,6 +21,8 @@
  * guarding against is always a jump between scripts.
  */
 
+import { phoneticEnglish } from './phoneticEnglish.js';
+
 export type Script =
   | 'latin'
   | 'arabic'
@@ -120,7 +122,8 @@ export function expectedScripts(hints: LanguageHints): Set<Script> {
   const scripts = new Set<Script>();
   for (const tag of hints.languages) for (const script of scriptsForLanguage(tag)) scripts.add(script);
   for (const text of hints.earlier) {
-    const script = dominantScript(text);
+    // English that was once heard as Urdu letters is English: it must not make Urdu "expected" from then on.
+    const script = dominantScript(text) === 'arabic' && phoneticEnglish(text) ? 'latin' : dominantScript(text);
     if (script) scripts.add(script);
   }
   return scripts;

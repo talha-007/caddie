@@ -5,7 +5,8 @@ import { fetchWithTimeout } from '../lib/http.js';
 import { log } from '../lib/logger.js';
 import { costOfAudio } from '../usage/pricing.js';
 import { record } from '../usage/store.js';
-import { languageToRetry, type LanguageHints } from './language.js';
+import { dominantScript, languageToRetry, type LanguageHints } from './language.js';
+import { phoneticEnglish } from './phoneticEnglish.js';
 
 /**
  * Speech to text.
@@ -105,7 +106,31 @@ export function impossibleSpeechRate(text: string, seconds: number): boolean {
   return words / seconds > MAX_WORDS_PER_SECOND;
 }
 
+/** What was heard, and what the Caddie is given - kept apart so a rewrite can always be traced. */
+export interface Heard {
+  /** What the provider first returned. */
+  rawTranscript: string;
+  /** What goes into the conversation. The same as the raw one unless it was heard again or rewritten. */
+  normalizedTranscript: string;
+  /** The language the raw transcript is written as: "en", "ur", or a script name. */
+  detectedLanguage: string;
+  /** The language the Caddie should answer in - the language of what it is given. */
+  replyLanguage: string;
+  /** How the raw transcript was changed, if it was. */
+  normalizedBy?: 'heard-again-in-english' | 'transliterated' | 'heard-again';
+}
+
+/** A transcript's language as far as its script says - enough for Latin versus Urdu, which is the failure. */
+export function languageOf(text: string): string {
+  const script = dominantScript(text);
+  return script === 'latin' ? 'en' : script === 'arabic' ? 'ur' : (script ?? 'none');
+}
+
 export async function transcribe(audio: Buffer, mimeType: string, meta?: TranscribeMeta): Promise<string> {
+  return (await transcribeHeard(audio, mimeType, meta)).normalizedTranscript;
+}
+
+export async function transcribeHeard(audio: Buffer, mimeType: string, meta?: TranscribeMeta): Promise<Heard> {
   if (!env.openai.apiKey) {
     throw new UpstreamError('Transcription needs OPENAI_API_KEY.');
   }
@@ -126,9 +151,33 @@ export async function transcribe(audio: Buffer, mimeType: string, meta?: Transcr
    */
   const forced = env.openai.transcribeLanguage || undefined;
   let text = await hear(audio, mimeType, meta, forced);
+  const raw = text;
+  let normalizedBy: Heard['normalizedBy'];
 
-  const retry = forced || !meta?.hints ? null : languageToRetry(text, meta.hints);
-  if (retry) {
+  /*
+   * English in Urdu letters (see phoneticEnglish.ts). Heard again in English
+   * first - the provider then spells it properly, product names and all - and
+   * only if that still is not English, rewritten word by word from the list
+   * that recognised it. Checked before the script retry, because that retry
+   * trusts a browser that lists Urdu, and this is exactly the accent that does.
+   */
+  const phonetic = forced || dominantScript(text) !== 'arabic' ? null : phoneticEnglish(text);
+  const retry = phonetic || forced || !meta?.hints ? null : languageToRetry(text, meta.hints);
+  if (phonetic) {
+    const again = await hear(audio, mimeType, meta, 'en');
+    const english = dominantScript(again) === 'latin';
+    text = english ? again : phonetic.normalised;
+    normalizedBy = english ? 'heard-again-in-english' : 'transliterated';
+    log.warn('voice.phonetic_english', {
+      sessionId: meta?.sessionId,
+      raw: raw.slice(0, 160),
+      heardAgain: again.slice(0, 160),
+      normalized: text.slice(0, 160),
+      normalizedBy,
+      englishWords: phonetic.english,
+      sharedWords: phonetic.shared,
+    });
+  } else if (retry) {
     const again = await hear(audio, mimeType, meta, retry);
     log.warn('voice.language_retry', {
       sessionId: meta?.sessionId,
@@ -138,8 +187,18 @@ export async function transcribe(audio: Buffer, mimeType: string, meta?: Transcr
     });
     // Named-language transcription of genuinely foreign speech can come back
     // empty; then the detected text is still the better of the two.
-    if (/[\p{L}\p{N}]/u.test(again)) text = again;
+    if (/[\p{L}\p{N}]/u.test(again)) {
+      text = again;
+      normalizedBy = 'heard-again';
+    }
   }
+  const heard = (normalized: string): Heard => ({
+    rawTranscript: raw,
+    normalizedTranscript: normalized,
+    detectedLanguage: languageOf(raw),
+    replyLanguage: languageOf(normalized),
+    ...(normalizedBy && normalized ? { normalizedBy } : {}),
+  });
 
   const seconds = audio.byteLength / NOMINAL_BYTES_PER_SECOND;
 
@@ -164,7 +223,7 @@ export async function transcribe(audio: Buffer, mimeType: string, meta?: Transcr
    */
   if (text && !/[\p{L}\p{N}]/u.test(text)) {
     log.warn('voice.transcript_rejected', { reason: 'no words in it', text: text.slice(0, 40) });
-    return '';
+    return heard('');
   }
 
   if (impossibleSpeechRate(text, seconds)) {
@@ -174,10 +233,10 @@ export async function transcribe(audio: Buffer, mimeType: string, meta?: Transcr
       seconds: Number(seconds.toFixed(2)),
       text: text.slice(0, 120),
     });
-    return '';
+    return heard('');
   }
 
-  return text;
+  return heard(text);
 }
 
 /**

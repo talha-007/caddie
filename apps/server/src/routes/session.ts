@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import type { BasketSync, ProfileRequest, SessionRestartResponse } from '@caddie/shared';
+import type { BasketSync, CardChoice, ProfileRequest, SessionRestartResponse } from '@caddie/shared';
 import { rememberShopper } from '../shopper/remember.js';
 import { log } from '../lib/logger.js';
 import { productById } from '../catalog/sync.js';
 import { sessions } from '../session/store.js';
+import { customerTurn, describeFocus, focusFromCard } from '../session/focus.js';
 import { runTool } from '../tools/index.js';
 
 /**
@@ -22,6 +23,48 @@ import { runTool } from '../tools/index.js';
  */
 
 export const sessionRouter: Router = Router();
+
+/**
+ * POST /api/session/:id/choice
+ *
+ * A size tapped on a product card lived only in the card. The customer picked
+ * M on a rain jacket, said "add it", and the Caddie - which had never heard of
+ * the M - asked for their size and reached for a different jacket. The card
+ * now says what they picked; it is kept for that product, and that product
+ * becomes the one "it" means. Only options the product really has are kept.
+ */
+sessionRouter.post('/:id/choice', async (req, res, next) => {
+  const sessionId = req.params.id;
+  try {
+    const body = (req.body ?? {}) as Partial<CardChoice>;
+    const product = productById(String(body.productId ?? ''));
+    if (!product) return res.status(400).json({ error: 'unknown_product' });
+    // Under the product's own option names ("SIZE", "JACKET SIZE"), and only values it really has.
+    const options: Record<string, string> = {};
+    for (const [name, value] of Object.entries(body.options ?? {})) {
+      const option = product.options.find((own) => own.name.toLowerCase() === name.toLowerCase());
+      const real = option?.values.find((own) => own.toLowerCase() === String(value).toLowerCase());
+      if (option && real) options[option.name] = real;
+    }
+    if (Object.keys(options).length === 0) return res.status(400).json({ error: 'no_valid_options' });
+    const variantId = typeof body.variantId === 'string' && body.variantId ? body.variantId : undefined;
+
+    const session = await sessions.getOrCreate(sessionId);
+    // A tap is the customer's own choice of product: it moves what they are shopping for (session/focus.ts).
+    const activeShoppingContext = focusFromCard(product, session.activeShoppingContext, customerTurn(session, false));
+    await sessions.patch(sessionId, {
+      cardChoices: { ...(session.cardChoices ?? {}), [product.id]: { options, ...(variantId ? { variantId } : {}), at: Date.now() } },
+      focusProductId: product.id,
+      cardFocus: product.id,
+      activeShoppingContext,
+    });
+    log.info('session.card_choice', { sessionId, productId: product.id, options });
+    log.info('focus.updated', { sessionId, utterance: null, prior: describeFocus(session.activeShoppingContext), resolved: describeFocus(activeShoppingContext), source: 'card-action' });
+    return res.json({ ok: true });
+  } catch (err) {
+    return next(err);
+  }
+});
 
 sessionRouter.post('/:id/restart', async (req, res, next) => {
   const sessionId = req.params.id;

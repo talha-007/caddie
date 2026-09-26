@@ -4,7 +4,7 @@ import type { CaddieMessage } from '@caddie/shared';
 import { screen } from '../ai/guard.js';
 import { parseLanguageList } from '../ai/language.js';
 import { converse, openaiEnabled } from '../ai/openai.js';
-import { MAX_AUDIO_BYTES, transcribe, transcribeEnabled } from '../ai/transcribe.js';
+import { MAX_AUDIO_BYTES, transcribeEnabled, transcribeHeard } from '../ai/transcribe.js';
 import { log } from '../lib/logger.js';
 import { consumeShared, LIMITS } from '../lib/rateLimit.js';
 import { clientKey, noteCartMode } from '../lib/request.js';
@@ -83,7 +83,18 @@ voiceRouter.post(
         earlier: session.messages.filter((m) => m.role === 'user' && m.text).slice(-6).map((m) => m.text),
       };
 
-      const transcript = await transcribe(req.body as Buffer, mimeType, { sessionId, client, hints });
+      const listened = await transcribeHeard(req.body as Buffer, mimeType, { sessionId, client, hints });
+      // Only the normalised text reaches the Caddie; the raw one is kept here, for diagnosing the next accent.
+      const transcript = listened.normalizedTranscript;
+      log.info('voice.language', {
+        sessionId,
+        rawTranscript: listened.rawTranscript.slice(0, 160),
+        normalizedTranscript: transcript.slice(0, 160),
+        detectedLanguage: listened.detectedLanguage,
+        replyLanguage: listened.replyLanguage,
+        ...(listened.normalizedBy ? { normalizedBy: listened.normalizedBy } : {}),
+        hints: hints.languages,
+      });
 
       // Nothing intelligible. Say so rather than sending silence to the model.
       if (!transcript) {

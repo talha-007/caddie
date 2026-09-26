@@ -205,6 +205,7 @@ async function viaDevRouter(sessionId: string, text: string): Promise<CaddieMess
     );
   }
 
-  const result = await runTool(intent.tool, intent.args, { session });
+  // The dev router's arguments come from its own parser of the customer's text, not a model.
+  const result = await runTool(intent.tool, intent.args, { session, utterance: text, direct: true });
   return message('assistant', result.speech, result.attachment);
 }

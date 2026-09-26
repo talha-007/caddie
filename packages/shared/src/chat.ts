@@ -114,6 +114,23 @@ export interface PageContext {
   variantId?: string;
 }
 
+/**
+ * POST /api/session/:id/choice - the customer picked an option on a product
+ * card themselves.
+ *
+ * Only what they actually picked is sent, never the card's starting values:
+ * a size the card opened on is our guess, a size they tapped is theirs. The
+ * server trusts these for this one product - "add it" then means this
+ * product, in this size - and never makes them their size for anything else.
+ */
+export interface CardChoice {
+  productId: string;
+  /** Only the options the customer picked on this card, by option name: { Size: 'M' }. */
+  options: Record<string, string>;
+  /** The variant those choices match, when the card already knows it. */
+  variantId?: string;
+}
+
 export interface ChatRequest {
   sessionId: string;
   text: string;

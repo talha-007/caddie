@@ -164,9 +164,15 @@ describe('search_products enforces them', () => {
     expect(titles).toEqual(['KIDS HESSIE HOODIE - NAVY']);
   });
 
-  it('a range passed by the model decides', async () => {
-    const { titles } = await search({ query: 'polo', range: 'ladies' }, 'polo');
+  // Task 21/22: the model's range decides only when the customer's words back it - never on its own.
+  it('a range the customer gave decides; the model passing one alone does not', async () => {
+    const { titles } = await search({ query: 'polo', range: 'ladies' }, 'show me a ladies polo');
     expect(titles).toEqual(['LADIES ELITE POLO - NAVY']);
+    // A fresh customer: the one above has just told us she shops ladies.
+    const session = await sessions.getOrCreate(`range-${Math.random()}`);
+    const alone = await runTool('search_products', { query: 'polo', range: 'ladies' }, { session, utterance: 'polo' });
+    const aloneTitles = alone.attachment?.kind === 'products' ? alone.attachment.products.map((p) => p.title) : [];
+    expect(aloneTitles.some((title) => !title.startsWith('LADIES'))).toBe(true);
   });
 
   it('midlayer in 2XL: midlayers, in stock in 2XL', async () => {

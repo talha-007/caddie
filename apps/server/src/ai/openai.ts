@@ -3,7 +3,7 @@ import { env } from '../env.js';
 import { UpstreamError } from '../lib/errors.js';
 import { fetchWithTimeout, Semaphore } from '../lib/http.js';
 import { log } from '../lib/logger.js';
-import { sessions, type CaddieSession } from '../session/store.js';
+import { sessions, tappedSinceLastSaid, type CaddieSession } from '../session/store.js';
 import { describeProfile, readIntent, standingPart } from '../shopper/profile.js';
 import { rememberShopper } from '../shopper/remember.js';
 import { runTool, toolDefinitionsForVapi } from '../tools/index.js';
@@ -12,6 +12,10 @@ import { record } from '../usage/store.js';
 import { SYSTEM_PROMPT } from './prompt.js';
 import { verifyReply, withoutClaims } from './verify.js';
 import { namesADeal } from '../recommend/deals.js';
+import { productById } from '../catalog/sync.js';
+import { packPieces, readPackChoices } from '../tools/packState.js';
+import { asksToAdd } from '../tools/cartAuthorization.js';
+import { describeFocus, noteShoppingFocus } from '../session/focus.js';
 
 /**
  * The Caddie's brain for text chat.
@@ -161,9 +165,12 @@ export function pageContext(session: CaddieSession): ChatMessage | null {
     if (!page.productId) return null;
 
     const title = page.productTitle ? ` - ${page.productTitle}` : '';
+    // Socks and belts come in one size: asked to add them, the Caddie asked which size.
+    const product = productById(page.productId);
+    const oneSize = product && !product.options.some((option) => option.values.length > 1) ? ' It comes in one size only - never ask which size.' : '';
     return {
       role: 'system',
-      content: `The customer is on the product page for [${page.productId}]${title}. "This", "it" and "this one" mean that product.`,
+      content: `The customer is on the product page for [${page.productId}]${title}. "This", "it" and "this one" mean that product.${oneSize}`,
     };
   }
 
@@ -184,6 +191,38 @@ function screenContext(session: CaddieSession): ChatMessage | null {
   );
 
   return { role: 'system', content: bits.join(' ') };
+}
+
+/**
+ * What they are shopping for now (session/focus.ts), said once, after what
+ * is on screen: the cards can be older than the conversation. The tools hold
+ * to it whatever the model picks; this is so it picks right the first time.
+ */
+function focusContext(session: CaddieSession): ChatMessage | null {
+  const focus = session.activeShoppingContext;
+  if (!focus || (!focus.kinds.length && !focus.productId)) return null;
+  const said = focus.request ? ` (their words: "${focus.request.slice(0, 120)}")` : '';
+  return {
+    role: 'system',
+    content: `What the customer is shopping for now: ${describeFocus(focus)}${said}. A short follow-up - different colours, another one, show me more, cheaper, what sizes, is it waterproof - is about this, not about older cards still on screen.`,
+  };
+}
+
+/**
+ * What they picked on a product card themselves - the product they are
+ * handling now, and the size they chose for it. "Add it" means this.
+ */
+function cardChoiceContext(session: CaddieSession): ChatMessage | null {
+  // Only a tap since they last spoke: after that, "it" is whatever they talked about.
+  const id = tappedSinceLastSaid(session);
+  const choice = id ? session.cardChoices?.[id] : undefined;
+  if (!id || !choice) return null;
+  const title = productById(id)?.title ?? id;
+  const picked = Object.entries(choice.options).map(([name, value]) => `${name} ${value}`).join(', ');
+  return {
+    role: 'system',
+    content: `The customer picked ${picked} themselves on the card for ${title} [${id}]. "It", "this" and "add it" mean that product, in ${picked} - no need to ask - unless they now name a different size or product.`,
+  };
 }
 
 /**
@@ -304,13 +343,37 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
    */
   const learned = standingPart(readIntent(userText));
   if (Object.keys(learned).length) await rememberShopper(sessionId, learned);
+  /*
+   * "Waist 34, leg 36" said about the pack on screen is a choice for that
+   * pack - read by code, checked against what its pieces come in, before the
+   * model runs. See tools/packState.ts.
+   */
+  {
+    const before = await sessions.getOrCreate(sessionId);
+    const handle = before.lastShown?.kind === 'pack' ? before.lastShown.bundle : before.packInFocus;
+    if (handle) {
+      const pieces = packPieces(before, handle);
+      const lastReply = [...before.messages].reverse().find((message) => message.role === 'assistant')?.text ?? '';
+      const current = before.packChoices?.[handle] ?? {};
+      const next = readPackChoices(userText, lastReply, pieces, current);
+      if (JSON.stringify(next) !== JSON.stringify(current)) await sessions.patch(sessionId, { packChoices: { ...(before.packChoices ?? {}), [handle]: next } });
+    }
+  }
+  // What they are shopping for now, from their words - before any tool can pick something else. See session/focus.ts.
+  await noteShoppingFocus(sessionId, userText);
   const session = await sessions.getOrCreate(sessionId);
   const turnStartedAt = Date.now();
 
   const messages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
-    ...([pageContext(session), screenContext(session), basketContext(session), shopperContext(session)].filter(Boolean) as ChatMessage[]),
+    ...([pageContext(session), screenContext(session), focusContext(session), basketContext(session), shopperContext(session)].filter(Boolean) as ChatMessage[]),
     ...history(session),
+    /*
+     * Last before their words: the tap happened after the reply before it.
+     * Placed with the other context, it lost to the history - the model added
+     * the jacket it had just recommended, not the one they had tapped.
+     */
+    ...([cardChoiceContext(session)].filter(Boolean) as ChatMessage[]),
     { role: 'user', content: userText },
   ];
 
@@ -386,6 +449,25 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
       continue;
     }
     /*
+     * Asked to add something, and answered with "what size?" without trying.
+     * "Add this one pair tour ankle socks to my basket" got "What size would
+     * you like?" three times in three - the socks come in one size, and the
+     * customer had to ask why. add_to_cart knows what the product needs and
+     * asks for exactly what is missing, so it goes first.
+     */
+    const asksSize = /\b(what|which)\s+size\b|\bsize (would|do|should) you\b|\byour size\b/i.test(finalText);
+    if (calls.length === 0 && !rewrote && step === 0 && asksSize && asksToAdd(userText)) {
+      rewrote = true;
+      log.warn('reply.asked_size_without_trying', { sessionId });
+      messages.push({ role: 'assistant', content: finalText });
+      messages.push({
+        role: 'system',
+        content:
+          'They asked to add it. Call add_to_cart now with the product and any size they have given - many products come in one size and need none. If a size is really needed, the tool says so and you ask for exactly that.',
+      });
+      continue;
+    }
+    /*
      * A deal named, and answered with a question instead of the deal. "An
      * Ambassador Pack, I mostly play in the rain" got "which version would you
      * like?" with no tool called - the tool reads the weather and picks Cool &
@@ -440,12 +522,12 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
       continue;
     }
     if (calls.length === 0 && finalText) {
-      const violations = verifyReply(finalText, evidence.join('\n'), attachment);
+      const violations = verifyReply(finalText, evidence.join('\n'), attachment, userText);
       if (violations.length && !rewrote) {
         rewrote = true;
         log.warn('reply.unverified', { sessionId, claims: violations.map((v) => `${v.kind}:${v.claim}`) });
         messages.push({ role: 'assistant', content: finalText });
-        const unbacked = violations.filter((v) => v.kind !== 'wording' && v.kind !== 'offer');
+        const unbacked = violations.filter((v) => v.kind !== 'wording' && v.kind !== 'offer' && v.kind !== 'length' && v.kind !== 'status' && v.kind !== 'pricing');
         const worded = violations.filter((v) => v.kind === 'wording');
         const offered = violations.filter((v) => v.kind === 'offer');
         messages.push({
@@ -461,6 +543,18 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
               : '',
             offered.length
               ? 'The products are already on screen: do not offer to show them. Ask which one they meant, their size, or whether to add it to the basket.'
+              : '',
+            violations.some((v) => v.kind === 'length')
+              ? `Say it in at most two short sentences and one question, under about 35 words - yours was ${violations.find((v) => v.kind === 'length')!.claim}. Merge or drop a sentence, keeping the question. The cards already show the pieces, colours, sizes and prices - do not list them, and do not repeat back what they told you.`
+              : '',
+            violations.some((v) => v.kind === 'pricing')
+              ? 'Give the price they will pay - the "Pack price: pays" figure - and nothing else about it. The listed price is not what they pay, and there is no saving, discount or deal to mention.'
+              : '',
+            violations.some((v) => v.kind === 'status')
+              ? 'The pack is not ready - never say it is ready or complete. Ask only the one thing its Pack status line says to ask.'
+              : '',
+            violations.some((v) => v.kind === 'comparison')
+              ? 'Call something the cheapest, or cheaper, only when the facts give a "Price ordering" or "Price comparison" line saying so - otherwise give its price and nothing more.'
               : '',
             'Do not mention this check.',
           ]

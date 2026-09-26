@@ -10,20 +10,51 @@ import { useShop } from './ShopContext.js';
  * payload (Shopify MCP) - nothing is taken from the Caddie's sentence.
  */
 
-export function ProductImage({ product, size }: { product: Product; size?: 'row' }) {
+export function ProductImage({ product, size, linked }: { product: Product; size?: 'row'; linked?: boolean }) {
   const [failed, setFailed] = useState(false);
   const className = `caddie-media${size === 'row' ? ' caddie-media--row' : ''}`;
-  if (!product.imageUrl || failed) {
-    return (
+  const image =
+    !product.imageUrl || failed ? (
       <div className={`${className} caddie-media--empty`} aria-hidden="true">
         <ShirtIcon size={size === 'row' ? 24 : 32} />
       </div>
+    ) : (
+      <div className={className}>
+        <img src={product.imageUrl} alt={product.title} loading="lazy" decoding="async" onError={() => setFailed(true)} />
+      </div>
     );
-  }
+  // The picture opens the product too - it is what a shopper taps first. The title link carries the name for screen readers.
+  return linked && product.url ? (
+    <a className="caddie-media-link" href={product.url} target="_top" tabIndex={-1} aria-hidden="true">
+      {image}
+    </a>
+  ) : (
+    image
+  );
+}
+
+/**
+ * The product's own page, where the photos, the description and the size
+ * guide are. Opened in the same tab: the conversation is kept per tab, so it
+ * is still there when they come back - a new tab would start an empty one.
+ */
+function ViewLink({ product }: { product: Product }) {
+  if (!product.url) return null;
   return (
-    <div className={className}>
-      <img src={product.imageUrl} alt={product.title} loading="lazy" decoding="async" onError={() => setFailed(true)} />
-    </div>
+    <a className="caddie-view-link" href={product.url} target="_top">
+      View product <span aria-hidden="true">›</span>
+    </a>
+  );
+}
+
+/** The name, as a link to the product when there is one. */
+function ProductName({ product }: { product: Product }) {
+  return product.url ? (
+    <a className="caddie-name-link" href={product.url} target="_top">
+      {product.title}
+    </a>
+  ) : (
+    <>{product.title}</>
   );
 }
 
@@ -112,16 +143,19 @@ export function ProductTile({ product, slot, addable, swappable, onChoice }: Car
   return (
     <article className="caddie-tile">
       <div className="caddie-tile__media">
-        <ProductImage product={product} />
+        <ProductImage product={product} linked />
         {swappable ? <SwapButton product={product} /> : null}
       </div>
       <div className="caddie-tile__body">
         {slot ? <span className="caddie-eyebrow">{slot}</span> : null}
-        <h4 className="caddie-tile__title">{product.title}</h4>
+        <h4 className="caddie-tile__title">
+          <ProductName product={product} />
+        </h4>
         {colour ? <p className="caddie-tile__meta">{colour}</p> : null}
         <Price price={price} compareAt={product.compareAtPrice} />
         <ProductOptions product={product} choice={choice} compact />
         {addable ? <AddButton product={product} choice={choice} /> : null}
+        <ViewLink product={product} />
       </div>
     </article>
   );
@@ -136,14 +170,15 @@ export function ProductRow({ product, slot, addable = true, swappable, onChoice 
 
   return (
     <article className="caddie-row">
-      <ProductImage product={product} size="row" />
+      <ProductImage product={product} size="row" linked />
       <div className="caddie-row__body">
         {slot ? <span className="caddie-eyebrow">{slot}</span> : null}
         <h4 className="caddie-row__title">
-          {product.title}
+          <ProductName product={product} />
           {colour ? <span className="caddie-row__colour"> · {colour}</span> : null}
         </h4>
         <Price price={price} compareAt={product.compareAtPrice} />
+        <ViewLink product={product} />
         <div className="caddie-row__controls">
           <ProductOptions product={product} choice={choice} />
           <div className="caddie-row__actions">

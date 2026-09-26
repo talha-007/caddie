@@ -266,11 +266,14 @@ describe('the customer\'s words survive a shortened query', () => {
     expect(products.every((p) => rangeOf(p) === 'women')).toBe(true);
   });
 
-  it('a feature only in the structured field turns meaning search on, and is written into it', async () => {
-    const { diagnostics } = await search({ query: 'golf trousers', features: ['stretch'] }, 'trousers for golf please');
-    expect(diagnostics.semanticUsed).toBe(true);
-    expect(diagnostics.why).toMatch(/stretch/);
-    expect(diagnostics.described).toMatch(/stretchy/);
+  // Task 21: a feature only the model supplied is a proposal, not a rule - it neither filters nor turns meaning search on.
+  it('a feature the customer asked for turns meaning search on; one only the model added does not', async () => {
+    const asked = await search({ query: 'golf trousers', features: ['stretch'] }, 'trousers with some stretch for golf please');
+    expect(asked.diagnostics.semanticUsed).toBe(true);
+    expect(asked.diagnostics.why).toMatch(/stretch/);
+    expect(asked.diagnostics.described).toMatch(/stretch/);
+    const invented = await search({ query: 'golf trousers', features: ['stretch'] }, 'trousers for golf please');
+    expect(invented.diagnostics.why).not.toMatch(/stretch/);
   });
 
   it('stretchy trousers: meaning search runs when the model shortens it to "golf trousers"', async () => {

@@ -1,14 +1,4 @@
-import type {
-  BasketSync,
-  CaddieAttachment,
-  CaddieMessage,
-  CartAction,
-  ChatRequest,
-  PageContext,
-  ProfileRequest,
-  SessionRestartResponse,
-  ShopperSizes,
-} from '@caddie/shared';
+import type { BasketSync, CaddieAttachment, CaddieMessage, CardChoice, CartAction, ChatRequest, PageContext, ProfileRequest, SessionRestartResponse, ShopperSizes } from '@caddie/shared';
 import { onStorefront } from './themeCart.js';
 
 const BASE = (import.meta.env.VITE_CADDIE_API_URL ?? 'http://localhost:8787').replace(/\/$/, '');
@@ -53,6 +43,11 @@ export function syncBasket(sessionId: string, basket: BasketSync) {
 /** Who they shop for and their sizes, from the quick start. */
 export function saveProfile(sessionId: string, profile: ProfileRequest) {
   return post<{ ok: boolean; shopper: ShopperSizes }>(`/api/session/${encodeURIComponent(sessionId)}/profile`, profile);
+}
+
+/** An option the customer picked on a product card themselves - so "add it" knows. See CardChoice. */
+export function sendCardChoice(sessionId: string, choice: CardChoice) {
+  return post<{ ok: boolean }>(`/api/session/${encodeURIComponent(sessionId)}/choice`, choice);
 }
 
 /** A clean chat on the same basket - behind "New chat". */

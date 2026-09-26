@@ -13,6 +13,13 @@ export interface ToolContext {
    */
   utterance?: string;
   /**
+   * The arguments were chosen directly - a developer calling /api/tools, or
+   * the dev router's own parser - with no model between the customer and the
+   * tool. Such arguments are trusted as a UI action would be; a model's are
+   * proposals (see tools/searchIntent.ts).
+   */
+  direct?: boolean;
+  /**
    * Store-cart changes already decided earlier in this same reply. The widget
    * makes them only once the reply arrives, so a basket read in the meantime
    * is out of date - the Caddie told a customer their basket was "still empty"

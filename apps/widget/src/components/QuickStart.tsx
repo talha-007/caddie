@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ShopperSizes } from '@caddie/shared';
+import { CloseIcon } from './icons.js';
 
 /**
  * Who are you shopping for, and in what size - asked first, in two taps.
@@ -60,7 +61,13 @@ export function QuickStart({ initial, busy, onDone, onCancel }: QuickStartProps)
   };
 
   return (
-    <section className="caddie-card caddie-quickstart" aria-label="Quick start">
+    <section className={`caddie-card caddie-quickstart${onCancel ? ' has-close' : ''}`} aria-label="Quick start">
+      {/* Closing, like any other panel: a cross in the corner rather than a word at the bottom. */}
+      {onCancel ? (
+        <button type="button" className="caddie-icon-btn caddie-icon-btn--small caddie-quickstart__close" aria-label="Close without changing" onClick={onCancel}>
+          <CloseIcon size={16} />
+        </button>
+      ) : null}
       {step === 'range' ? (
         <>
           <p className="caddie-quickstart__question">Who are you shopping for?</p>
@@ -134,12 +141,6 @@ export function QuickStart({ initial, busy, onDone, onCancel }: QuickStartProps)
             Back
           </button>
         </>
-      ) : null}
-
-      {onCancel ? (
-        <button type="button" className="caddie-link caddie-quickstart__cancel" onClick={onCancel}>
-          Cancel
-        </button>
       ) : null}
     </section>
   );

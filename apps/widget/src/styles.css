@@ -67,8 +67,9 @@
   --caddie-mic: 48px;
   --caddie-orb: 124px;
   --caddie-gutter: 16px;
-  /* Themes with a sticky add-to-cart bar can raise the launcher: #druids-caddie .caddie-root { --caddie-launcher-offset: 88px } */
-  --caddie-launcher-offset: 16px;
+  /* Above the theme's "FOLLOW DRUIDS" button, which takes the bottom-right corner
+     (about 70px tall, 16px up). A theme can change it: <div id="druids-caddie" data-launcher-offset="96">. */
+  --caddie-launcher-offset: 108px;
 
   --caddie-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
@@ -177,11 +178,7 @@
 .caddie-launcher {
   position: fixed;
   right: calc(var(--caddie-gutter) + env(safe-area-inset-right, 0px));
-  /* --caddie-lift is set by Launcher.tsx to clear other floating buttons. */
-  /* No transition on bottom: Launcher.tsx measures the resting position by
-     dropping the lift and reading it straight back, and an animated bottom
-     reports where it was, not where it is going - it settled onto the pill. */
-  bottom: calc(var(--caddie-launcher-offset) + var(--caddie-lift, 0px) + env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--caddie-launcher-offset) + env(safe-area-inset-bottom, 0px));
   z-index: 2147483000;
   display: inline-flex;
   align-items: center;
@@ -554,10 +551,55 @@
   font-weight: 600;
 }
 
-.caddie-quickstart__back,
-.caddie-quickstart__cancel {
+.caddie-quickstart__back {
   align-self: flex-start;
   font-size: 13px;
+}
+
+/* Changing answers already given: a cross in the corner closes it, as on any panel. */
+.caddie-quickstart.has-close {
+  position: relative;
+}
+
+.caddie-quickstart.has-close .caddie-quickstart__question {
+  padding-right: 44px;
+}
+
+.caddie-quickstart__close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
+/* ---------- Links to the product's own page ---------- */
+
+.caddie-media-link {
+  display: block;
+  flex: none;
+  color: inherit;
+}
+
+.caddie-name-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.caddie-name-link:hover,
+.caddie-name-link:focus-visible {
+  text-decoration: underline;
+}
+
+.caddie-view-link {
+  align-self: flex-start;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--caddie-accent);
+  text-decoration: none;
+}
+
+.caddie-view-link:hover,
+.caddie-view-link:focus-visible {
+  text-decoration: underline;
 }
 
 /* "Men · L · 34 waist  Change" - what every card opens on, always changeable. */
@@ -2059,9 +2101,9 @@
 
   .caddie-launcher {
     right: 24px;
-    /* The lift and the theme offset apply here too - this used to be a flat
-       24px, which is why a theme raising the launcher saw no change. */
-    bottom: calc(max(24px, var(--caddie-launcher-offset)) + var(--caddie-lift, 0px));
+    /* The theme offset applies here too - this used to be a flat 24px, which
+       is why a theme raising the launcher saw no change. */
+    bottom: max(24px, var(--caddie-launcher-offset));
   }
 }
 

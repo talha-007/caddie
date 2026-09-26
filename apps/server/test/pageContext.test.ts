@@ -64,3 +64,44 @@ describe('what the customer is looking at', () => {
     expect(saved?.page?.productId).toBe('gid://shopify/Product/7');
   });
 });
+
+/*
+ * "Add this one pair tour ankle socks to my basket", on the socks' own page,
+ * got "What size would you like?" - they come in one size. The model is told.
+ */
+describe('a product that comes in one size', async () => {
+  const { setCatalogueForTests } = await import('../src/catalog/sync.js');
+  const product = (id: string, options: Array<{ name: string; values: string[] }>) => ({
+    id: `gid://shopify/Product/${id}`,
+    title: `THING ${id}`,
+    url: '',
+    imageUrl: null,
+    vendor: 'Druids',
+    productType: null,
+    tags: [],
+    price: { amount: 6, currency: 'GBP' },
+    options,
+    variants: [],
+    description: null,
+  });
+
+  it('is said to come in one size, so no size is asked', () => {
+    setCatalogueForTests([product('7', [{ name: 'Title', values: ['Default Title'] }])]);
+    expect(pageContext(session({ pageType: 'product', productId: 'gid://shopify/Product/7' }))?.content).toContain('one size only - never ask which size');
+  });
+
+  it('a product with sizes says nothing of the kind', () => {
+    setCatalogueForTests([product('8', [{ name: 'Size', values: ['S', 'M', 'L'] }])]);
+    expect(pageContext(session({ pageType: 'product', productId: 'gid://shopify/Product/8' }))?.content).not.toContain('one size');
+  });
+});
+
+describe('asked to add', async () => {
+  const { asksToAdd } = await import('../src/tools/cartAuthorization.js');
+  it('reads an add request, and not a refusal or a question', () => {
+    expect(asksToAdd('Add this one pair tour ankle socks to my basket')).toBe(true);
+    expect(asksToAdd("I'll take them")).toBe(true);
+    expect(asksToAdd("Don't add it yet")).toBe(false);
+    expect(asksToAdd('What are the available sizes?')).toBe(false);
+  });
+});

@@ -3,6 +3,7 @@ import { env } from '../env.js';
 import { UpstreamError } from '../lib/errors.js';
 import { log } from '../lib/logger.js';
 import { publish } from '../session/bus.js';
+import { noteShoppingFocus } from '../session/focus.js';
 import { sessions } from '../session/store.js';
 import { runTool } from '../tools/index.js';
 
@@ -31,6 +32,19 @@ interface VapiMessage {
   toolCallList?: VapiToolCall[];
   call?: { id?: string; assistantOverrides?: { metadata?: Record<string, unknown> } };
   assistant?: { metadata?: Record<string, unknown> };
+  /** The conversation so far, when Vapi includes it. */
+  artifact?: { messages?: Array<{ role?: string; message?: string }> };
+}
+
+/*
+ * What the customer last said, when Vapi sends the conversation with the
+ * tool call. The model's arguments are proposals (tools/searchIntent.ts); the
+ * customer's words are what make them rules. Absent, the tools run on
+ * proposals alone - which filter nothing.
+ */
+function lastCustomerLine(message: VapiMessage): string | undefined {
+  const said = [...(message.artifact?.messages ?? [])].reverse().find((entry) => entry.role === 'user' && typeof entry.message === 'string');
+  return said?.message?.trim() || undefined;
 }
 
 function parseArgs(raw: unknown): Record<string, unknown> {
@@ -75,6 +89,9 @@ vapiRouter.post('/webhook', async (req, res) => {
 
   const calls = message.toolCalls ?? message.toolCallList ?? [];
   const sessionId = resolveSessionId(message);
+  // Their words read into what they are shopping for, once for the batch - the same reader typed chat uses.
+  const heard = lastCustomerLine(message);
+  if (heard) await noteShoppingFocus(sessionId, heard);
   const session = await sessions.getOrCreate(sessionId);
 
   const results = await Promise.all(
@@ -86,7 +103,8 @@ vapiRouter.post('/webhook', async (req, res) => {
       try {
         // Re-read the session per call: an earlier tool in the batch may have changed it.
         const current = await sessions.getOrCreate(sessionId);
-        const result = await runTool(name, args, { session: current });
+        const utterance = lastCustomerLine(message);
+        const result = await runTool(name, args, { session: current, ...(utterance ? { utterance } : {}) });
 
         if (result.attachment) {
           publish({ type: 'attachment', sessionId, attachment: result.attachment });

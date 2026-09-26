@@ -3,6 +3,7 @@ import type {
   BundleDeal,
   CaddieAttachment,
   CaddieMessage,
+  CardChoice,
   Cart,
   CartAction,
   Journey,
@@ -13,7 +14,7 @@ import type {
   SizeInput,
   SizeRecommendation,
 } from '@caddie/shared';
-import { openEventStream, restartSession, runTool, saveProfile, sendMessage, sendVoice, syncBasket } from './api.js';
+import { openEventStream, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, syncBasket } from './api.js';
 import {
   addBundleToThemeCart,
   addToThemeCart,
@@ -92,6 +93,8 @@ export interface CaddieState {
    * the matching variant, so this is the only way to know its id and stock.
    */
   resolveVariant: (productId: string, selection: Record<string, string>) => Promise<ProductVariant | null>;
+  /** What the customer picked on a card themselves, told to the server so "add it" knows. */
+  chooseOnCard: (choice: CardChoice) => void;
   details: Record<string, Product>;
   addToBasket: (items: BasketItem[]) => Promise<boolean>;
   /** A bundle deal into the store cart as one pack, at the pack price. Storefront only. */
@@ -570,6 +573,18 @@ export function useCaddie(page: PageContext): CaddieState {
     [details, remember, sessionId],
   );
 
+  /*
+   * A size picked on a card lived only in the card, and "add it" then meant
+   * nothing to the Caddie. Told to the server as it happens - fire and forget:
+   * a lost message costs one question, never a wrong basket.
+   */
+  const chooseOnCard = useCallback(
+    (choice: CardChoice) => {
+      void sendCardChoice(sessionId, choice).catch(() => undefined);
+    },
+    [sessionId],
+  );
+
   const resolveVariant = useCallback(
     async (productId: string, selection: Record<string, string>): Promise<ProductVariant | null> => {
       silentProducts.current.add(productId);
@@ -810,6 +825,7 @@ export function useCaddie(page: PageContext): CaddieState {
     submitJourney,
     loadProduct,
     resolveVariant,
+    chooseOnCard,
     details,
     addToBasket,
     addPack,
