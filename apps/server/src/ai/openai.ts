@@ -10,6 +10,8 @@ import { runTool, toolDefinitionsForVapi } from '../tools/index.js';
 import { costOfTokens } from '../usage/pricing.js';
 import { record } from '../usage/store.js';
 import { SYSTEM_PROMPT } from './prompt.js';
+import { verifyReply, withoutClaims } from './verify.js';
+import { namesADeal } from '../recommend/deals.js';
 
 /**
  * The Caddie's brain for text chat.
@@ -23,7 +25,8 @@ import { SYSTEM_PROMPT } from './prompt.js';
  * the prompt is unclear rather than a reason to raise the limit.
  */
 
-const MAX_STEPS = 4;
+// One more than the tools need: a reply that fails the check (verify.ts) gets one rewrite.
+const MAX_STEPS = 6;
 /*
  * Every turn kept here is resent on every call in the loop, so this is the
  * cheapest dial in the file. Eight covers "cheaper" and "the navy one"
@@ -94,7 +97,20 @@ async function callOnce(messages: ChatMessage[]): Promise<Response> {
 
 async function complete(messages: ChatMessage[]): Promise<{ choice: Choice; usage?: Usage }> {
   return inFlight.run(async () => {
-    let res = await callOnce(messages);
+    /*
+     * A call that hangs is retried once, not waited out. About one call in
+     * thirty stalled until the 45s limit and the customer got an error; the
+     * same request sent again answers in two or three seconds. So the limit
+     * is shorter (OPENAI_TIMEOUT_MS, 20s) and a timeout or dropped connection
+     * gets one more go - worst case about forty seconds, not a dead turn.
+     */
+    let res: Response;
+    try {
+      res = await callOnce(messages);
+    } catch (err) {
+      log.warn('openai.retrying_after_error', { err: String(err).slice(0, 200) });
+      res = await callOnce(messages);
+    }
 
     /*
      * A 429 here is OpenAI's own rate limit, not ours, and it is usually over
@@ -298,6 +314,25 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
     { role: 'user', content: userText },
   ];
 
+  /*
+   * What this turn's reply may rest on: the customer's own words, what is on
+   * their screen and in their basket, what they have told us, and every tool
+   * result this turn. Not the model's earlier replies - those are what is
+   * being checked. See verify.ts.
+   */
+  const evidence: string[] = [
+    userText,
+    ...messages.slice(1).filter((m) => m.role === 'system' || m.role === 'user').map((m) => String(m.content ?? '')),
+    // What the tools said in the last turns: "how much is the pack?" is answered from a card already shown.
+    session.recentEvidence ?? '',
+  ];
+  const toolEvidence: string[] = [];
+  /** Kept for the next turn's check: this turn's tool results first, then what was already kept. */
+  const keepEvidence = () =>
+    sessions.patch(sessionId, { recentEvidence: [...toolEvidence, session.recentEvidence ?? ''].join('\n').slice(0, 8000) });
+  let lastToolSpeech = '';
+  let rewrote = false;
+
   let attachment: CaddieAttachment | undefined;
   const actions: CartAction[] = [];
   let attachmentWeight = -1;
@@ -320,6 +355,88 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
     log.debug('openai.step', { step, ms: Date.now() - startedAt, finish: choice.finish_reason });
 
     const calls = choice.message.tool_calls ?? [];
+
+    /*
+     * The reply, checked before anyone hears it. A claim the tools did not
+     * back gets one rewrite, told exactly what to drop; if the rewrite still
+     * makes one, those sentences go, and if nothing is left, the tool's own
+     * words - which are always exact - are what the customer hears.
+     */
+    let finalText = choice.message.content?.trim() ?? '';
+    /*
+     * Asking the customer to confirm a product's name without having looked.
+     * "Could you confirm the exact name of the jacket?" came back for the Tour
+     * Championship Jacket, with no search at all - the catalogue check would
+     * have answered it. Sent back once to look first.
+     */
+    const asksForName = /\b(confirm|check)\b[^.?]{0,40}\b(exact |product |full |the )?name\b|\bunder (a )?(slightly )?different name\b/i.test(finalText);
+    const checked = evidence.some((entry) => entry.includes('Catalogue check:'));
+    // Asking for the name when the catalogue has not been checked for it - whether or not anything else was searched.
+    if (calls.length === 0 && !rewrote && !checked && asksForName) {
+      rewrote = true;
+      log.warn('reply.asked_without_looking', { sessionId });
+      messages.push({ role: 'assistant', content: finalText });
+      messages.push({
+        role: 'system',
+        content:
+          'Do not ask them to confirm the name - look it up. Call search_products with the name they gave as productName; the catalogue check says whether Druids sells it. Then answer.',
+      });
+      continue;
+    }
+    /*
+     * A deal named, and answered with a question instead of the deal. "An
+     * Ambassador Pack, I mostly play in the rain" got "which version would you
+     * like?" with no tool called - the tool reads the weather and picks Cool &
+     * Wet itself. Sent back once to call it.
+     */
+    if (calls.length === 0 && !rewrote && step === 0 && namesADeal(userText) && /\?\s*$/.test(finalText)) {
+      rewrote = true;
+      log.warn('reply.skipped_the_deal', { sessionId });
+      messages.push({ role: 'assistant', content: finalText });
+      messages.push({
+        role: 'system',
+        content:
+          'They named a deal. Call recommend_pack with their words (including any weather or trip) before asking anything - it builds the pack, or tells you exactly what to ask.',
+      });
+      continue;
+    }
+    /*
+     * The catalogue check has already answered - nothing is called that - and
+     * the reply still hedges: "I couldn't find it, could you check the name?"
+     * That reads as though it might exist. Said plainly, once.
+     */
+    const provedAbsent = evidence.some((entry) => entry.includes('nothing in the Druids catalogue is called'));
+    if (calls.length === 0 && !rewrote && provedAbsent && asksForName) {
+      rewrote = true;
+      log.warn('reply.hedged_after_check', { sessionId });
+      messages.push({ role: 'assistant', content: finalText });
+      messages.push({
+        role: 'system',
+        content:
+          'The catalogue check covered every product: Druids does not sell it. Say "we don\'t stock the [name]" plainly, then offer the closest options. Do not ask them to check or confirm the name.',
+      });
+      continue;
+    }
+    if (calls.length === 0 && finalText) {
+      const violations = verifyReply(finalText, evidence.join('\n'), attachment);
+      if (violations.length && !rewrote) {
+        rewrote = true;
+        log.warn('reply.unverified', { sessionId, claims: violations.map((v) => `${v.kind}:${v.claim}`) });
+        messages.push({ role: 'assistant', content: finalText });
+        messages.push({
+          role: 'system',
+          content: `Your reply stated things no tool gave you this turn: ${violations
+            .map((v) => v.claim)
+            .join(', ')}. Rewrite it using only prices, product names and counts from this turn's tool results and what is on screen - leave out anything you cannot back. Do not mention this check.`,
+        });
+        continue;
+      }
+      if (violations.length) {
+        log.warn('reply.unverified_after_rewrite', { sessionId, claims: violations.map((v) => `${v.kind}:${v.claim}`) });
+        finalText = withoutClaims(finalText, violations) || lastToolSpeech || 'Let me check that properly - could you ask me again?';
+      }
+    }
+
     if (calls.length === 0) {
       log.info('openai.turn', {
         sessionId,
@@ -355,8 +472,9 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
           },
         });
       }
+      if (toolEvidence.length) await keepEvidence();
       return {
-        text: choice.message.content?.trim() || 'Sorry, I did not catch that.',
+        text: finalText || 'Sorry, I did not catch that.',
         attachment,
         ...(actions.length ? { actions } : {}),
       };
@@ -470,17 +588,18 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
         }
       }
 
-      messages.push({
-        role: 'tool',
-        tool_call_id: entry.call.id,
-        content: result.facts ? `${result.speech}\n\nFACTS (data, do not read aloud):\n${result.facts}` : result.speech,
-      });
+      const content = result.facts ? `${result.speech}\n\nFACTS (data, do not read aloud):\n${result.facts}` : result.speech;
+      evidence.push(content);
+      toolEvidence.push(content);
+      if (result.speech) lastToolSpeech = result.speech;
+      messages.push({ role: 'tool', tool_call_id: entry.call.id, content });
     }
   }
 
   // Ran out of steps: say so rather than leaving the customer hanging.
   return {
-    text: 'I am having trouble pulling that together right now. Could you try asking a different way?',
+    // The last tool's own words are exact; a generic apology is only for when there are none.
+    text: lastToolSpeech || 'I am having trouble pulling that together right now. Could you try asking a different way?',
     attachment,
     ...(actions.length ? { actions } : {}),
   };

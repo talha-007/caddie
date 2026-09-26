@@ -174,7 +174,7 @@ const CASES = [
     id: 'size-loose',
     why: 'A loose fit is weighed, not ignored - and the size still comes from the tool',
     turns: ['My chest is 42 inches but I like my tops loose. What size mens polo?'],
-    check: (text, shown) => shown?.kind === 'size' && ['L', 'XL'].includes(shown.recommendation.size) && /XL/.test(text),
+    check: (text, shown) => shown?.kind === 'size' && ['L', 'XL'].includes(shown.recommendation.size) && /XL|extra large|x-large/i.test(text),
   },
   {
     id: 'memory',
@@ -233,6 +233,44 @@ const CASES = [
     turns: ['show me mens polos', 'is the first one waterproof?'],
     check: (text) => !/\b(yes|it is|it's) (fully |completely )?waterproof\b/i.test(text) || /not|doesn't|does not|can't confirm/i.test(text),
   },
+  /* ---- Questions about a product: colours, sizes, stock, price in a size ---- */
+
+  {
+    id: 'product-second-in-xl',
+    why: '"Is the second one in XL?" is about the second card, answered from its stock',
+    turns: ['show me mens polos', 'is the second one in XL?'],
+    check: (text, shown, cards) => {
+      const second = cards[0]?.kind === 'products' ? cards[0].products[1] : undefined;
+      const name = second?.title.split(' - ')[0].toLowerCase() ?? '';
+      return !!name && text.toLowerCase().includes(name) && /(in stock|available|sold out|out of stock)/i.test(text);
+    },
+  },
+  {
+    id: 'product-colours-first',
+    why: 'Colours of "the first one" - its own and its other colourways, not "which product?"',
+    turns: ['show me mens polos', 'what colours does the first one come in?'],
+    check: (text, shown, cards) => {
+      const first = cards[0]?.kind === 'products' ? cards[0].products[0] : undefined;
+      const name = first?.title.split(' - ')[0].toLowerCase() ?? '';
+      return !!name && text.toLowerCase().includes(name) && !/which (one|product)/i.test(text);
+    },
+  },
+  {
+    id: 'product-it-in-2xl',
+    why: '"How much is it in 2XL?" follows the product just discussed - a price for that size, or sold out',
+    turns: ['show me mens polos', 'tell me about the first one', 'how much is it in 2XL?'],
+    check: (text, shown, cards) => {
+      const first = cards[0]?.kind === 'products' ? cards[0].products[0] : undefined;
+      const name = first?.title.split(' - ')[0].toLowerCase() ?? '';
+      return !!name && text.toLowerCase().includes(name) && /(£\s?\d|sold out|not available|out of stock)/i.test(text);
+    },
+  },
+  {
+    id: 'pack-price-followup',
+    why: '"How much is the pack?" gets the price on the card - the reply check must not strip it',
+    turns: ['show me the mixed conditions ambassador pack', 'how much is the pack?'],
+    check: (text) => /£\s?\d/.test(text),
+  },
   {
     id: 'just-this',
     why: '"Just the jacket" means no more selling',
@@ -264,16 +302,21 @@ for (const testCase of CASES) {
   let last = '';
   // The card, for checks about what was shown rather than what was said.
   let shown;
+  // Every card in the conversation, in order - "the second one" refers back to an earlier card.
+  const cards = [];
   const startedAt = Date.now();
   try {
-    for (const turn of testCase.turns) ({ text: last, attachment: shown } = await send(sessionId, turn));
+    for (const turn of testCase.turns) {
+      ({ text: last, attachment: shown } = await send(sessionId, turn));
+      if (shown) cards.push(shown);
+    }
   } catch (err) {
     last = `ERROR ${String(err)}`;
   }
   const ms = Date.now() - startedAt;
   timings.push(ms / testCase.turns.length);
   const clean = normalise(last);
-  const pass = !clean.startsWith('ERROR') && testCase.check(clean, shown);
+  const pass = !clean.startsWith('ERROR') && testCase.check(clean, shown, cards);
   results.push({ id: testCase.id, pass, text: clean });
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${testCase.id.padEnd(22)} ${clean.replace(/\s+/g, ' ').slice(0, 115)}`);
 }

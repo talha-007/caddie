@@ -349,6 +349,31 @@ Conversations are kept for seven days and then expire. Client labels are a
 salted hash of the address rather than the address, salted with `ADMIN_TOKEN`
 so every instance derives the same label.
 
+## What is checked before a reply goes out
+
+The prompt asks the model not to invent things; `src/ai/verify.ts` makes sure.
+Every reply is checked, in code, against the evidence for that turn - the
+customer's words, what is on screen, their basket, and the tool results of
+this turn and the last few (`session.recentEvidence`):
+
+- every **£ amount** must be in the evidence, or be the difference of two that
+  are (a saving);
+- every **product name** must be one the tools or the screen mentioned;
+- a **count** like "six polos" must match what the card holds.
+
+A reply that fails gets one rewrite, told what to drop; if it fails again the
+offending sentences are removed, and if nothing is left the tool's own
+`speech` is used. The same rewrite catches three habits: asking the customer
+to confirm a product's name without running the catalogue check, hedging
+after the check has said we don't stock it, and answering a named deal with a
+question instead of calling `recommend_pack`. `reply.unverified` and
+`reply.asked_without_looking` in the log show when it happens.
+
+**Product questions go through `product_info`.** Colours, sizes, stock and the
+price in a size come from the variants (`src/recommend/productFacts.ts`), and
+"the second one", "the navy one", "this", "it" are resolved from what is on
+screen, the page and the last product talked about (`src/session/screen.ts`).
+
 ## Running under load
 
 The things that only bite at scale, and what handles them.
@@ -359,6 +384,8 @@ The things that only bite at scale, and what handles them.
 | **Upstream timeouts** | Node's `fetch` has none, so a hung dependency holds a customer's request until the socket gives up. Everything outbound goes through `fetchWithTimeout` in `src/lib/http.ts`. |
 | **Model concurrency** | Capped by a semaphore (`OPENAI_MAX_CONCURRENT`, default 25). Past that they queue here rather than becoming a wall of 429s at the provider. `GET /health` shows `inFlight` and `queued`. |
 | **Provider 429s** | One short retry, honouring `retry-after`. OpenAI's limit clears in seconds, unlike Shopify's. |
+| **OpenAI hangs** | 20s limit (`OPENAI_TIMEOUT_MS`) and one retry on a timeout or dropped connection. About one call in thirty stalled until 45s and the customer got an error; sent again, it answers in seconds. |
+| **Redis down or refusing** | Every command times out at 1.5s and Redis is then skipped for 10s, so requests use memory at once. Sessions are always kept in memory too, and the newer copy wins. A wrong Redis password once hung every chat on the live server while `/health` said ok - `/health` now reports `redis.usable`. |
 | **Webhook bursts** | A bulk edit fires one webhook per product. They are collected for 1.5s; past fifteen it does a single delta pull rather than 2,442 separate reads. |
 | **Overlapping syncs** | One delta at a time. On a large catalogue a pull can outlast its own interval, and two would race to write the mirror. |
 | **One bad request** | `unhandledRejection` is logged and survived - a malformed webhook took the whole process down once. An `uncaughtException` still exits, because the process state is then unknown. |

@@ -185,7 +185,8 @@ export const env = {
      * A hung call holds a customer's request open with nothing to show for it.
      * Long enough for a slow answer, short enough to fail and let them retry.
      */
-    timeoutMs: Number(optional('OPENAI_TIMEOUT_MS', '45000')),
+    // Short, with one retry in openai.ts: a stalled call is sent again rather than waited out.
+    timeoutMs: Number(optional('OPENAI_TIMEOUT_MS', '20000')),
     /**
      * Model calls allowed at once. Past this they queue here rather than
      * turning into a wall of 429s at the provider.

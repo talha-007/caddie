@@ -28,6 +28,19 @@ import { log } from './logger.js';
 let client: Redis | null = null;
 let subscriber: Redis | null = null;
 let warned = false;
+let createdAt = 0;
+/** Until when Redis is treated as down: callers get null and use memory straight away. */
+let downUntil = 0;
+let lastError: string | null = null;
+
+/**
+ * How long a failure keeps Redis out of the path. Long enough that a turn's
+ * dozen session reads and writes do not each wait on a dead connection; short
+ * enough that a Redis that comes back is used again within seconds.
+ */
+const DOWN_FOR_MS = 10_000;
+/** A fresh connection gets this long to become ready before its queue counts as a hang. */
+const STARTUP_GRACE_MS = 5_000;
 
 function create(label: string): Redis {
   const redis = new Redis(env.redisUrl, {
@@ -41,11 +54,19 @@ function create(label: string): Redis {
     enableOfflineQueue: true,
     maxRetriesPerRequest: 2,
     connectTimeout: 5000,
+    /*
+     * No command waits longer than this. With the password wrong, Redis
+     * accepted the connection and refused every command, the queue held them,
+     * and every chat on the live store hung for 40 seconds and more while
+     * /health still said all was well.
+     */
+    commandTimeout: 1500,
     lazyConnect: false,
     retryStrategy: (attempt) => Math.min(attempt * 200, 5000),
   });
 
   redis.on('error', (err) => {
+    markRedisDown(err);
     // One line per failure, not per retry.
     if (!warned) {
       warned = true;
@@ -57,18 +78,58 @@ function create(label: string): Redis {
   });
 
   redis.on('connect', () => log.info('redis.connected', { label }));
+  // Ready means authenticated and answering - not merely a socket that opened.
+  redis.on('ready', () => {
+    downUntil = 0;
+    lastError = null;
+  });
   return redis;
+}
+
+/**
+ * A command failed or timed out: stop sending Redis anything for a while.
+ * Every caller already falls back to memory when it gets no client - this is
+ * what makes them do it at once, instead of each waiting out a timeout.
+ */
+export function markRedisDown(err?: unknown): void {
+  downUntil = Date.now() + DOWN_FOR_MS;
+  if (err) lastError = String(err).slice(0, 200);
 }
 
 export function redisEnabled(): boolean {
   return Boolean(env.redisUrl);
 }
 
-/** The shared connection for reads and writes. */
+/** Configured, connected, authenticated and not in a recent failure. */
+export function redisUsable(): boolean {
+  if (!client) return false;
+  if (Date.now() < downUntil) return false;
+  if (client.status === 'ready') return true;
+  // Just started: the offline queue holds commands until it is ready - see create().
+  return Date.now() - createdAt < STARTUP_GRACE_MS && (client.status === 'connecting' || client.status === 'connect');
+}
+
+/** For /health: whether the shared state is really in Redis right now. */
+export function redisState(): { configured: boolean; usable: boolean; status: string; lastError: string | null } {
+  return {
+    configured: redisEnabled(),
+    usable: redisEnabled() ? (redis(), redisUsable()) : false,
+    status: client?.status ?? 'none',
+    lastError,
+  };
+}
+
+/**
+ * The shared connection for reads and writes - or null when Redis is not
+ * configured, or not usable right now. Null always means "use memory".
+ */
 export function redis(): Redis | null {
   if (!env.redisUrl) return null;
-  if (!client) client = create('main');
-  return client;
+  if (!client) {
+    client = create('main');
+    createdAt = Date.now();
+  }
+  return redisUsable() ? client : null;
 }
 
 /**

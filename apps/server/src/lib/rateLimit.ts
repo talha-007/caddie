@@ -1,5 +1,5 @@
 import { log } from './logger.js';
-import { redis } from './redis.js';
+import { markRedisDown, redis } from './redis.js';
 
 /**
  * Rate limiting.
@@ -90,6 +90,7 @@ export async function consumeShared(key: string, limit: Limit): Promise<LimitRes
     return { ok: true, remaining: Math.max(0, limit.max - count) };
   } catch (err) {
     // Never let the limiter become the reason a customer cannot shop.
+    markRedisDown(err);
     log.warn('ratelimit.redis_failed', { err: String(err) });
     return consumeLocal(key, limit);
   }

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { CaddieAttachment } from '@caddie/shared';
 import { log } from '../lib/logger.js';
-import { redis, redisSubscriber } from '../lib/redis.js';
+import { markRedisDown, redis, redisSubscriber } from '../lib/redis.js';
 
 /**
  * During a voice call the model speaks, but the cards have to appear on
@@ -71,6 +71,7 @@ export function publish(event: Omit<CaddieEvent, 'at'>): void {
    * once everywhere else.
    */
   client.publish(CHANNEL, JSON.stringify(full)).catch((err) => {
+    markRedisDown(err);
     log.warn('bus.publish_failed', { err: String(err) });
     // Redis is down; at least serve the customers on this instance.
     emitter.emit(full.sessionId, full);

@@ -31,6 +31,11 @@ const KEYWORDS: Array<{ words: RegExp; match: RegExp }> = [
   { words: /\bplayers?\b|\bholiday\b|\bsummer bundle\b/i, match: /players|summer/ },
 ];
 
+/** Their words name one of the store's deals - "the Ambassador Pack", "mixed conditions". */
+export function namesADeal(text: string): boolean {
+  return KEYWORDS.some((entry) => entry.words.test(text));
+}
+
 /** A bundle asked for without naming one: "any bundles?", "what deals do you have". */
 export function asksForDeals(query: string): boolean {
   return /\b(bundles?|deals?|packs?|offers?|multi ?buys?)\b/i.test(query);

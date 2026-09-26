@@ -1,5 +1,5 @@
 import { log } from '../lib/logger.js';
-import { redis, redisEnabled } from '../lib/redis.js';
+import { markRedisDown, redis, redisEnabled } from '../lib/redis.js';
 
 /**
  * What we spent, and on whose conversation.
@@ -199,14 +199,20 @@ export const usage: UsageStore = redisEnabled() ? new RedisUsageStore() : new Me
  * a line on a dashboard; a thrown one costs the customer their answer.
  */
 export function record(event: UsageEvent): void {
-  void usage.record(event).catch((err) => log.warn('usage.record_failed', { err: String(err) }));
+  void usage.record(event).catch((err) => {
+    markRedisDown(err);
+    log.warn('usage.record_failed', { err: String(err) });
+  });
 }
 
 export function recordMessage(sessionId: string, role: TranscriptLine['role'], text: string): void {
   if (!text.trim()) return;
   void usage
     .recordMessage(sessionId, { at: Date.now(), role, text })
-    .catch((err) => log.warn('usage.message_failed', { err: String(err) }));
+    .catch((err) => {
+      markRedisDown(err);
+      log.warn('usage.message_failed', { err: String(err) });
+    });
 }
 
 export { RETENTION_MS };

@@ -1,7 +1,7 @@
 import type { CaddieMessage } from '@caddie/shared';
 import type { CaddieSession, SessionStore } from './store.js';
 import { log } from '../lib/logger.js';
-import { redis } from '../lib/redis.js';
+import { markRedisDown, redis } from '../lib/redis.js';
 
 /**
  * Sessions in Redis, so any instance can serve any customer.
@@ -42,6 +42,7 @@ export class RedisSessionStore implements SessionStore {
       const raw = await client.get(PREFIX + id);
       return raw ? (JSON.parse(raw) as CaddieSession) : null;
     } catch (err) {
+      markRedisDown(err);
       log.warn('session.read_failed', { id, err: String(err) });
       return null;
     }
@@ -64,6 +65,7 @@ export class RedisSessionStore implements SessionStore {
       // Every save renews the two hours, so an active conversation never expires.
       await client.set(PREFIX + session.id, JSON.stringify(session), 'EX', TTL_SECONDS);
     } catch (err) {
+      markRedisDown(err);
       log.warn('session.write_failed', { id: session.id, err: String(err) });
     }
   }
@@ -89,6 +91,8 @@ export class RedisSessionStore implements SessionStore {
     const preferences = { ...session.preferences, ...defined(patch.preferences ?? {}) };
 
     Object.assign(session, defined(patch), { sizeProfile, preferences });
+    // A new screen: "it" no longer means the product talked about on the last one.
+    if (patch.lastShown && patch.focusProductId === undefined) delete session.focusProductId;
     await this.save(session);
     return session;
   }

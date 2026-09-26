@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { catalogueReady, catalogueState } from '../catalog/sync.js';
 import { bestSellersState } from '../catalog/bestSellers.js';
+import { redisState } from '../lib/redis.js';
 import { dealsState } from '../catalog/bundles.js';
 import { modelLoad } from '../ai/openai.js';
 import { storefrontCartEnabled } from '../shopify/storefrontCart.js';
@@ -36,6 +37,12 @@ healthRouter.get('/', (_req, res) => {
     // The store's bundle deals, read from the live theme.
     deals: dealsState(),
     bestSellers: bestSellersState(),
+    /*
+     * Whether conversations are really in Redis. With the password wrong on
+     * the live server, /health said ok while every chat hung - this says
+     * "down, serving from memory" instead of nothing.
+     */
+    redis: redisState(),
     // Queued means customers are waiting on the model, not on us.
     model: modelLoad(),
     // UCP is throttled; the Storefront API is not rate-limited for buyers.

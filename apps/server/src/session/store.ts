@@ -1,5 +1,5 @@
 import type { CaddieMessage, PageContext, SizeInput } from '@caddie/shared';
-import { redisEnabled } from '../lib/redis.js';
+import { redisEnabled, redisUsable } from '../lib/redis.js';
 import type { ShopperProfile } from '../shopper/profile.js';
 import { RedisSessionStore } from './redisStore.js';
 
@@ -67,6 +67,14 @@ export interface CaddieSession {
    * "swap the polo" still has an outfit to swap in. See outfitShown.
    */
   lastOutfit?: CaddieSession['lastShown'];
+  /** The product last talked about, so "how much is it in 2XL?" follows "what colours does the first one come in?". */
+  focusProductId?: string;
+  /**
+   * The tool results of the last couple of turns, for checking replies only
+   * (verify.ts) - never sent to the model. "How much is the pack?" is
+   * answered from the card on screen, whose price came a turn earlier.
+   */
+  recentEvidence?: string;
   /**
    * Every bundle deal shown this session, as it was last shown, by handle. So
    * "the mixed conditions pack" is the one they saw, not a fresh pick, and
@@ -197,6 +205,8 @@ export class MemorySessionStore implements SessionStore {
     const preferences = { ...session.preferences, ...defined(patch.preferences ?? {}) };
 
     Object.assign(session, defined(patch), { sizeProfile, preferences });
+    // A new screen: "it" no longer means the product talked about on the last one.
+    if (patch.lastShown && patch.focusProductId === undefined) delete session.focusProductId;
     await this.save(session);
     return session;
   }
@@ -216,9 +226,52 @@ export class MemorySessionStore implements SessionStore {
 }
 
 /**
- * In Redis when there is one, in memory otherwise.
+ * Redis for sharing, memory underneath it, always.
  *
- * Chosen once at startup rather than per call, so a Redis blip does not
- * silently move a conversation between two different stores.
+ * Choosing one store at startup meant that when Redis stopped answering - a
+ * wrong password, on the live server - every read and write waited on it and
+ * every conversation hung. Now every session is also kept in this process,
+ * Redis is used while it answers, and the newer of the two copies wins on
+ * read, so a conversation carries on through a Redis outage and is not rolled
+ * back when Redis returns. With more than one instance an outage means each
+ * serves its own customers from memory until Redis is back.
  */
-export const sessions: SessionStore = redisEnabled() ? new RedisSessionStore() : new MemorySessionStore();
+class ResilientSessionStore implements SessionStore {
+  private readonly shared = new RedisSessionStore();
+  private readonly local = new MemorySessionStore();
+
+  async get(id: string): Promise<CaddieSession | null> {
+    const [remote, mine] = await Promise.all([redisUsable() ? this.shared.get(id) : Promise.resolve(null), this.local.get(id)]);
+    if (remote && mine) return remote.updatedAt >= mine.updatedAt ? remote : mine;
+    return remote ?? mine;
+  }
+
+  async getOrCreate(id: string): Promise<CaddieSession> {
+    return (await this.get(id)) ?? this.local.getOrCreate(id);
+  }
+
+  async save(session: CaddieSession): Promise<void> {
+    await this.local.save(session);
+    if (redisUsable()) await this.shared.save(session);
+  }
+
+  async patch(id: string, patch: Partial<Omit<CaddieSession, 'id'>>): Promise<CaddieSession> {
+    const session = await this.getOrCreate(id);
+    const sizeProfile = { ...session.sizeProfile, ...defined(patch.sizeProfile ?? {}) };
+    const preferences = { ...session.preferences, ...defined(patch.preferences ?? {}) };
+    Object.assign(session, defined(patch), { sizeProfile, preferences });
+    // A new screen: "it" no longer means the product talked about on the last one.
+    if (patch.lastShown && patch.focusProductId === undefined) delete session.focusProductId;
+    await this.save(session);
+    return session;
+  }
+
+  async append(id: string, messages: CaddieMessage[]): Promise<void> {
+    const session = await this.getOrCreate(id);
+    session.messages.push(...messages);
+    await this.save(session);
+  }
+}
+
+/** Resilient when Redis is configured; memory alone when it is not. */
+export const sessions: SessionStore = redisEnabled() ? new ResilientSessionStore() : new MemorySessionStore();

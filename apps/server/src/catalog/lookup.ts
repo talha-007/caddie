@@ -42,10 +42,13 @@ function singular(word: string): string {
   return word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word;
 }
 
-/** The words that make a name a name: not the garment, colour or range. */
+/** Sizes are never part of a name: "player polo XL" is the Player polo, in XL. */
+const SIZE_WORD = /^(xxs|xs|s|m|l|xl|xxl|xxxl|[2-5]xl|small|medium|large|\d{1,3}(\/\d{1,2})?)$/;
+
+/** The words that make a name a name: not the garment, colour, range or size. */
 export function distinctiveWords(name: string): string[] {
   const { rest } = parseColours(parseRange(name).rest);
-  return words(rest).filter((word) => !GARMENT_WORDS.has(word) && !GARMENT_WORDS.has(singular(word)));
+  return words(rest).filter((word) => !GARMENT_WORDS.has(word) && !GARMENT_WORDS.has(singular(word)) && !SIZE_WORD.test(word));
 }
 
 function brandProducts(): Product[] {
@@ -66,14 +69,22 @@ function brandProducts(): Product[] {
  */
 export function unknownNameIn(query: string): Existence | null {
   const wanted = distinctiveWords(query);
-  if (wanted.length === 0 || !catalogueReady()) return null;
-  const products = brandProducts();
-  const known = (word: string) =>
-    products.some((product) => {
-      const text = `${product.title} ${product.productType ?? ''} ${product.description ?? ''}`.toLowerCase();
-      return new RegExp(`\\b${singular(word)}`).test(text);
-    });
-  if (wanted.every(known)) return null;
+  if (!catalogueReady()) return null;
+  /*
+   * Only something shaped like a product name is checked: two or more
+   * distinctive words, at least one of which Druids use in their product
+   * names ("Tour", "Vento"). "Tour Championship jacket" searched without
+   * productName was never checked, and the Caddie asked the customer to
+   * confirm the name.
+   *
+   * The rule this replaces - any word found nowhere in the catalogue makes it
+   * a name - called "a lightweight polo for Spain" and "something for a
+   * wedding" products we do not stock. A description has no name words, so
+   * it is never mistaken for one.
+   */
+  if (wanted.length < 2) return null;
+  const titleWords = new Set(brandProducts().flatMap((product) => words(product.title).map(singular)));
+  if (!wanted.some((word) => titleWords.has(singular(word)))) return null;
   return lookupProductName(query);
 }
 

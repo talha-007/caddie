@@ -106,18 +106,23 @@ describe('verified product attributes', () => {
 describe('customer words into catalogue words', () => {
   it('a rain top is a jacket that has to be waterproof', () => {
     const q = normaliseQuery('rain top');
-    expect(q.query).toBe('jacket');
+    expect(q.query).toBe('rain jacket');
     expect(q.features).toEqual(['waterproof']);
   });
 
   it('a jumper is a midlayer, golf bottoms are trousers', () => {
-    expect(normaliseQuery('navy jumper').query).toBe('navy midlayer hoodie');
+    expect(normaliseQuery('navy jumper').query).toBe('navy jumper midlayer hoodie');
     expect(normaliseQuery('golf bottoms').query).toBe('trousers');
+  });
+
+  it('keeps the word the product is named by - INFINITE RAIN TROUSERS was lost as plain "trousers"', () => {
+    expect(normaliseQuery('rain trousers').query).toBe('rain trousers');
+    expect(normaliseQuery('rain trousers').features).toEqual(['waterproof']);
   });
 
   it('keeps every describing word', () => {
     expect(normaliseQuery('plain white polo').query).toBe('plain white polo');
-    expect(normaliseQuery('plain white rain top').query).toBe('plain white jacket');
+    expect(normaliseQuery('plain white rain top').query).toBe('plain white rain jacket');
   });
 
   it('hears the features a customer asks for', () => {
@@ -267,6 +272,10 @@ describe('whether we stock a named product', () => {
     expect(unknownNameIn('Tour Championship Jacket')?.status).toBe('not-stocked');
     // Ordinary describing words are in descriptions, so they are never taken for a name.
     expect(unknownNameIn('breathable polo')).toBeNull();
+    // Nor a place, an occasion or a size - each was once called a product we do not stock.
+    expect(unknownNameIn('lightweight polo for spain')).toBeNull();
+    expect(unknownNameIn('something for a wedding')).toBeNull();
+    expect(unknownNameIn('vento polo xl')).toBeNull();
   });
 
   it('claims nothing about a kind of thing', () => {
@@ -394,7 +403,17 @@ describe('search_products with a shopper profile', () => {
     const { shown, result } = await search({ query: 'rain top' }, 'I need a rain top');
     expect(shown[0]).toBe('STORM JACKET - BLACK');
     expect(shown).not.toContain('RAINSUIT JACKET - GREY');
-    expect(result.facts).toContain('rain top -> jacket');
+    expect(result.facts).toContain('rain top -> rain jacket');
+  });
+
+  it('finds a garment with a needed feature even when it is not on the first page of results', async () => {
+    // Thirty ordinary trousers ahead of the one that says waterproof - the live store's joggers and INFINITE RAIN TROUSERS.
+    const plain = Array.from({ length: 30 }, (_, i) => garment(`TECH TROUSER ${i} - NAVY`, { productType: 'TROUSERS', sizes: ['32', '34'], description: 'Stretch trousers.' }));
+    const rain = garment('INFINITE RAIN TROUSERS - BLACK', { productType: 'TROUSERS', sizes: ['32', '34'], description: 'Fully waterproof over trousers.' });
+    setCatalogueForTests([...plain, rain]);
+    const { shown, result } = await search({ query: 'trousers', features: ['waterproof'] }, 'I need waterproof trousers');
+    expect(shown[0]).toBe('INFINITE RAIN TROUSERS - BLACK');
+    expect(result.speech).not.toMatch(/could not find anything that meets/);
   });
 
   it('a hard per-item budget from earlier is kept on the next search', async () => {

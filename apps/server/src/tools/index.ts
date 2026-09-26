@@ -1,6 +1,6 @@
 import type { Cart, OutfitPiece, Product } from '@caddie/shared';
 import { z } from 'zod';
-import { FEATURE_LABEL, attributesOf, type Feature, type Weather } from '../catalog/attributes.js';
+import { FEATURE_LABEL, attributesOf, hasFeature, type Feature, type Weather } from '../catalog/attributes.js';
 import { parseRange, rangeOf, type Range } from '../catalog/audience.js';
 import { lookupProductName, unknownNameIn } from '../catalog/lookup.js';
 import { normaliseQuery } from '../catalog/taxonomy.js';
@@ -9,6 +9,8 @@ import { hasSignals, rankFacts, rankProducts } from '../recommend/rank.js';
 import { describeProfile, readIntent, type Budget } from '../shopper/profile.js';
 import { rankRequestFor, rememberShopper, shopperSizes } from '../shopper/remember.js';
 import { bestPicks, kindsNamed } from '../recommend/bestPicks.js';
+import { answerAbout, describeStock } from '../recommend/productFacts.js';
+import { resolveProduct } from '../session/screen.js';
 import { colourMatch, coloursOffered, matchesColourText, parseColours } from '../catalog/colour.js';
 import { allDeals, type DealRecipe } from '../catalog/bundles.js';
 import { log } from '../lib/logger.js';
@@ -436,7 +438,27 @@ const searchTool = defineTool({
           ...(known ? { known } : {}),
         })
       : [];
-    const found = [...inColour, ...wide.filter((product) => !inColour.some((hit) => hit.id === product.id))];
+    /*
+     * A feature they need is looked for across the whole range, not just the
+     * first page. "Waterproof trousers" searched as "trousers" found two dozen
+     * joggers, none waterproof, and the Caddie said Druids had none - while
+     * INFINITE RAIN TROUSERS, which says waterproof in its description, sat
+     * further down the list. Every garment the words match is checked for it.
+     */
+    const needed = request.features?.required ?? [];
+    const withFeature = needed.length
+      ? (
+          await searchProducts({
+            query,
+            limit: 400,
+            ...(ceiling !== undefined ? { maxPrice: ceiling } : {}),
+            ...(known ? { known } : {}),
+          })
+        ).filter((product) => needed.every((feature) => hasFeature(product, feature)))
+      : [];
+    const found = [...withFeature, ...inColour, ...wide].filter(
+      (product, index, all) => all.findIndex((other) => other.id === product.id) === index,
+    );
 
     /*
      * A product they named, checked against the whole catalogue - the one
@@ -571,7 +593,12 @@ const detailsTool = defineTool({
     required: ['productId'],
   },
   async run(args, ctx): Promise<ToolResult> {
-    const product = await getProductDetails(args.productId, args.options);
+    let product = await getProductDetails(args.productId, args.options);
+    // "The second one", "the navy one": what they can see, not an id to guess.
+    if (!product && !/^(gid:\/\/|\d+$)/.test(args.productId.trim())) {
+      const seen = resolveProduct(ctx.session, args.productId);
+      if (seen) product = await getProductDetails(seen.product.id, args.options);
+    }
     if (!product) {
       /*
        * A name, not an id, that matched nothing. The model reaches for this
@@ -603,10 +630,14 @@ const detailsTool = defineTool({
      * Caddie may make beyond name, price and stock.
      */
     const attributes = attributesOf(product);
+    // Now the one being talked about: "is it in XL?" next means this product.
+    await sessions.patch(ctx.session.id, { focusProductId: product.id });
     const verified = [
       attributes.features.length ? `Its description states: ${attributes.features.map((f) => FEATURE_LABEL[f]).join(', ')}.` : 'Its description states no technical features - do not claim any.',
       attributes.fit ? `Cut: ${attributes.fit}.` : '',
       attributes.materials.length ? `Fabric: ${attributes.materials.join(', ')}.` : '',
+      // Every size and colour, in stock or not, from the full product - a narrowed lookup holds one variant.
+      `Stock: ${describeStock(productById(product.id) ?? product)}`,
     ]
       .filter(Boolean)
       .join(' ');
@@ -1625,7 +1656,12 @@ const addToCartTool = defineTool({
     required: ['productId'],
   },
   async run(args, ctx): Promise<ToolResult> {
-    const product = await getProductDetails(args.productId, args.options);
+    let product = await getProductDetails(args.productId, args.options);
+    // "The second one", "the navy one": what they can see, not an id to guess.
+    if (!product && !/^(gid:\/\/|\d+$)/.test(args.productId.trim())) {
+      const seen = resolveProduct(ctx.session, args.productId);
+      if (seen) product = await getProductDetails(seen.product.id, args.options);
+    }
     if (!product) {
       return { speech: 'I could not find that product. Let me search again rather than guess.' };
     }
@@ -2187,6 +2223,62 @@ const viewCartTool = defineTool({
   },
 });
 
+/* ---------------- product_info ---------------- */
+
+const infoSchema = z.object({
+  which: z.string().optional(),
+  question: z.string().optional(),
+});
+
+/**
+ * A question about one product, answered from its variants.
+ *
+ * Colours, sizes, stock, the price in a size: the model was reading these off
+ * raw option lists, and read a size list as stock and a starting price as the
+ * price. Which product they mean is worked out from what they can see ("the
+ * second one", "the navy one", "this") rather than an id the model copied.
+ */
+const productInfoTool = defineTool({
+  name: 'product_info',
+  description:
+    'Answer a question about one product: its colours, sizes, what is in stock, the price in a size. Pass `which` as the customer said it ("the second one", "the navy polo", "this", "the Vento") or a product id, and `question` in their words. It knows what is on screen and the page they are on. Use it for any "does it come in...", "is XL in stock", "what sizes", "how much in 2XL".',
+  schema: infoSchema,
+  parameters: {
+    type: 'object',
+    properties: {
+      which: { type: 'string', description: 'The product as the customer referred to it, or its id. Leave out for "this" / what they are looking at.' },
+      question: { type: 'string', description: 'The question in their words, in English: "is XL in stock?", "what colours?"' },
+    },
+    required: [],
+  },
+  async run(args, ctx): Promise<ToolResult> {
+    const said = ctx.utterance ?? '';
+    const question = `${args.question ?? ''} ${said}`.trim();
+    const byId = args.which && /^(gid:\/\/|\d+$)/.test(args.which.trim()) ? productById(args.which.trim()) : null;
+    const resolved =
+      (byId ? { product: byId, how: 'the id given' } : null) ??
+      (args.which ? resolveProduct(ctx.session, args.which) : null) ??
+      resolveProduct(ctx.session, said);
+    const product = resolved?.product ?? (args.which && !byId ? await getProductDetails(args.which) : null);
+
+    if (!product) {
+      const screen = (ctx.session.lastShown?.items ?? []).filter((item) => item.id);
+      return {
+        speech: screen.length ? 'Which one do you mean?' : 'Which product would you like to know about?',
+        facts: screen.length
+          ? `On screen, in order:\n${screen.map((item, i) => `${i + 1}. ${item.title} [${item.id}]`).join('\n')}\nAsk which, offering two or three of these by name.`
+          : 'Nothing is on screen. Search for what they mean first.',
+      };
+    }
+    const answer = answerAbout(product, question);
+    await sessions.patch(ctx.session.id, { focusProductId: product.id });
+    return {
+      speech: answer.speech,
+      facts: `About: ${product.title} [${product.id}] (${resolved?.how ?? 'by name'}).\n${answer.facts}\nAnswer only from these facts. Sizes, stock and prices are exact; do not add any.`,
+    };
+  },
+});
+
 /* ---------------- best_picks ---------------- */
 
 const picksSchema = z.object({
@@ -2359,6 +2451,7 @@ export const tools: CaddieTool[] = [
   viewCartTool,
   noteShopperTool,
   bestPicksTool,
+  productInfoTool,
 ] as CaddieTool[];
 
 const byName = new Map(tools.map((tool) => [tool.name, tool]));

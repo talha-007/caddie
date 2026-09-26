@@ -37,6 +37,9 @@ const MAPPINGS: Mapping[] = [
   { match: /\bskirts?\b/g, terms: 'skort' },
 ];
 
+/** Words in a customer's phrase that name no product - dropped once the catalogue's term is in. */
+const FILLER = new Set(['top', 'tops', 'bottoms', 'gear', 'wear', 'stuff', 'kit', 'golf', 'warm', 'layer', 'shell', 'coat']);
+
 export interface NormalisedQuery {
   /** The query in catalogue terms, every other word kept. */
   query: string;
@@ -53,9 +56,21 @@ export function normaliseQuery(raw: string): NormalisedQuery {
 
   for (const mapping of MAPPINGS) {
     query = query.replace(mapping.match, (phrase) => {
-      mapped.push(`${phrase.trim()} -> ${mapping.terms}`);
+      /*
+       * The customer's own words stay, the catalogue's are added. Replacing
+       * "rain trousers" with "trousers" threw away the one word in the
+       * product's name - INFINITE RAIN TROUSERS - and the search came back
+       * with joggers and "we don't have waterproof trousers". Only filler that
+       * names no product ("top", "bottoms", "gear") is dropped.
+       */
+      const kept = phrase
+        .trim()
+        .split(/\s+/)
+        .filter((word) => !FILLER.has(word) && !mapping.terms.split(' ').includes(word));
+      const replacement = [...kept, mapping.terms].join(' ');
+      mapped.push(`${phrase.trim()} -> ${replacement}`);
       for (const feature of mapping.features ?? []) features.add(feature);
-      return ` ${mapping.terms} `;
+      return ` ${replacement} `;
     });
   }
 
