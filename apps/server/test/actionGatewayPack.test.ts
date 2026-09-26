@@ -1,4 +1,5 @@
 import express from 'express';
+const { ownerHeaders } = await import('./support/ownership.js');
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CartAction, Product } from '@caddie/shared';
@@ -97,7 +98,7 @@ async function chat(utterance: string, args: Record<string, unknown> = {}) {
   return runTool('add_pack_to_cart', args, { session: await sessions.getOrCreate(id), utterance });
 }
 async function click(pieces: Array<{ productId: string; options: Record<string, string> }>) {
-  const r = await fetch(`${base}/api/session/${id}/add-pack`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-caddie-cart': 'theme' }, body: JSON.stringify({ handle: DEAL.handle, pieces }) });
+  const r = await fetch(`${base}/api/session/${id}/add-pack`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-caddie-cart': 'theme', ...(await ownerHeaders(id)) }, body: JSON.stringify({ handle: DEAL.handle, pieces }) });
   return (await r.json()) as { ok: boolean; actions?: CartAction[]; message?: string };
 }
 
@@ -162,7 +163,7 @@ describe('the pack card\'s Add button', () => {
     checkoutPrice = 26;
     const r = await fetch(`${base}/api/session/${id}/add-pack`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-caddie-cart': 'theme' },
+      headers: { 'Content-Type': 'application/json', 'x-caddie-cart': 'theme', ...(await ownerHeaders(id)) },
       body: JSON.stringify({ handle: priced.handle, pieces: [{ productId: POLO.id, options: { Size: 'S' } }, { productId: SOCKS.id, options: {} }] }),
     });
     const reply = (await r.json()) as { ok: boolean; message?: string };

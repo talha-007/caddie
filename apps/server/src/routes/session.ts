@@ -1,5 +1,5 @@
 import { Router, type RequestHandler } from 'express';
-import type { BasketSync, CardChoice, CartAction, ProfileRequest, SessionRestartResponse, UiActionResponse, UiAddRequest, UiCartLineRequest, UiPackAddRequest } from '@caddie/shared';
+import type { BasketSync, CardChoice, CartAction, ProfileRequest, SessionClaimResponse, SessionRestartResponse, UiActionResponse, UiAddRequest, UiCartLineRequest, UiPackAddRequest } from '@caddie/shared';
 import { z } from 'zod';
 import { noteCartMode } from '../lib/request.js';
 import { executeCommerceAction } from '../tools/actionGateway.js';
@@ -10,6 +10,7 @@ import { limitRoute } from '../lib/routeLimit.js';
 import { productById } from '../catalog/sync.js';
 import { sessions } from '../session/store.js';
 import { customerTurn, describeFocus, focusFromCard } from '../session/focus.js';
+import { claimSession, requireSessionOwner } from '../session/ownership.js';
 import { runTool } from '../tools/index.js';
 
 /**
@@ -36,6 +37,28 @@ export const sessionRouter: Router = Router();
  * gets near it; a script hammering one session, or many, does.
  */
 const writeLimit = limitRoute('session', (req) => req.params.id, LIMITS.sessionWritesPerSession, LIMITS.sessionWritesPerAddress) as RequestHandler<{ id: string }>;
+/*
+ * And only the browser that owns the session (session/ownership.ts) - checked
+ * first, so a caller with someone else's id is turned away before it can
+ * spend that session's allowance.
+ */
+const owner = requireSessionOwner((req) => req.params.id) as RequestHandler<{ id: string }>;
+const claimLimit = limitRoute('claim', (req) => req.params.id, LIMITS.sessionClaimsPerSession, LIMITS.sessionClaimsPerAddress) as RequestHandler<{ id: string }>;
+
+/**
+ * POST /api/session/:id/claim - make this session id the caller's. Once, per
+ * session: a session already claimed says so (409) and gives nothing away.
+ */
+sessionRouter.post('/:id/claim', claimLimit, async (req, res, next) => {
+  try {
+    const claimed = await claimSession(req.params.id);
+    if (!claimed.ok) return res.status(claimed.reason === 'taken' ? 409 : 400).json({ error: claimed.reason === 'taken' ? 'session_taken' : 'invalid_session' });
+    const body: SessionClaimResponse = { sessionId: req.params.id, sessionToken: claimed.sessionToken };
+    return res.json(body);
+  } catch (err) {
+    return next(err);
+  }
+});
 
 /**
  * POST /api/session/:id/choice
@@ -46,7 +69,7 @@ const writeLimit = limitRoute('session', (req) => req.params.id, LIMITS.sessionW
  * now says what they picked; it is kept for that product, and that product
  * becomes the one "it" means. Only options the product really has are kept.
  */
-sessionRouter.post('/:id/choice', writeLimit, async (req, res, next) => {
+sessionRouter.post('/:id/choice', owner, writeLimit, async (req, res, next) => {
   const sessionId = req.params.id;
   try {
     const body = (req.body ?? {}) as Partial<CardChoice>;
@@ -79,7 +102,7 @@ sessionRouter.post('/:id/choice', writeLimit, async (req, res, next) => {
   }
 });
 
-sessionRouter.post('/:id/restart', writeLimit, async (req, res, next) => {
+sessionRouter.post('/:id/restart', owner, writeLimit, async (req, res, next) => {
   const sessionId = req.params.id;
   try {
     const existing = await sessions.get(sessionId);
@@ -114,6 +137,8 @@ sessionRouter.post('/:id/restart', writeLimit, async (req, res, next) => {
         : {}),
       messages: [],
       ...(existing.cartId ? { cartId: existing.cartId } : {}),
+      // A new conversation on the same shopping session: the same owner, the same capability.
+      ...(existing.ownerHash ? { ownerHash: existing.ownerHash } : {}),
     };
     await sessions.save(fresh);
 
@@ -145,7 +170,7 @@ sessionRouter.post('/:id/restart', writeLimit, async (req, res, next) => {
  * Checked against what the store sells rather than taken as given - the body
  * comes from a browser.
  */
-sessionRouter.post('/:id/profile', writeLimit, async (req, res, next) => {
+sessionRouter.post('/:id/profile', owner, writeLimit, async (req, res, next) => {
   try {
     const body = (req.body ?? {}) as Partial<ProfileRequest>;
     const range = body.range === 'men' || body.range === 'women' || body.range === 'kids' ? body.range : undefined;
@@ -174,7 +199,7 @@ sessionRouter.post('/:id/profile', writeLimit, async (req, res, next) => {
  * every page load, so "swap the orange polo" and "what is in my basket" are
  * answered from what is really there.
  */
-sessionRouter.post('/:id/basket', writeLimit, async (req, res, next) => {
+sessionRouter.post('/:id/basket', owner, writeLimit, async (req, res, next) => {
   try {
     const body = req.body as Partial<BasketSync> | undefined;
     const lines = Array.isArray(body?.lines) ? body.lines.slice(0, 100) : [];
@@ -226,7 +251,7 @@ const addSchema = z.object({
   items: z.array(z.object({ productId: z.string().min(1).max(100), options: optionsSchema, quantity: z.number().int().min(1).max(10).optional() })).min(1).max(10),
 });
 
-sessionRouter.post('/:id/add', writeLimit, async (req, res, next) => {
+sessionRouter.post('/:id/add', owner, writeLimit, async (req, res, next) => {
   const sessionId = req.params.id;
   try {
     const parsed = addSchema.safeParse((req.body ?? {}) as UiAddRequest);
@@ -258,7 +283,7 @@ const packSchema = z.object({
   pieces: z.array(z.object({ productId: z.string().min(1).max(100), options: optionsSchema })).min(1).max(12),
 });
 
-sessionRouter.post('/:id/add-pack', writeLimit, async (req, res, next) => {
+sessionRouter.post('/:id/add-pack', owner, writeLimit, async (req, res, next) => {
   const sessionId = req.params.id;
   try {
     const parsed = packSchema.safeParse((req.body ?? {}) as UiPackAddRequest);
@@ -274,7 +299,7 @@ sessionRouter.post('/:id/add-pack', writeLimit, async (req, res, next) => {
 
 const lineSchema = z.object({ lineId: z.string().min(1).max(200), quantity: z.number().int().min(0).max(10) });
 
-sessionRouter.post('/:id/cart-line', writeLimit, async (req, res, next) => {
+sessionRouter.post('/:id/cart-line', owner, writeLimit, async (req, res, next) => {
   const sessionId = req.params.id;
   try {
     const parsed = lineSchema.safeParse((req.body ?? {}) as UiCartLineRequest);

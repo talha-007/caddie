@@ -1,4 +1,5 @@
 import express from 'express';
+import { ownerHeaders } from './support/ownership.js';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Product } from '@caddie/shared';
@@ -174,7 +175,7 @@ describe('a product in focus', () => {
     await onScreen([ELITE_WHITE, CLIMA_NAVY]);
     const tapped = await fetch(`${base}/api/session/${id}/choice`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await ownerHeaders(id)) },
       body: JSON.stringify({ productId: CLIMA_NAVY.id, options: { Size: 'M' } }),
     });
     expect(tapped.ok).toBe(true);

@@ -6,6 +6,7 @@ import { env } from '../env.js';
 import { log } from '../lib/logger.js';
 import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
+import { SESSION_TOKEN_HEADER, openSessionsAllowed, ownsSession } from '../session/ownership.js';
 import { shopperSizes } from '../shopper/remember.js';
 import { runTool } from '../tools/index.js';
 import { route } from '../ai/devRouter.js';
@@ -80,7 +81,17 @@ chatRouter.post('/', async (req, res, next) => {
     return res.status(400).json({ error: 'bad_request', detail: parsed.error.message });
   }
 
-  const sessionId = parsed.data.sessionId ?? randomUUID();
+  /*
+   * Only the browser that owns the session may talk in it (session/ownership.ts):
+   * the conversation, the profile and the basket are that shopper's. Checked
+   * before the rate limit, so someone else's id cannot spend their allowance.
+   */
+  const sessionId = parsed.data.sessionId ?? (openSessionsAllowed() ? randomUUID() : undefined);
+  if (!sessionId) return res.status(400).json({ error: 'session_required' });
+  if (!openSessionsAllowed() && !ownsSession(await sessions.get(sessionId), req.get(SESSION_TOKEN_HEADER) ?? undefined)) {
+    log.warn('session.not_owned', { path: '/api/chat', session: sessionId.slice(0, 8) });
+    return res.status(401).json({ error: 'session_not_owned' });
+  }
 
   // Public, unauthenticated, and every call spends money.
   const [bySession, byAddress] = await Promise.all([

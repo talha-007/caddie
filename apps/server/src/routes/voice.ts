@@ -10,6 +10,7 @@ import { consumeShared, LIMITS } from '../lib/rateLimit.js';
 import { clientKey, noteCartMode } from '../lib/request.js';
 import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
+import { SESSION_TOKEN_HEADER, openSessionsAllowed, ownsSession } from '../session/ownership.js';
 import { shopperSizes } from '../shopper/remember.js';
 import { clientHash } from '../usage/identity.js';
 import { recordMessage } from '../usage/store.js';
@@ -41,15 +42,21 @@ voiceRouter.post(
   '/',
   express.raw({ type: ['audio/*', 'video/webm', 'application/octet-stream'], limit: MAX_AUDIO_BYTES }),
   async (req, res, next) => {
+    const sessionId = (req.query.sessionId as string) || req.get('x-caddie-session') || (openSessionsAllowed() ? randomUUID() : '');
+    const mimeType = req.get('content-type') ?? 'audio/webm';
+    // The same proof as typed chat: the browser that owns the session (session/ownership.ts).
+    if (!sessionId) return res.status(400).json({ error: 'session_required' });
+    if (!openSessionsAllowed() && !ownsSession(await sessions.get(sessionId), req.get(SESSION_TOKEN_HEADER) ?? undefined)) {
+      log.warn('session.not_owned', { path: '/api/voice', session: sessionId.slice(0, 8) });
+      return res.status(401).json({ error: 'session_not_owned' });
+    }
+
     if (!transcribeEnabled() || !openaiEnabled()) {
       return res.status(501).json({
         error: 'voice_unavailable',
         detail: 'Set OPENAI_API_KEY to enable voice.',
       });
     }
-
-    const sessionId = (req.query.sessionId as string) || req.get('x-caddie-session') || randomUUID();
-    const mimeType = req.get('content-type') ?? 'audio/webm';
 
     // Transcription is billed per minute on top of the conversation, so voice
     // gets a tighter budget than text.

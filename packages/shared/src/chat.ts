@@ -204,3 +204,15 @@ export interface UiActionResponse {
   /** When nothing changed: what is needed, in words to show the customer. */
   message?: string;
 }
+
+/**
+ * POST /api/session/:id/claim - the widget's session id, made its own.
+ *
+ * The id alone is not a permission: the token that comes back is, and goes
+ * in the x-caddie-session-token header of every request about the session.
+ * Keep it where the id is kept, and never put it in a URL.
+ */
+export interface SessionClaimResponse {
+  sessionId: string;
+  sessionToken: string;
+}

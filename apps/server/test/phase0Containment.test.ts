@@ -1,4 +1,5 @@
 import express from 'express';
+import { ownerHeaders, sessionOfRequest } from './support/ownership.js';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Product } from '@caddie/shared';
@@ -65,8 +66,12 @@ afterEach(() => {
   env.vapi.webhookSecret = hadSecret;
 });
 
-const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
-  fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+/** As the session's own browser would send it: with its token (Phase 2.1). */
+const post = async (path: string, body: unknown, headers: Record<string, string> = {}) => {
+  const session = sessionOfRequest(path, body);
+  const owner = session && !path.includes('/vapi/') ? await ownerHeaders(session) : {};
+  return fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...owner, ...headers }, body: JSON.stringify(body) });
+};
 
 /** A shopper somewhere else, with a basket-mode session and a profile of their own. */
 async function someoneElse(): Promise<string> {
@@ -81,6 +86,7 @@ describe('/api/tools in production: only what the storefront widget calls', () =
   it('a mutating tool is refused, and nothing on the session changes', async () => {
     env.isProd = true;
     const victim = await someoneElse();
+    await ownerHeaders(victim); // claimed before the snapshot: the claim itself is not what this checks
     const before = JSON.stringify(await sessions.getOrCreate(victim));
     for (const [tool, args] of [
       ['add_to_cart', { productId: POLO.id, options: { Size: 'M' }, quantity: 5 }],

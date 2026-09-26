@@ -1,4 +1,5 @@
 import express from 'express';
+import { ownerHeaders } from './support/ownership.js';
 import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -88,8 +89,8 @@ async function tool(name: string, args: Record<string, unknown>, utterance: stri
 }
 const adds = (actions: CartAction[] | undefined) => (actions ?? []).flatMap((a) => (a.type === 'add' ? a.lines : []));
 const changes = (actions: CartAction[] | undefined) => (actions ?? []).flatMap((a) => (a.type === 'change' ? [{ lineKey: a.lineKey, quantity: a.quantity }] : []));
-const post = (path: string, body: unknown) =>
-  fetch(`${base}/api/session/${id}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-caddie-cart': 'theme' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, body: (await r.json()) as { ok: boolean; actions?: CartAction[]; message?: string } }));
+const post = async (path: string, body: unknown) =>
+  fetch(`${base}/api/session/${id}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-caddie-cart': 'theme', ...(await ownerHeaders(id)) }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, body: (await r.json()) as { ok: boolean; actions?: CartAction[]; message?: string } }));
 
 describe('product adds, from chat', () => {
   it('named: the Elite Polo in navy in M - the model passes the white one, navy M goes in', async () => {

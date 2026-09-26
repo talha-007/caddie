@@ -113,6 +113,12 @@ export interface CaddieSession {
    * Set and cleared only by the Action Gateway (tools/actionGateway.ts).
    */
   pendingAction?: PendingAction;
+  /**
+   * SHA-256 of the session's capability token (session/ownership.ts) - the
+   * proof a request comes from the browser that owns this session. The token
+   * itself is never stored, and this hash never leaves the server.
+   */
+  ownerHash?: string;
   /** The product the gateway last put in the basket, and when - what "make it two" and "remove it" mean. */
   lastAdded?: { productId: string; turn: number };
   /**

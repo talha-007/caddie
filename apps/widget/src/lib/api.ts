@@ -7,6 +7,7 @@ import type {
   ChatRequest,
   PageContext,
   ProfileRequest,
+  SessionClaimResponse,
   SessionRestartResponse,
   ShopperSizes,
   UiActionResponse,
@@ -41,8 +42,76 @@ function cartHeader(): Record<string, string> {
   return { 'x-caddie-cart': onStorefront() ? 'theme' : 'storefront' };
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+/* ---------------- the session's own capability ---------------- */
+
+/*
+ * The session id says which conversation; it is not a permission. The server
+ * hands the browser that claims a session a token, and only requests carrying
+ * it can read or change that session - so an id seen in a log or the page is
+ * not a way into someone's basket. Kept beside the id, for this tab only;
+ * sent in a header, never in a URL.
+ */
+const TOKEN_HEADER = 'x-caddie-session-token';
+const TOKEN_KEY = 'druids-caddie-session-token';
+const tokens = new Map<string, Promise<string>>();
+
+function storedToken(sessionId: string): string | null {
+  try {
+    const raw = sessionStorage.getItem(TOKEN_KEY);
+    const stored = raw ? (JSON.parse(raw) as { sessionId?: string; token?: string }) : null;
+    return stored?.sessionId === sessionId && stored.token ? stored.token : null;
+  } catch {
+    return null;
+  }
+}
+
+async function claim(sessionId: string): Promise<string> {
+  const res = await fetch(`${BASE}/api/session/${encodeURIComponent(sessionId)}/claim`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  if (res.status === 409) throw new ApiError('This chat was opened somewhere else. Refresh the page to start a new one.', 409);
+  const body = await unwrap<SessionClaimResponse>(res);
+  try {
+    sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ sessionId, token: body.sessionToken }));
+  } catch {
+    // Private mode: the token lives as long as this page, like the chat.
+  }
+  return body.sessionToken;
+}
+
+function sessionToken(sessionId: string): Promise<string> {
+  let token = tokens.get(sessionId);
+  if (!token) {
+    const stored = storedToken(sessionId);
+    token = stored ? Promise.resolve(stored) : claim(sessionId);
+    tokens.set(sessionId, token);
+    token.catch(() => tokens.delete(sessionId));
+  }
+  return token;
+}
+
+function forgetToken(sessionId: string): void {
+  tokens.delete(sessionId);
+  try {
+    sessionStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Nothing stored.
+  }
+}
+
+/**
+ * A request about this session, with its token. If the server no longer
+ * knows the session - two hours idle, or a restart - it is claimed again and
+ * the request sent once more.
+ */
+async function authed(sessionId: string, path: string, init: RequestInit & { headers?: Record<string, string> }): Promise<Response> {
+  const send = async () => fetch(`${BASE}${path}`, { ...init, headers: { ...(init.headers ?? {}), [TOKEN_HEADER]: await sessionToken(sessionId) } });
+  const res = await send();
+  if (res.status !== 401) return res;
+  forgetToken(sessionId);
+  return send();
+}
+
+async function post<T>(sessionId: string, path: string, body: unknown): Promise<T> {
+  const res = await authed(sessionId, path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...cartHeader() },
     body: JSON.stringify(body),
@@ -50,29 +119,31 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return unwrap<T>(res);
 }
 
+/* ---------------- the calls ---------------- */
+
 /** The store cart as the widget read it, so the Caddie can see what is really in it. */
 export function syncBasket(sessionId: string, basket: BasketSync) {
-  return post<{ ok: boolean }>(`/api/session/${encodeURIComponent(sessionId)}/basket`, basket);
+  return post<{ ok: boolean }>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/basket`, basket);
 }
 
 /** Who they shop for and their sizes, from the quick start. */
 export function saveProfile(sessionId: string, profile: ProfileRequest) {
-  return post<{ ok: boolean; shopper: ShopperSizes }>(`/api/session/${encodeURIComponent(sessionId)}/profile`, profile);
+  return post<{ ok: boolean; shopper: ShopperSizes }>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/profile`, profile);
 }
 
 /** An option the customer picked on a product card themselves - so "add it" knows. See CardChoice. */
 export function sendCardChoice(sessionId: string, choice: CardChoice) {
-  return post<{ ok: boolean }>(`/api/session/${encodeURIComponent(sessionId)}/choice`, choice);
+  return post<{ ok: boolean }>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/choice`, choice);
 }
 
 /** A clean chat on the same basket - behind "New chat". */
 export function restartSession(sessionId: string) {
-  return post<SessionRestartResponse>(`/api/session/${encodeURIComponent(sessionId)}/restart`, {});
+  return post<SessionRestartResponse>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/restart`, {});
 }
 
 export function sendMessage(sessionId: string, text: string, context?: PageContext) {
   const body: ChatRequest = { sessionId, text, ...(context ? { context } : {}) };
-  return post<{ sessionId: string; message: CaddieMessage }>('/api/chat', body);
+  return post<{ sessionId: string; message: CaddieMessage }>(sessionId, '/api/chat', body);
 }
 
 /** Runs a tool directly. Useful while building UI before the AI understands the phrasing. */
@@ -91,19 +162,19 @@ export interface ToolResponse {
  * widget changes it.
  */
 export function addFromCard(sessionId: string, request: UiAddRequest) {
-  return post<UiActionResponse>(`/api/session/${encodeURIComponent(sessionId)}/add`, request);
+  return post<UiActionResponse>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/add`, request);
 }
 
 export function addPackFromCard(sessionId: string, request: UiPackAddRequest) {
-  return post<UiActionResponse>(`/api/session/${encodeURIComponent(sessionId)}/add-pack`, request);
+  return post<UiActionResponse>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/add-pack`, request);
 }
 
 export function changeCartLine(sessionId: string, request: UiCartLineRequest) {
-  return post<UiActionResponse>(`/api/session/${encodeURIComponent(sessionId)}/cart-line`, request);
+  return post<UiActionResponse>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/cart-line`, request);
 }
 
 export function runTool(sessionId: string, name: string, args: Record<string, unknown>) {
-  return post<ToolResponse>(`/api/tools/${name}`, {
+  return post<ToolResponse>(sessionId, `/api/tools/${name}`, {
     sessionId,
     args,
   });
@@ -132,17 +203,17 @@ function customerLanguages(): string[] {
  * Sends one recorded clip. The body is the audio itself - no form wrapper -
  * and the server transcribes it and answers in the same round trip.
  */
-export function sendVoice(sessionId: string, clip: Blob) {
+export async function sendVoice(sessionId: string, clip: Blob) {
   // Browsers report types like "audio/webm;codecs=opus"; the server wants the
   // plain type it can map to a file extension for transcription.
   const contentType = (clip.type || 'audio/webm').split(';')[0] as string;
   const lang = encodeURIComponent(customerLanguages().join(','));
-
-  return fetch(`${BASE}/api/voice?sessionId=${encodeURIComponent(sessionId)}&lang=${lang}`, {
+  const res = await authed(sessionId, `/api/voice?sessionId=${encodeURIComponent(sessionId)}&lang=${lang}`, {
     method: 'POST',
     headers: { 'Content-Type': contentType, ...cartHeader() },
     body: clip,
-  }).then((res) => unwrap<VoiceResponse>(res));
+  });
+  return unwrap<VoiceResponse>(res);
 }
 
 export interface CaddieEvent {
@@ -153,24 +224,66 @@ export interface CaddieEvent {
   text?: string;
 }
 
+const EVENT_TYPES = new Set(['attachment', 'speech', 'status']);
+
 /**
  * Opens the session event stream. The server pushes product cards here during
  * a voice call, so the screen keeps up with what the Caddie is saying.
+ *
+ * Read with fetch rather than EventSource, which cannot send the session's
+ * token - and the stream carries this shopper's cards and basket. Reconnects
+ * after a drop, as EventSource did.
  */
 export function openEventStream(sessionId: string, onEvent: (event: CaddieEvent) => void): () => void {
-  const source = new EventSource(`${BASE}/api/events/${encodeURIComponent(sessionId)}`);
+  let stopped = false;
+  let controller: AbortController | null = null;
 
-  const handle = (event: MessageEvent<string>) => {
+  const deliver = (frame: string) => {
+    let type = 'message';
+    const data: string[] = [];
+    for (const line of frame.split('\n')) {
+      if (line.startsWith('event:')) type = line.slice(6).trim();
+      else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+    }
+    if (!EVENT_TYPES.has(type) || data.length === 0) return;
     try {
-      onEvent(JSON.parse(event.data) as CaddieEvent);
+      onEvent(JSON.parse(data.join('\n')) as CaddieEvent);
     } catch {
       // A malformed frame is not worth killing the stream over.
     }
   };
 
-  source.addEventListener('attachment', handle as EventListener);
-  source.addEventListener('speech', handle as EventListener);
-  source.addEventListener('status', handle as EventListener);
+  const run = async () => {
+    while (!stopped) {
+      controller = new AbortController();
+      try {
+        const res = await authed(sessionId, `/api/events/${encodeURIComponent(sessionId)}`, { headers: { Accept: 'text/event-stream' }, signal: controller.signal });
+        if (res.ok && res.body) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+            let end = buffer.indexOf('\n\n');
+            while (end >= 0) {
+              deliver(buffer.slice(0, end));
+              buffer = buffer.slice(end + 2);
+              end = buffer.indexOf('\n\n');
+            }
+          }
+        }
+      } catch {
+        // Dropped, or closed on purpose - the loop decides which.
+      }
+      if (!stopped) await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+  };
+  void run();
 
-  return () => source.close();
+  return () => {
+    stopped = true;
+    controller?.abort();
+  };
 }

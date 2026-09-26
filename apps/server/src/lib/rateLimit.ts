@@ -123,6 +123,9 @@ export const LIMITS = {
    */
   sessionWritesPerSession: { max: 600, windowMs: 60 * 60 * 1000 },
   sessionWritesPerAddress: { max: 3000, windowMs: 60 * 60 * 1000 },
+  /** Claiming a session: once per session, and a few hundred per address an hour. */
+  sessionClaimsPerSession: { max: 5, windowMs: 60 * 60 * 1000 },
+  sessionClaimsPerAddress: { max: 300, windowMs: 60 * 60 * 1000 },
   /** Vapi's servers call on behalf of every caller, so only per call - never per address. */
   vapiPerSession: { max: 300, windowMs: 60 * 60 * 1000 },
 } as const satisfies Record<string, Limit>;

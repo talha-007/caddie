@@ -1,4 +1,5 @@
 import express from 'express';
+import { ownerHeaders } from './support/ownership.js';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Product } from '@caddie/shared';
@@ -72,10 +73,10 @@ async function shopper(): Promise<string> {
 }
 
 /** Exactly what the card sends when the customer taps a size. */
-function tap(sessionId: string, product: Product, options: Record<string, string>) {
+async function tap(sessionId: string, product: Product, options: Record<string, string>) {
   return fetch(`${base}/api/session/${sessionId}/choice`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await ownerHeaders(sessionId)) },
     body: JSON.stringify({ productId: product.id, options }),
   });
 }

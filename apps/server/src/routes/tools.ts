@@ -9,6 +9,7 @@ import { limitRoute } from '../lib/routeLimit.js';
 import { publish } from '../session/bus.js';
 import { sessions } from '../session/store.js';
 import { noteCartMode } from '../lib/request.js';
+import { openSessionsAllowed, requireSessionOwner } from '../session/ownership.js';
 import { runTool, toolDefinitionsForVapi, tools } from '../tools/index.js';
 
 /**
@@ -79,6 +80,8 @@ toolsRouter.get('/', (_req, res) => {
 
 toolsRouter.post(
   '/:name',
+  // The widget's calls act on its own session - loading a card, the size form's profile - so only its owner may make them.
+  requireSessionOwner(sessionOf),
   limitRoute('tools', sessionOf, LIMITS.sessionWritesPerSession, LIMITS.sessionWritesPerAddress),
   async (req, res, next) => {
     try {
@@ -87,7 +90,7 @@ toolsRouter.post(
         log.warn('tools.direct_blocked', { tool: name });
         return res.status(404).json({ error: 'not_found' });
       }
-      const sessionId = sessionOf(req) || randomUUID();
+      const sessionId = sessionOf(req) || (openSessionsAllowed() ? randomUUID() : '');
       const args = req.body?.args ?? req.body ?? {};
 
       // The size form's own fields, validated: the only direct arguments that count as the customer's words.

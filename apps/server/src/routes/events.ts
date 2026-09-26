@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { subscribe } from '../session/bus.js';
+import { requireSessionOwner } from '../session/ownership.js';
 
 /**
  * Server-sent events for one session.
@@ -10,8 +11,9 @@ import { subscribe } from '../session/bus.js';
 
 export const eventsRouter: Router = Router();
 
-eventsRouter.get('/:sessionId', (req, res) => {
-  const { sessionId } = req.params;
+// Only the browser that owns the session hears its cards - the event stream carries its products, basket and choices.
+eventsRouter.get('/:sessionId', requireSessionOwner((req) => req.params.sessionId), (req, res) => {
+  const sessionId = req.params.sessionId ?? '';
 
   res.set({
     'Content-Type': 'text/event-stream',
