@@ -55,6 +55,8 @@ export function rankRequestFor(
     ...(avoid?.length ? { avoidColours: avoid } : {}),
     ...(required.size || preferred.size ? { features: { required: [...required], preferred: [...preferred] } } : {}),
     ...((turn.weather ?? profile.weather)?.length ? { weather: turn.weather ?? profile.weather } : {}),
+    // Only weather named now can mark a product as not suiting it; remembered weather only ranks.
+    ...(turn.weather?.length ? { weatherAsked: true } : {}),
     ...((turn.budget ?? profile.budget) ? { budget: turn.budget ?? profile.budget } : {}),
     ...(size ? { size } : {}),
     ...(profile.waist ? { waist: profile.waist } : {}),

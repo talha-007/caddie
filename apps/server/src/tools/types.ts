@@ -41,6 +41,13 @@ export interface ToolResult {
    * basket is the theme's cart in the shopper's browser - see CartAction.
    */
   actions?: CartAction[];
+  /**
+   * A sentence the reply must open with, when the model cannot be trusted to
+   * keep it. "No - the Premium Play Trousers aren't part of the pack" was
+   * reworded as "Yes, the Clima trousers are available" two times in three.
+   * `unless` is what shows the reply already says it.
+   */
+  lead?: { text: string; unless: RegExp };
 }
 
 export interface CaddieTool<Schema extends z.ZodTypeAny = z.ZodTypeAny> {

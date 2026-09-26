@@ -12,7 +12,8 @@
     "sync:assistant": "tsx scripts/syncAssistant.ts",
     "publish:profile": "node scripts/publishAgentProfile.mjs",
     "eval:model": "node scripts/evalModel.mjs",
-    "webhooks": "node scripts/registerWebhooks.mjs"
+    "webhooks": "node scripts/registerWebhooks.mjs",
+    "semantic-search": "tsx scripts/semanticSearch.ts"
   },
   "dependencies": {
     "@caddie/shared": "*",

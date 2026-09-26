@@ -1,18 +1,32 @@
 import type { Cart, OutfitPiece, Product } from '@caddie/shared';
 import { z } from 'zod';
 import { FEATURE_LABEL, attributesOf, hasFeature, type Feature, type Weather } from '../catalog/attributes.js';
-import { parseRange, rangeOf, type Range } from '../catalog/audience.js';
-import { lookupProductName, unknownNameIn } from '../catalog/lookup.js';
+import { inRange, parseRange, rangeOf, type Range } from '../catalog/audience.js';
+import { distinctiveWords, lookupProductName, unknownNameIn, type Existence } from '../catalog/lookup.js';
 import { normaliseQuery } from '../catalog/taxonomy.js';
+import { identityOf, nameWords } from '../catalog/identity.js';
+import { categoriesAsked, categoriesOf, isCategory, sizeInRequest, sizeStatus, withoutSize, type Category } from '../catalog/constraints.js';
+import {
+  descriptiveSearchText,
+  mergeCandidates,
+  orderHybrid,
+  recordHybridDiagnostics,
+  semanticDesigns,
+  wantsSemantic,
+  type CandidateEvidence,
+  type HybridDiagnostics,
+} from '../catalog/hybrid.js';
+import { conceptKindsInQuery, topKindsFor, type Climate } from '../catalog/concepts.js';
+import { searchLocalScored } from '../catalog/search.js';
 import { nextStep } from '../recommend/nextStep.js';
-import { hasSignals, rankFacts, rankProducts } from '../recommend/rank.js';
+import { hasSignals, rankFacts, rankProducts, weatherHotOnly } from '../recommend/rank.js';
 import { describeProfile, readIntent, type Budget } from '../shopper/profile.js';
 import { rankRequestFor, rememberShopper, shopperSizes } from '../shopper/remember.js';
 import { bestPicks, kindsNamed } from '../recommend/bestPicks.js';
 import { answerAbout, describeStock } from '../recommend/productFacts.js';
 import { resolveProduct } from '../session/screen.js';
 import { colourMatch, coloursOffered, matchesColourText, parseColours } from '../catalog/colour.js';
-import { allDeals, type DealRecipe } from '../catalog/bundles.js';
+import { allDeals, type DealRecipe, type DealStep } from '../catalog/bundles.js';
 import { log } from '../lib/logger.js';
 import { checkoutTotal, storefrontCartEnabled } from '../shopify/storefrontCart.js';
 import { colourwayName, garmentName, otherColourways } from '../catalog/colourways.js';
@@ -23,7 +37,7 @@ import { recommendPack } from '../recommend/pack.js';
 import { findNamedPack, findUnstockedBundle, recommendNamedPack } from '../recommend/packs.js';
 import { priceFor, priceRange } from '../recommend/pricing.js';
 import { categoryForProduct, recommendSize } from '../recommend/size.js';
-import { optionValueMatches } from '../recommend/sizeWords.js';
+import { normaliseSize, optionValueMatches } from '../recommend/sizeWords.js';
 import { addToCart, getCart, getProductDetails, isBrandProduct, searchProducts, setLineQuantity } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
 import { sessions, type CaddieSession } from '../session/store.js';
@@ -240,7 +254,7 @@ function numericId(id: string): string {
  * polo" in a store that stocks none and you get six mens polos back. Without
  * this the model relays them as womens.
  */
-function listFacts(products: Product[]): string {
+function listFacts(products: Product[], evidence?: (product: Product) => string): string {
   return products
     .map((product) => {
       const range = rangeOf(product);
@@ -260,7 +274,8 @@ function listFacts(products: Product[]): string {
           ? money(span.min, span.currency)
           : `${money(span.min, span.currency)} to ${money(span.max, span.currency)} depending on size`;
 
-      return `- ${product.title}${label} - ${shown} [${product.id}]${verifiedLine(product)}`;
+      const checked = evidence?.(product);
+      return `- ${product.title}${label} - ${shown} [${product.id}]${checked ? ` | checked: ${checked}` : ''}${verifiedLine(product)}`;
     })
     .join('\n');
 }
@@ -273,6 +288,130 @@ function listFacts(products: Product[]): string {
  * description never says waterproof is not called waterproof, however much
  * the customer wants one.
  */
+/**
+ * The catalogue check, said as exactly as it was established. Only "not-found"
+ * lets the Caddie say we do not stock something; a possible match is never
+ * the product and never proof it is missing.
+ */
+/**
+ * The cards for a name that could be several products: every in-stock
+ * colourway of each candidate design, the designs taking turns so the
+ * customer can choose between the names rather than see one of them six times.
+ */
+/** "Another one", "something else", "a different one" - asking past what was just shown. */
+const ANOTHER = /\b(another|something else|a different one|different ones?|other ones?|other options?|more options|any others)\b/i;
+
+/** Within each group (a match level), what has not been seen first; the order is otherwise kept. */
+function unseenFirst<T>(entries: T[], idOf: (entry: T) => string, groupOf: (entry: T) => string, seen: Set<string>): T[] {
+  const out: T[] = [];
+  let start = 0;
+  while (start < entries.length) {
+    let end = start;
+    while (end < entries.length && groupOf(entries[end]!) === groupOf(entries[start]!)) end += 1;
+    const group = entries.slice(start, end);
+    out.push(...group.filter((entry) => !seen.has(idOf(entry))), ...group.filter((entry) => seen.has(idOf(entry))));
+    start = end;
+  }
+  return out;
+}
+
+/** The cuts a description can state that suit each fit a customer prefers. */
+const FIT_SUITS: Record<'tight' | 'regular' | 'relaxed', string[]> = {
+  relaxed: ['relaxed'],
+  regular: ['regular'],
+  tight: ['athletic', 'slim', 'tailored'],
+};
+
+/**
+ * The cards with the lead moved to the front - see search_products. Chosen
+ * only from those that fit as well as the first; ties keep the search's order.
+ */
+export function leadFirst(
+  products: Product[],
+  opts: {
+    levelOf: (product: Product) => string;
+    seen: Set<string>;
+    fit?: 'tight' | 'regular' | 'relaxed';
+    colours: string[];
+    lastLead?: { id: string; colour: string };
+  },
+): Product[] {
+  if (products.length < 2) return products;
+  const best = opts.levelOf(products[0]!);
+  const laneOf = (colourText: string) => opts.colours.find((colour) => parseColours(colourText).colours.some((c) => c.word === colour) || colourText.includes(colour));
+  const lastLane = opts.lastLead ? laneOf(opts.lastLead.colour) : undefined;
+  const score = (product: Product) => {
+    const fit = attributesOf(product).fit;
+    const lane = laneOf(colourwayName(product.title).toLowerCase());
+    return (
+      (opts.seen.size && !opts.seen.has(product.id) ? 4 : 0) +
+      (opts.fit && fit && FIT_SUITS[opts.fit].includes(fit) ? 2 : 0) +
+      (lastLane && lane && lane !== lastLane ? 1 : 0) +
+      (opts.lastLead && product.id !== opts.lastLead.id ? 1 : 0)
+    );
+  };
+  let chosen = 0;
+  products.forEach((product, index) => {
+    if (opts.levelOf(product) === best && score(product) > score(products[chosen]!)) chosen = index;
+  });
+  return chosen === 0 ? products : [products[chosen]!, ...products.filter((_, index) => index !== chosen)];
+}
+
+/** One from each list in turn, until all are used. */
+function takeTurns<T>(lists: T[][]): T[] {
+  const lanes = lists.map((list) => [...list]);
+  const out: T[] = [];
+  while (lanes.some((lane) => lane.length)) for (const lane of lanes) { const next = lane.shift(); if (next !== undefined) out.push(next); }
+  return out;
+}
+
+const TOP_WORD = /\btops?\b/i;
+
+function possibleCards(candidates: Product[]): Product[] {
+  const byDesign = new Map<string, Product[]>();
+  for (const product of candidates.flatMap((candidate) => [candidate, ...otherColourways(candidate)])) {
+    if (!product.variants.some((variant) => variant.available)) continue;
+    const key = `${rangeOf(product)}|${garmentName(product.title)}`;
+    const group = byDesign.get(key) ?? [];
+    if (!group.some((p) => p.id === product.id)) group.push(product);
+    byDesign.set(key, group);
+  }
+  const lanes = [...byDesign.values()];
+  const out: Product[] = [];
+  while (lanes.some((lane) => lane.length)) for (const lane of lanes) { const next = lane.shift(); if (next) out.push(next); }
+  return out;
+}
+
+function catalogueCheck(existence: Existence): string {
+  const listed = (products: Product[]) =>
+    products.map((p) => `${p.title} [${p.id}]${p.variants.some((v) => v.available) ? '' : ' (sold out)'}`).join(', ');
+  // A misspelt or differently spelt name, read as the catalogue's: say the real name, never repeat theirs as if it were right.
+  const corrected =
+    (existence.kind === 'exact-product' || existence.kind === 'exact-family') && existence.resolution.type === 'corrected'
+      ? `"${existence.resolution.input}" appears to refer to `
+      : '';
+  switch (existence.kind) {
+    case 'exact-product':
+      return corrected
+        ? `Catalogue check: ${corrected}${listed([existence.product])}. Use the product's real name.`
+        : `Catalogue check: exact product found: ${listed([existence.product])}.`;
+    case 'exact-family':
+      return corrected
+        ? `Catalogue check: ${corrected}the ${titleCaseWords(existence.familyName)} design, in ${existence.products.length} colourways: ${listed(existence.products)}. Use the design's real name; ask which colour if it matters.`
+        : `Catalogue check: Druids stocks the ${titleCaseWords(existence.familyName)} design in ${existence.products.length} colourways: ${listed(existence.products)}. No single colourway was named - ask which colour if it matters.`;
+    case 'possible-match':
+      return `Catalogue check: no single product could be confirmed for "${existence.name}" (${existence.reason}).${
+        existence.products.length ? ` Possible matches: ${listed(existence.products)}.` : ''
+      } Never present one of these as what they named, and never say we do not stock it - say you could not find that exact product.`;
+    case 'not-found':
+      return `Catalogue check: nothing in the Druids catalogue is called "${existence.name}" - every product was checked. You may say we do not stock it.${
+        existence.closest.length ? ` Closest names: ${existence.closest.map((p) => p.title).join(', ')} - offer them as alternatives, never as it.` : ''
+      }`;
+    case 'unknown':
+      return 'The full catalogue could not be checked just now. Say you could not find that exact product - never that we do not stock it.';
+  }
+}
+
 function verifiedLine(product: Product): string {
   const { features, fit } = attributesOf(product);
   const bits = features.slice(0, 5).map((feature) => FEATURE_LABEL[feature]);
@@ -308,14 +447,29 @@ function colourAsked(explicit: string | undefined, ...texts: Array<string | unde
 
 const FEATURES = Object.keys(FEATURE_LABEL) as Feature[];
 
-const searchSchema = z.object({
-  query: z.string().min(1).describe('What the customer is looking for, in English'),
-  colour: z.string().optional(),
-  productName: z.string().optional(),
-  features: z.array(z.enum(FEATURES as [Feature, ...Feature[]])).optional(),
-  limit: z.number().int().min(1).max(20).optional(),
-  maxPrice: z.number().positive().optional(),
-});
+/*
+ * A search is a description, a product name, or both. The model asked "do
+ * you have the Tour Championship Jacket?" by sending the name alone; with
+ * query required, the call was refused, the catalogue check never ran, and
+ * the Caddie hedged. A name on its own is searched as itself.
+ */
+const searchSchema = z
+  .object({
+    query: z.string().optional().describe('What the customer is looking for, in English'),
+    colour: z.string().optional(),
+    productName: z.string().optional(),
+    features: z.array(z.enum(FEATURES as [Feature, ...Feature[]])).optional(),
+    limit: z.number().int().min(1).max(20).optional(),
+    maxPrice: z.number().positive().optional(),
+    category: z.string().optional(),
+    range: z.enum(['mens', 'ladies', 'kids']).optional(),
+    size: z.string().optional(),
+  })
+  .refine((args) => !!args.query?.trim() || !!args.productName?.trim(), {
+    message: 'give query, productName, or both',
+    path: ['query'],
+  })
+  .transform((args) => ({ ...args, query: args.query?.trim() || args.productName!.trim() }));
 
 /**
  * How firmly a colour binds this search.
@@ -326,6 +480,51 @@ const searchSchema = z.object({
  * this turn decide; failing that, how they put it before; a colour named for
  * this request and nothing else is required for this request.
  */
+/*
+ * "Mostly navy or black", then "show me a polo": the model searched with
+ * colour navy, every turn, and black was never seen again - the ranking
+ * preferred navy alone and marked every black polo "not navy". A colour that
+ * is only part of the list the customer gave - in this message or before -
+ * is that whole list, not the first word of it. A colour outside the list
+ * ("a red polo") is theirs, and is left exactly as it is.
+ */
+function rememberedWhenEchoed(
+  asked: string | undefined,
+  turn: ReturnType<typeof readIntent>,
+  remembered: { words: string[]; strength: 'required' | 'preferred' } | undefined,
+): string | undefined {
+  // The colours they said in this message, else the ones they told us before - the same echo, either way.
+  const whole = turn.colours?.words.length ? turn.colours.words : remembered?.words;
+  if (!asked || !whole?.length) return asked;
+  const { colours, plain } = parseColours(asked);
+  if (!colours.length || !colours.every((colour) => whole.includes(colour.word))) return asked;
+  const kept = whole.filter((word) => !(turn.avoidColours ?? []).includes(word));
+  return `${plain ? 'plain ' : ''}${kept.join(' or ')}`;
+}
+
+/** Within each match level, one of each preferred colour in turn; everything else keeps its order. */
+function colourTurns<T extends { product: Product; matchLevel: string }>(
+  entries: T[],
+  colours: string[],
+  groupOf: (entry: T) => string = (entry) => entry.matchLevel,
+): T[] {
+  const out: T[] = [];
+  let start = 0;
+  while (start < entries.length) {
+    let end = start;
+    while (end < entries.length && groupOf(entries[end]!) === groupOf(entries[start]!)) end += 1;
+    const lanes = new Map<string, T[]>();
+    for (const entry of entries.slice(start, end)) {
+      const colour = colours.find((word) => matchesColourText(entry.product, word) > 0) ?? '';
+      lanes.set(colour, [...(lanes.get(colour) ?? []), entry]);
+    }
+    const queues = [...lanes.values()];
+    while (queues.some((queue) => queue.length)) for (const queue of queues) { const next = queue.shift(); if (next) out.push(next); }
+    start = end;
+  }
+  return out;
+}
+
 function colourStrength(asked: string, turn: ReturnType<typeof readIntent>, ctx: ToolContext): 'required' | 'preferred' {
   const words = parseColours(asked).colours.map((colour) => colour.word);
   if (turn.colours?.words.some((word) => words.includes(word))) return turn.colours.strength;
@@ -348,13 +547,13 @@ const searchTool = defineTool({
   description:
     'Search the live Druids store for products. Use this for any question about what is available, what something costs, or what is in stock. Never answer those from memory. ' +
     'Results come back ranked against everything the customer has told you (budget, size, fit, colours, weather, features), each marked exact, strong or partial with the verified reason - put the best one forward and say why in a few words. ' +
-    'If the customer names a colour - in any language - pass it, in English, as `colour`. If they name a specific product ("the Tour Championship Jacket"), pass that name as `productName`: the whole catalogue is checked for it.',
+    'If the customer names a colour - in any language - pass it, in English, as `colour`. If they name a specific product ("the Tour Championship Jacket"), pass that name as `productName`: the whole catalogue is checked for it. Give `query`, `productName`, or both - a name alone is enough.',
   schema: searchSchema,
   parameters: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: 'What the customer is looking for, in English, keeping every describing word ("plain", "lightweight", "rain top").' },
-      colour: { type: 'string', description: 'The colour they asked for, in English: "blue", "navy", "light grey". Never leave out a colour they named.' },
+      query: { type: 'string', description: 'What the customer is looking for, in English, keeping every describing word ("plain", "lightweight", "rain top"). Optional when productName is given.' },
+      colour: { type: 'string', description: 'The colour they asked for, in English: "blue", "navy", "light grey". Never leave out a colour they named. Colours they told you they usually wear are applied already - no need to repeat them here.' },
       productName: {
         type: 'string',
         description: 'Only when they name one specific product rather than a kind of thing: its name as they said it. The catalogue is checked for it, which is the only thing that lets you say we do or do not stock it.',
@@ -366,21 +565,83 @@ const searchTool = defineTool({
       },
       limit: { type: 'integer', minimum: 1, maximum: 20 },
       maxPrice: { type: 'number', description: 'Upper price limit per item, if the customer gave a hard one' },
+      category: { type: 'string', description: 'The kind of garment, when they named one: "polo", "jacket", "gilet", "midlayer", "hoodie", "trousers", "shorts", "cap"... Only that kind comes back.' },
+      range: { type: 'string', enum: ['mens', 'ladies', 'kids'], description: 'Only when they said it: mens, ladies (womens) or kids.' },
+      size: { type: 'string', description: 'The size they need, when they said one: "XL", "M", "2XL", a waist "34", a ladies "12". Only products in stock in that size come back, priced at that size.' },
     },
-    required: ['query'],
+    // Either query or productName - enforced by the schema, which searches a name on its own as itself.
+    required: [],
   },
   async run(args, ctx): Promise<ToolResult> {
     const turn = readIntent(ctx.utterance ?? '');
     const profile = ctx.session.shopper;
     const currency = ctx.session.preferences.currency ?? storeCurrency();
 
+    /*
+     * A piece of the pack on screen, changed: a swap inside the pack, not a
+     * search of the store. "Change this trouser with a white trouser" came
+     * back as three white trousers from the whole store, two of which the
+     * pack does not take - and the customer then asked for one of those.
+     */
+    const packShown = packOnScreen(ctx);
+    if (packShown && asksToChangePackPiece(packShown, ctx.utterance ?? '')) {
+      const swapped = await dealAnswer({ query: ctx.session.lastShown?.query ?? packShown.title }, ctx, colourAsked(undefined, ctx.utterance), currency);
+      if (swapped) return swapped;
+    }
+    /*
+     * Asked about a piece while a pack is being built: that pack's own
+     * choices, never the whole store. White trousers from everywhere put the
+     * Premium Play Trousers next to the pack, and the customer took them for
+     * a pack choice - they are not one.
+     */
+    const building = packShown ?? packChoicesInFocus(ctx);
+    if (building) {
+      const stepIndex = stepNamed(building, `${ctx.utterance ?? ''} ${args.query}`);
+      const outside = /\b(separately|on its own|on their own|outside the pack|not in the pack|not for the pack|without the pack|full price)\b/i.test(ctx.utterance ?? '');
+      if (stepIndex >= 0 && !outside) return packStepChoices(building, stepIndex, ctx, colourAsked(args.colour, ctx.utterance));
+    }
+
+    /*
+     * What this request makes a rule: the kind of garment, the range, the size.
+     * Passed by the model, or read from what was asked - "navy polo in XL" is
+     * a polo, in XL, whether or not the model split it out. The size comes out
+     * of the words searched: "XL" is not a word a product is found by.
+     */
+    /*
+     * A size is a rule only when the customer gave it. Asked for "something
+     * warm but sleeveless", the model searched in size M, and the Caddie told
+     * the customer the gilet was "available in your size M" - a size nobody
+     * had said. So the size in their words now wins; a size the model proposes
+     * (the size field, or written into its query) counts only if it is one the
+     * customer said in this conversation or their profile holds - the same
+     * test the basket uses (sizesNeverGiven). Anything else is set aside, and
+     * the search runs across every size.
+     */
+    const saidSize = sizeInRequest(ctx.utterance ?? '');
+    const proposedSize = args.size?.trim() ? (normaliseSize(args.size) ?? args.size.trim().toUpperCase()) : sizeInRequest(args.query);
+    const proposedGrounded = !!proposedSize && sizesNeverGiven([proposedSize], ctx).length === 0;
+    const size = saidSize ?? (proposedGrounded ? proposedSize : undefined);
+    const sizeProvenance = {
+      requestedSize: proposedSize ?? null,
+      trustedSize: size ?? null,
+      sizeSource: saidSize ? 'utterance' : proposedGrounded ? 'conversation or profile' : 'none',
+      ignoredModelSize: !!proposedSize && proposedSize !== size,
+    };
+    if (sizeProvenance.ignoredModelSize) log.warn('search.size_not_given', { sessionId: ctx.session.id, ...sizeProvenance });
+    // Size words come out of what is searched either way: "M" is not a word a product is found by.
+    const sizeWords = proposedSize ?? size;
+    const categories: Category[] = (args.category ? categoriesAsked(args.category) : []).length
+      ? categoriesAsked(args.category!)
+      : categoriesAsked(withoutSize(args.query, sizeWords));
+    const rangeArg = args.range === 'mens' ? 'men' : args.range === 'ladies' ? 'women' : args.range === 'kids' ? 'kids' : undefined;
+
     // Customer words into catalogue words: "rain top" is a jacket that has to be waterproof.
-    const normal = normaliseQuery(args.query);
+    const normal = normaliseQuery(withoutSize(args.query, sizeWords));
 
     // Plain is the one thing read from their own words here - "swap this
     // orange polo for a plain white one" must not make orange the filter.
     const saidPlain = ctx.utterance ? parseColours(ctx.utterance).plain : false;
-    const namedColour = colourAsked(args.colour, normal.query);
+    const namedColour = rememberedWhenEchoed(colourAsked(args.colour, normal.query), turn, profile?.colours);
     const asked = saidPlain && namedColour && !parseColours(namedColour).plain ? `plain ${namedColour}` : namedColour;
     /*
      * Required colours filter; preferred ones only rank. A standing "only
@@ -402,7 +663,7 @@ const searchTool = defineTool({
      * someone actually named is remembered: a woman who searched "navy polo"
      * and was shown mens ones has not told us she shops mens.
      */
-    const askedRange = parseRange(args.query).range ?? parseRange(ctx.utterance ?? '').range;
+    const askedRange = rangeArg ?? parseRange(args.query).range ?? parseRange(ctx.utterance ?? '').range;
     const rangeWord = askedRange && !parseRange(normal.query).range ? `${askedRange === 'women' ? 'ladies' : askedRange} ` : '';
     const words = parseColours(normal.query).rest;
     const query = `${rangeWord}${filterColour ? `${filterColour} ${words}` : strength === 'preferred' ? words : normal.query}`.trim();
@@ -413,15 +674,49 @@ const searchTool = defineTool({
       colour: rankColour,
       currency,
     });
+    // The size asked for now is the size ranked on, over the one in their profile.
+    if (size) request.size = size;
     const ceiling = args.maxPrice ?? priceCeiling(request.budget);
+    // Features this request needs - not ones remembered from an earlier search.
+    const mustDo = [...new Set([...normal.features, ...(args.features ?? []), ...(turn.features?.required ?? [])])];
+    /*
+     * The day this request describes, from this turn only: "for warm weather",
+     * "somewhere hot", or asking for what heat needs. Lightweight alone is not
+     * heat - there are lightweight midlayers for a cool evening.
+     */
+    const askedNow = [...mustDo, ...(turn.features?.preferred ?? [])];
+    const climate: Climate | undefined = weatherHotOnly(turn.weather)
+      ? 'hot'
+      : turn.weather?.includes('cold') || askedNow.includes('warm')
+        ? 'cold'
+        : askedNow.some((feature) => feature === 'breathable' || feature === 'moisture-wicking' || feature === 'uv-protection')
+          ? 'hot'
+          : undefined;
+    // "Top" with no kind named: the kinds that suit that day, preferred - see topKindsFor.
+    const topKinds = topKindsFor(`${args.query} ${ctx.utterance ?? ''}`, climate, categories);
+    if (topKinds.length) request.kinds = topKinds;
+    const rules = {
+      ...(size ? { size } : {}),
+      ...(categories.length ? { categories } : {}),
+      ...(askedRange ? { range: askedRange } : {}),
+    };
     const limit = args.limit ?? 6;
     // Ranking needs room to choose: fetch wide, then keep the best.
     const ranking = hasSignals(request);
+    /*
+     * "Another one": what this run of searches has already shown goes behind
+     * what it has not. The Caddie answered "do you have another one?" with the
+     * polo it had just recommended. Fetched wide, so there is something new to
+     * show; when everything good has been seen, the seen ones come back.
+     */
+    const wantsAnother = ANOTHER.test(ctx.utterance ?? '');
+    const seen = new Set(wantsAnother ? [...(ctx.session.recentShown ?? []), ...(ctx.session.lastShown?.items.map((item) => item.id) ?? [])] : []);
     const wide = await searchProducts({
       query,
-      limit: ranking ? Math.max(limit * 4, 24) : limit,
+      limit: ranking || wantsAnother ? Math.max(limit * 4, 24) : limit,
       ...(ceiling !== undefined ? { maxPrice: ceiling } : {}),
       ...(known ? { known } : {}),
+      ...rules,
     });
     /*
      * A preferred colour is looked for, not just waited for. The store has
@@ -430,13 +725,21 @@ const searchTool = defineTool({
      * colour's own results go into the pool first, then everything else.
      */
     const preferredWords = rankColour?.strength === 'preferred' ? rankColour.words.join(' or ') : '';
+    // Each preferred colour looked for on its own, taking turns: "navy or black" together came back navy first and navy only.
     const inColour = preferredWords
-      ? await searchProducts({
-          query: `${rangeWord}${preferredWords} ${words}`.trim(),
-          limit: limit * 2,
-          ...(ceiling !== undefined ? { maxPrice: ceiling } : {}),
-          ...(known ? { known } : {}),
-        })
+      ? takeTurns(
+          await Promise.all(
+            rankColour!.words.map((colour) =>
+              searchProducts({
+                query: `${rangeWord}${colour} ${words}`.trim(),
+                limit: limit * 2,
+                ...(ceiling !== undefined ? { maxPrice: ceiling } : {}),
+                ...(known ? { known } : {}),
+                ...rules,
+              }),
+            ),
+          ),
+        )
       : [];
     /*
      * A feature they need is looked for across the whole range, not just the
@@ -453,21 +756,155 @@ const searchTool = defineTool({
             limit: 400,
             ...(ceiling !== undefined ? { maxPrice: ceiling } : {}),
             ...(known ? { known } : {}),
+            ...rules,
           })
         ).filter((product) => needed.every((feature) => hasFeature(product, feature)))
       : [];
-    const found = [...withFeature, ...inColour, ...wide].filter(
+    /*
+     * The kinds a top means today, looked for by name, each on its own:
+     * "top" itself only ever found "layering top" midlayers, and "polo dress"
+     * searched together found only polo dresses.
+     */
+    const inKind = (
+      await Promise.all(
+        topKinds.map((kind) =>
+          searchProducts({
+            query: TOP_WORD.test(query) ? query.replace(new RegExp(TOP_WORD.source, 'gi'), kind) : `${query} ${kind}`,
+            limit: limit * 2,
+            ...(ceiling !== undefined ? { maxPrice: ceiling } : {}),
+            ...(known ? { known } : {}),
+            ...rules,
+            categories: [kind],
+          }),
+        ),
+      )
+    ).flat();
+    const found = [...withFeature, ...inColour, ...inKind, ...wide].filter(
       (product, index, all) => all.findIndex((other) => other.id === product.id) === index,
     );
 
     /*
      * A product they named, checked against the whole catalogue - the one
-     * thing that can say "we do not stock that" truthfully. Named products
-     * that exist go first, ahead of whatever search ranked highest.
+     * thing that can say "we do not stock that" truthfully. A colour or range
+     * the model passed on its own is part of the name: "Apex polo" with colour
+     * black is the black Apex polo, which Druids do not sell.
      */
-    const existence = args.productName ? lookupProductName(args.productName) : unknownNameIn(args.query);
-    const named = existence?.status === 'exact' ? existence.products.filter((p) => p.variants.some((v) => v.available)) : [];
-    const pool = [...named, ...found.filter((product) => !named.some((n) => n.id === product.id))];
+    const nameRange = askedRange ?? (args.productName ? parseRange(args.productName).range : null);
+    const nameAsked = args.productName
+      ? [
+          args.productName,
+          filterColour && !parseColours(args.productName).colours.length ? filterColour : '',
+          askedRange && !parseRange(args.productName).range ? (askedRange === 'women' ? 'ladies' : askedRange) : '',
+        ]
+          .filter(Boolean)
+          .join(' ')
+      : '';
+    const existence = args.productName ? lookupProductName(nameAsked) : unknownNameIn(args.query);
+    /*
+     * Every rule this request set, checked on every product - the named ones
+     * too. The ladies Apex polo in blush once led a search for a black Apex
+     * polo, and "navy polo in XL" was answered with polos sold out in XL.
+     * What fails a rule is not shown, however well it scores.
+     */
+    const wantedColour = filterColour ? parseColours(filterColour) : null;
+    const failures = (product: Product): string[] => {
+      const out: string[] = [];
+      if (!product.variants.some((variant) => variant.available)) out.push('sold out');
+      if (!inRange(product, nameRange, known)) out.push('not in that range');
+      if (wantedColour && (wantedColour.colours.length || wantedColour.plain) && colourMatch(product, wantedColour.colours, true, wantedColour.plain) === 0) {
+        out.push(`not ${filterColour}`);
+      }
+      if (categories.length && !isCategory(product, categories)) out.push(`not a ${categories.join(' or ')}`);
+      if (size) {
+        const status = sizeStatus(product, size);
+        if (status === 'sold-out') out.push(`sold out in ${size}`);
+        else if (status !== 'in-stock') out.push(`not made in ${size}`);
+      }
+      if (ceiling !== undefined && priceFor(product, size).amount > ceiling) out.push(`over ${money(ceiling, currency)}${size ? ` in ${size}` : ''}`);
+      for (const feature of mustDo) if (!hasFeature(product, feature)) out.push(`${FEATURE_LABEL[feature]} not stated in its description`);
+      return out;
+    };
+    const meetsRules = (product: Product) => failures(product).length === 0;
+    const named =
+      existence?.kind === 'exact-product'
+        ? [existence.product].filter(meetsRules)
+        : existence?.kind === 'exact-family'
+          ? existence.products.filter(meetsRules)
+          : [];
+    // The product they named, when it is not what they asked for: said, never shown as if it were.
+    const namedMisses =
+      existence?.kind === 'exact-product' && !named.length ? `${existence.product.title} is the product they named, but it is ${failures(existence.product).join(', ')}.` : '';
+    /*
+     * A name that could be more than one product. "Show me the Hexi polo" was
+     * told no single product could be confirmed - Hexie or Hexa - while the
+     * cards showed the best-selling Elite and Honeycomb polos, because the
+     * candidates lived only in the facts. They are the cards now: every
+     * colourway of each candidate design, held to the same rules as anything
+     * else, designs taking turns. If none of them meets the rules ("black Apex
+     * polo" - the only Apex is blush), the cards are the search as before.
+     */
+    const possible = existence?.kind === 'possible-match' ? possibleCards(existence.products).filter(meetsRules) : [];
+    let candidates = found.filter((product) => !named.some((n) => n.id === product.id) && meetsRules(product));
+    /*
+     * Meaning search, only when the request describes what it wants ("a
+     * sleeveless warm outer layer", "something for hot weather") and names
+     * nothing. It adds candidates; each one passes the same rules as a word
+     * match, and a named product stays ahead of all of them. If it cannot run
+     * - not built, not configured, the call failed - this is word search
+     * exactly as it was, and the customer never hears about it.
+     */
+    const identified = existence?.kind === 'exact-product' || existence?.kind === 'exact-family' || !!args.productName;
+    // The model's query and the customer's own words together: a shortened query cannot lose the heat, the rain or the sleeves.
+    const described = descriptiveSearchText({ query: args.query, ...(ctx.utterance ? { utterance: ctx.utterance } : {}), ...(args.features ? { features: args.features } : {}) });
+    const need = wantsSemantic(described, { named: identified, ...(args.features ? { features: args.features } : {}) });
+    const diagnostics: HybridDiagnostics = {
+      semanticUsed: false,
+      why: need.why,
+      described,
+      size: sizeProvenance,
+      lexical: found.length,
+      semanticScanned: 0,
+      semanticDesigns: 0,
+      merged: candidates.length,
+      afterRules: candidates.length,
+    };
+    let hybridEvidence: Map<string, CandidateEvidence> | null = null;
+    if (need.use) {
+      const semantic = await semanticDesigns(described);
+      if (semantic.available && semantic.designs.length) {
+        const hits = new Map(
+          searchLocalScored({
+            query,
+            limit: 400,
+            ...(ceiling !== undefined ? { maxPrice: ceiling } : {}),
+            ...(known ? { known } : {}),
+            ...rules,
+          }).map((hit) => [hit.product.id, hit]),
+        );
+        const merged = mergeCandidates(
+          candidates.filter((product) => !named.some((n) => n.id === product.id)),
+          hits,
+          semantic.designs,
+          (members) => members.find((member) => meetsRules(member) && !named.some((n) => n.id === member.id)),
+          { categories, conceptKinds: [...conceptKindsInQuery(described), ...topKinds] },
+        );
+        candidates = merged.ordered.filter(meetsRules);
+        hybridEvidence = merged.evidence;
+        Object.assign(diagnostics, {
+          semanticUsed: true,
+          semanticScanned: semantic.scanned,
+          semanticDesigns: semantic.designs.length,
+          merged: merged.ordered.length,
+          afterRules: candidates.length,
+          cache: semantic.cached ? 'hit' : 'miss',
+        });
+      } else {
+        diagnostics.fallback = semantic.reason ?? 'no semantic candidates';
+      }
+    }
+    recordHybridDiagnostics(diagnostics);
+    log.info('search.hybrid', { sessionId: ctx.session.id, ...diagnostics });
+    const pool = [...named, ...possible, ...candidates.filter((product) => !possible.some((p) => p.id === product.id))];
 
     const ranked = ranking ? rankProducts(pool, request) : [];
     /*
@@ -476,11 +913,74 @@ const searchTool = defineTool({
      * facts say so.
      */
     const good = ranked.filter((entry) => entry.matchLevel !== 'partial');
-    const shownRanked = ranking ? (good.length ? good : ranked.filter((e) => !e.missedRequirements.includes('turned down earlier'))) : [];
-    const products = ranking
+    const kept = ranking ? (good.length ? good : ranked.filter((e) => !e.missedRequirements.includes('turned down earlier'))) : [];
+    /*
+     * A descriptive search that used meaning search is ordered by how strong
+     * its evidence is, within each match level - see orderHybrid. Named
+     * products stay in front; precise searches are untouched.
+     */
+    const poolPosition = new Map(pool.map((product, index) => [product.id, index]));
+    const hybridOrder = {
+      rangeAsked: !!askedRange || !!known,
+      broad: categories.length === 0 && !identified,
+      positionOf: (id: string) => poolPosition.get(id) ?? 0,
+    };
+    const ordered = hybridEvidence ? orderHybrid(kept, hybridEvidence, hybridOrder) : kept;
+    /*
+     * Several colours they like equally ("navy or black"): among results that
+     * match equally well, the colours take turns. Without this, whichever
+     * colour the search happened to reach first filled the screen, and three
+     * turns running showed navy alone to someone who wears black as often.
+     */
+    // Unseen first, then the colours take turns within what is unseen - the other way round, "another one" came back all navy.
+    const unseenOrder = seen.size ? unseenFirst(ordered, (entry) => entry.product.id, (entry) => entry.matchLevel, seen) : ordered;
+    const shownRanked =
+      rankColour?.strength === 'preferred' && rankColour.words.length > 1
+        ? colourTurns(unseenOrder, rankColour.words, (entry) => `${entry.matchLevel}|${seen.has(entry.product.id)}`)
+        : unseenOrder;
+    if (hybridEvidence) {
+      diagnostics.top = shownRanked.slice(0, 8).map((entry) => ({
+        title: entry.product.title,
+        band: hybridEvidence!.get(entry.product.id)?.band ?? 0,
+        rankScore: entry.score,
+        merged: Math.round((hybridEvidence!.get(entry.product.id)?.score ?? 0) * 100) / 100,
+        matchLevel: entry.matchLevel,
+      }));
+    }
+    const unrankedOrder = hybridEvidence
+      ? orderHybrid(pool.map((product) => ({ product, matchLevel: 'exact', score: 0 })), hybridEvidence, hybridOrder).map((entry) => entry.product)
+      : pool;
+    const unranked = seen.size ? unseenFirst(unrankedOrder, (product) => product.id, () => '', seen) : unrankedOrder;
+    const searched = ranking
       ? [...named.filter((n) => !shownRanked.some((e) => e.product.id === n.id)), ...shownRanked.map((entry) => entry.product)].slice(0, limit)
-      : pool.slice(0, limit);
-    const onlyPartial = ranking && good.length === 0 && shownRanked.length > 0;
+      : [...named, ...unranked.filter((product) => !named.some((n) => n.id === product.id))].slice(0, limit);
+    // The possible matches, when there are any that fit, are what is on screen - never unrelated products beside them.
+    const entryOf = new Map(shownRanked.map((entry) => [entry.product.id, entry]));
+    /*
+     * Which card leads - the one the Caddie recommends. Named products and
+     * possible matches keep their place; otherwise, among the cards that fit
+     * equally well, the lead is the one that best suits what the customer has
+     * told us: a cut its description states that matches the fit they prefer
+     * (a regular-cut polo led for "I prefer a relaxed fit"), something not yet
+     * shown when they asked for another, and not the same product or colour
+     * as last time when they like several colours equally.
+     */
+    // Chosen from everything that fits as well as the first card, not only the first six: the relaxed polos sat seventh and eighth.
+    const leadPool = ranking ? [...searched, ...shownRanked.map((entry) => entry.product).filter((product) => !searched.includes(product))] : searched;
+    const chosenLead = leadFirst(leadPool, {
+      levelOf: (product) => entryOf.get(product.id)?.matchLevel ?? '',
+      seen,
+      ...(request.fit ? { fit: request.fit } : {}),
+      colours: rankColour?.strength === 'preferred' && rankColour.words.length > 1 ? rankColour.words : [],
+      ...(ctx.session.lastLead ? { lastLead: ctx.session.lastLead } : {}),
+    })[0];
+    const products = possible.length
+      ? possible.slice(0, limit)
+      : named.length || !chosenLead
+        ? searched
+        : [chosenLead, ...searched.filter((product) => product !== chosenLead)].slice(0, limit);
+    const onlyPartial = !possible.length && ranking && good.length === 0 && shownRanked.length > 0;
+    const lead = possible.length ? undefined : products[0];
 
     await sessions.patch(ctx.session.id, {
       lastShown: {
@@ -489,19 +989,73 @@ const searchTool = defineTool({
         query,
         ...(filterColour ? { colour: filterColour } : {}),
       },
+      recentShown: [...new Set([...(wantsAnother ? (ctx.session.recentShown ?? []) : []), ...products.map((p) => p.id)])].slice(-40),
+      ...(lead ? { lastLead: { id: lead.id, colour: colourwayName(lead.title).toLowerCase() } } : {}),
       ...(askedRange === 'men' || askedRange === 'women' ? { preferences: { audience: askedRange } } : {}),
     });
 
-    const existenceFacts =
-      existence?.status === 'not-stocked'
-        ? `Catalogue check: nothing in the Druids catalogue is called "${existence.name}" - every product was checked. You may say we do not stock it.${
-            existence.closest.length ? ` Closest names: ${existence.closest.map((p) => p.title).join(', ')} - offer them as alternatives, never as it.` : ''
-          }`
-        : existence?.status === 'exact'
-          ? `Catalogue check: Druids does sell "${args.productName}": ${existence.products.map((p) => `${p.title} [${p.id}]${p.variants.some((v) => v.available) ? '' : ' (sold out)'}`).join(', ')}.`
-          : existence?.status === 'unknown'
-            ? `The full catalogue could not be checked just now. Say you could not find that exact product - never that we do not stock it.`
-            : '';
+    // Cards that are not the possible matches the facts name would be the Hexi polo again: log it rather than let it pass unseen.
+    if (existence?.kind === 'possible-match' && existence.products.length && !possible.length && products.length) {
+      log.warn('search.possible_match_unshown', { name: existence.name, candidates: existence.products.map((p) => p.title), shown: products.map((p) => p.title) });
+    }
+    // The possible matches named in the facts are the cards on screen, so the words and the screen agree.
+    const existenceFacts = existence
+      ? possible.length && existence.kind === 'possible-match'
+        ? `${catalogueCheck({ ...existence, products })} These possible matches are the cards on screen - ask which one they meant.`
+        : catalogueCheck(existence)
+      : '';
+    /*
+     * Why each result is here, as checked - only for what was asked. The model
+     * should never have to guess whether the navy polo it is about to offer
+     * comes in XL.
+     */
+    const namedWords = nameWords(args.productName ?? args.query);
+    const evidence = (product: Product): string => {
+      const bits: string[] = [];
+      // The design they named, exactly: "Elite Polo" is the Elite Polo, not a polo that shares a word.
+      const design = identityOf(product).designWords;
+      if (namedWords.length && design.length === namedWords.length && namedWords.every((word) => design.includes(word))) {
+        bits.push(`the design they named: ${titleCaseWords(product.title.split(' - ')[0]!)}`);
+      }
+      if (categories.length) bits.push([...categoriesOf(product)].filter((kind) => categories.includes(kind)).join('/') || categories[0]!);
+      if (filterColour && wantedColour?.colours.length) bits.push(colourwayName(product.title).toLowerCase() || filterColour);
+      if (size) bits.push(`${size} in stock at ${money(priceFor(product, size).amount, currency)}`);
+      if (ceiling !== undefined) bits.push(`within ${money(ceiling, currency)}`);
+      for (const feature of mustDo) bits.push(FEATURE_LABEL[feature]);
+      // They care about fit, and this one's description states none: say so, rather than leave it to be guessed.
+      if (request.fit && !attributesOf(product).fit) bits.push('fit not stated');
+      return bits.join(', ');
+    };
+
+    if (products.length === 0 && size) {
+      /*
+       * Nothing in their size. Said as that - never "we have nothing" - with
+       * what the same search holds in other sizes, so every size named is real.
+       */
+      const anySize = await searchProducts({
+        query,
+        limit: 12,
+        ...(ceiling !== undefined ? { maxPrice: ceiling } : {}),
+        ...(known ? { known } : {}),
+        ...(categories.length ? { categories } : {}),
+        ...(askedRange ? { range: askedRange } : {}),
+      });
+      const others = anySize.filter((product) => failures(product).every((failure) => failure.includes(size)));
+      if (others.length) {
+        const sizesOf = (product: Product) =>
+          [...new Set(product.variants.filter((variant) => variant.available).flatMap((variant) => Object.values(variant.options)))].join(', ');
+        return {
+          speech: `None of those are in stock in ${size} right now.`,
+          facts:
+            `Nothing matching is in stock in ${size}. The same search in other sizes:\n${others
+              .slice(0, 5)
+              .map((product) => `- ${product.title} [${product.id}]: in stock in ${sizesOf(product)}`)
+              .join('\n')}\nSay plainly that it is not in ${size}; offer another size or something else. Never show these as available in ${size}.${
+              existenceFacts ? `\n${existenceFacts}` : ''
+            }${namedMisses ? `\n${namedMisses}` : ''}`,
+        };
+      }
+    }
 
     if (products.length === 0) {
       /*
@@ -529,13 +1083,30 @@ const searchTool = defineTool({
       return { speech: `I could not find anything for "${query}" in the store right now.`, ...(existenceFacts ? { facts: existenceFacts } : {}) };
     }
 
-    const top = shownRanked[0];
+    // Never "lead with" one of several possible matches: which one they meant is theirs to say.
+    const top = lead ? entryOf.get(lead.id) : undefined;
+    // The level is for the model to weigh, never a phrase to repeat: "an exact match for your request" is not how a salesperson talks.
     const pickLine =
       top && !onlyPartial && top.reason
-        ? `\nLead with: ${top.product.title} [${top.product.id}] - ${top.matchLevel} match: ${top.reason}.${
+        ? `\nLead with: ${top.product.title} [${top.product.id}] - it fits because: ${top.reason}.${
             top.missedPreferences.length ? ` It differs on: ${top.missedPreferences.join('; ')} - say so.` : ''
           }`
         : '';
+    /*
+     * One next step, decided from what is known. A trusted size it is in
+     * stock in, on a product that is not in doubt: offer the basket. No size
+     * yet: ask for it. Neither while they are choosing between names.
+     */
+    const buyingSize = size ?? request.size;
+    const leadSized = !!lead && (lead.options.find((option) => /size/i.test(option.name))?.values.length ?? 0) > 1;
+    const nextStep =
+      !lead || onlyPartial || !leadSized || (categories.length === 0 && !identified && !topKinds.length)
+        ? ''
+        : buyingSize && sizeStatus(lead, buyingSize) === 'in-stock'
+          ? `Next step: the ${lead.title} is in stock in ${buyingSize} at ${money(priceFor(lead, buyingSize).amount, currency)} - offer to add it to their basket in ${buyingSize}. Only add it once they say yes.`
+          : !buyingSize
+            ? 'Next step: their size is not known - ask for it, rather than offering the basket.'
+            : '';
     const partialLine = onlyPartial
       ? `\nNothing meets everything they asked for. These are the closest, and each fails something (below) - say plainly what is missing, never present them as what they asked for.`
       : '';
@@ -545,25 +1116,46 @@ const searchTool = defineTool({
      * returns its best guesses, and "I found 4 options" invites the model to
      * present them as the thing that was asked for.
      */
+    // With a pack on screen, which of these can go in it - the rest are full price, bought on their own.
+    const inPack = packShown ? products.filter((product) => packShown.steps.some((step) => step.productIds.has(product.id))) : [];
+    const packNote = packShown
+      ? `The ${packShown.title} was on screen. ${
+          inPack.length ? `Of these results only ${inPack.map((p) => p.title).join(', ')} can go in it.` : 'None of these results can go in it.'
+        } The others are bought separately at full price - say so, and never offer to put them in the pack.`
+      : '';
+    const packSpeech =
+      packShown && inPack.length < products.length
+        ? inPack.length
+          ? ` Only the ${inPack.map((p) => titleCaseWords(p.title)).join(' and the ')} can go in the pack - the others would be bought separately.`
+          : ' None of these are part of the pack - they would be bought separately.'
+        : '';
     return {
       // A proven absence leads: "closest matches" first made the model hedge and ask the customer to confirm the name.
-      speech: existence?.status === 'not-stocked'
-        ? `We do not stock the ${existence.name.replace(/^(the|a|an)\s+/i, '')}. The closest options are on screen now.`
+      speech: `${possible.length
+        ? `I couldn't confirm a single product called the ${(args.productName ?? existence?.name ?? query).replace(/^(the|a|an)\s+/i, '')}. These are the closest named matches, on screen now.`
+        : existence?.kind === 'not-found'
+        ? `We do not stock the ${(args.productName ?? existence.name).replace(/^(the|a|an)\s+/i, '')}. The closest options are on screen now.`
         : onlyPartial
         ? `I could not find anything that meets everything you asked for - these are the closest. They are on screen now.`
         : products.length === 1
           ? 'Here is the closest match in the store. It is on screen now.'
-          : `Here are the ${products.length} closest matches in the store. They are on screen now.`,
+          : `Here are the ${products.length} closest matches in the store. They are on screen now.`}${packSpeech}`,
       facts: [
-        `Results for "${query}", best match first:\n${listFacts(products)}`,
+        packNote,
+        `Results for "${query}", best match first:\n${listFacts(products, evidence)}`,
         normal.mapped.length ? `Searched in catalogue terms: ${normal.mapped.join('; ')}.` : '',
+        topKinds.length
+          ? `"Top" read as ${topKinds.join(' or ')} for ${climate} weather - a preference, not a rule: other kinds can still show, below these.`
+          : '',
         filterColour && strength !== 'preferred'
           ? `Every result is in ${filterColour} or a shade of it - the colour is in each name. Say which shade when it is not the exact word they used (navy for blue, teal for blue or green).`
           : strength === 'preferred'
             ? `${asked} is a preference, not a rule: those colours are ranked first, others can still show.`
             : '',
         ranking ? `How each fits what they asked for:\n${rankFacts(shownRanked.filter((e) => products.includes(e.product)))}${pickLine}${partialLine}` : '',
+        nextStep,
         existenceFacts,
+        namedMisses,
       ]
         .filter(Boolean)
         .join('\n'),
@@ -593,6 +1185,8 @@ const detailsTool = defineTool({
     required: ['productId'],
   },
   async run(args, ctx): Promise<ToolResult> {
+    const picked = await pickFromPackChoices(ctx);
+    if (picked) return picked;
     let product = await getProductDetails(args.productId, args.options);
     // "The second one", "the navy one": what they can see, not an id to guess.
     if (!product && !/^(gid:\/\/|\d+$)/.test(args.productId.trim())) {
@@ -607,8 +1201,10 @@ const detailsTool = defineTool({
        * confirm the name. The same whole-catalogue check as search answers it.
        */
       const named = /^(gid:\/\/|\d+$)/.test(args.productId.trim()) ? null : lookupProductName(args.productId);
-      if (named?.status === 'not-stocked') {
-        const name = named.name.replace(/^(the|a|an)\s+/i, '');
+      // One product by that name and colour: that is the one they mean.
+      if (named?.kind === 'exact-product') product = await getProductDetails(named.product.id, args.options);
+      if (!product && named?.kind === 'not-found') {
+        const name = args.productId.replace(/^(the|a|an)\s+/i, '');
         return {
           speech: `We do not stock the ${name}.`,
           facts: `Catalogue check: nothing in the Druids catalogue is called "${name}" - every product was checked. Say we don't stock it, then offer to show the closest with search_products.${
@@ -616,13 +1212,13 @@ const detailsTool = defineTool({
           }`,
         };
       }
-      if (named?.status === 'exact') {
+      if (!product && (named?.kind === 'exact-family' || named?.kind === 'possible-match')) {
         return {
-          speech: 'I found a few with that name - which one did you mean?',
-          facts: `Products with that name: ${named.products.map((p) => `${p.title} [${p.id}]`).join(', ')}. Call get_product_details with one of these ids.`,
+          speech: named.kind === 'exact-family' ? 'That comes in a few colours - which one would you like?' : "I couldn't find that exact product.",
+          facts: `${catalogueCheck(named)} Call get_product_details with one of these ids once you know which.`,
         };
       }
-      return { speech: 'I could not load that product.' };
+      if (!product) return { speech: 'I could not load that product.' };
     }
 
     /*
@@ -634,7 +1230,7 @@ const detailsTool = defineTool({
     await sessions.patch(ctx.session.id, { focusProductId: product.id });
     const verified = [
       attributes.features.length ? `Its description states: ${attributes.features.map((f) => FEATURE_LABEL[f]).join(', ')}.` : 'Its description states no technical features - do not claim any.',
-      attributes.fit ? `Cut: ${attributes.fit}.` : '',
+      attributes.fit ? `Cut: ${attributes.fit}.` : ctx.session.shopper?.fit ? 'Cut: not stated in its description - never describe its fit.' : '',
       attributes.materials.length ? `Fabric: ${attributes.materials.join(', ')}.` : '',
       // Every size and colour, in stock or not, from the full product - a narrowed lookup holds one variant.
       `Stock: ${describeStock(productById(product.id) ?? product)}`,
@@ -865,7 +1461,7 @@ const packSchema = z.object({
  * recipes from the live theme (catalog/bundles.ts).
  */
 async function dealAnswer(
-  args: { query: string; size?: string; swap?: string; swapWith?: string },
+  args: { query: string; size?: string; colour?: string; swap?: string; swapWith?: string },
   ctx: ToolContext,
   colour: string | undefined,
   currency: string,
@@ -923,7 +1519,9 @@ async function dealAnswer(
    * pack" with Warm Rounds on screen changed Warm Rounds, and then told them
    * no mixed pack was showing.
    */
-  const target = namedDeal && remembered[namedDeal.handle] ? namedDeal : onScreen;
+  // Or the pack in focus while its choices for one piece are on screen.
+  const inFocus = ctx.session.packInFocus && remembered[ctx.session.packInFocus] ? allDeals().find((deal) => deal.handle === ctx.session.packInFocus) : undefined;
+  const target = namedDeal && remembered[namedDeal.handle] ? namedDeal : (onScreen ?? inFocus);
   const fromScreen = !!target && target === onScreen && shown?.kind === 'pack';
   const targetItems = target ? ((fromScreen ? shown!.items : remembered[target.handle]?.items) ?? []) : [];
   const targetColour = target ? (fromScreen ? shown?.colour : remembered[target.handle]?.colour) : undefined;
@@ -932,14 +1530,37 @@ async function dealAnswer(
 
   // One piece named with a change word is a swap, whether or not the model called it one.
   const slotIndex = target ? stepNamed(target, said) : -1;
-  const changeWords = /\b(swap|change|different|another|replace|other|new|else|design|style)\b/i.test(said);
-  const wantsSwap = !!(args.swap || args.swapWith) || (changeWords && slotIndex >= 0 && !wholePack);
+  const changeWords = CHANGE_WORDS.test(said);
+  /*
+   * One piece named, with a change, a colour or a choice, is a swap of that
+   * piece. "Select men's clima golf trousers which is white" came in with the
+   * colour and no piece to swap, and every piece of the pack was rebuilt in
+   * white - the jacket, polo and belt the customer had not mentioned.
+   */
+  const aboutOnePiece = changeWords || parseColours(said).colours.length > 0 || CHOICE_WORDS.test(said);
+  const wantsSwap = !!(args.swap || args.swapWith) || (!!target && slotIndex >= 0 && !wholePack && aboutOnePiece);
 
   // Swapping one piece of that pack: the rest stays, one step is re-picked.
   if (target && wantsSwap) {
     const current = targetItems.map((item) => (item.id ? productById(item.id) : null));
     const stepIndex = current.findIndex((product) => !!product && !!args.swap && sameProduct(product.id, args.swap));
-    const chosen = args.swapWith ? await getProductDetails(args.swapWith) : null;
+    // "swapWith: cap" is the kind of piece they want, not a product to look up - any cap in the store could come back.
+    const bare = (args.swapWith ?? '').trim().replace(/^(an?|the)\s+/i, '');
+    const kindOnly = /^[a-z]+$/i.test(bare) && PIECE_KINDS.some((kind) => kind.said.test(bare));
+    /*
+     * A design they name is their pick, whether or not the model passed it.
+     * "Swap this premium play trouser which is white" - not in the pack - put
+     * white Comfort Shorts in; "select men's clima golf trousers which is
+     * white" then said the pack had no white trousers.
+     */
+    const named = designNamedIn(
+      said,
+      slotIndex >= 0 ? target.steps[slotIndex] : undefined,
+      targetItems,
+      new Set(ctx.session.lastShown?.kind === 'products' ? ctx.session.lastShown.items.map((item) => item.id) : []),
+    );
+    // Their own words first: the model once passed a vague swapWith and the named design was lost.
+    const chosen = named ?? (args.swapWith && !kindOnly ? await getProductDetails(args.swapWith) : null);
     const index =
       stepIndex >= 0
         ? stepIndex
@@ -956,9 +1577,22 @@ async function dealAnswer(
     }
     const step = target.steps[index]!;
     if (chosen && !step.productIds.has(chosen.id)) {
+      // What the pack does take in that colour: "the Premium Play Trousers aren't in it - the Clima Golf Trousers in white are".
+      const shade = colourwayName(chosen.title);
+      const nearest = [...step.productIds]
+        .map((id) => productById(id))
+        .filter((p): p is Product => !!p && p.variants.some((v) => v.available) && (!shade || matchesColourText(p, shade) > 0))
+        .sort((a, b) => Number(kindOf(b) === kindOf(chosen)) - Number(kindOf(a) === kindOf(chosen)))[0];
       return {
-        speech: `The ${chosen.title} is not one of the ${step.title.toLowerCase()} choices for the ${target.title}.`,
-        facts: `Only products from that step's collection count towards the pack price. Offer to add it separately instead.`,
+        lead: notInPackLead(chosen, titleCaseWords(target.title)),
+        speech: `The ${titleCaseWords(chosen.title)} ${/s$/i.test(garmentName(chosen.title)) ? "aren't" : "isn't"} one of the pack's choices${
+          nearest ? ` - the ${titleCaseWords(nearest.title)} is. Shall I put that in?` : ', so it would be bought separately at full price.'
+        }`,
+        facts:
+          `${chosen.title} is not in the ${step.title} step of ${target.title}; only that step's products count towards the pack. Nothing has changed. ` +
+          (nearest
+            ? `The pack's own choice in that colour: ${nearest.title} [${nearest.id}] - offer it (recommend_pack with swapWith that id), or ${chosen.title} bought separately.`
+            : `Offer ${chosen.title} bought separately at full price.`),
       };
     }
     const keep = new Map<number, Product>();
@@ -969,15 +1603,70 @@ async function dealAnswer(
     const outgoing = current[index];
     if (outgoing) await rememberShopper(ctx.session.id, { rejected: [outgoing.id], ...(chosen ? { liked: [chosen.id] } : {}) });
     const turnedDown = ctx.session.shopper?.rejected ?? [];
-    // A swap is a different piece, not the same one in another colour: "change the design of the polo".
+    /*
+     * The colour asked for this one piece, in the customer's own words first.
+     * "Change the colour of trouser to white" reached here with no colour -
+     * the model left it out - and black joggers came back while the Caddie
+     * told the customer they were white.
+     */
+    const pieceColour = chosen ? undefined : (colourAsked(undefined, said) ?? colourAsked(args.colour));
+    const redesign = /\b(design|style|different|another|other)\b/i.test(said);
+    const outgoingDesign = outgoing ? new Set([garmentName(outgoing.title)]) : undefined;
+    const stepProducts = [...step.productIds].map((id) => productById(id)).filter((p): p is Product => !!p);
+    const kind = chosen
+      ? undefined
+      : (kindWanted(said, outgoing, stepProducts) ?? (kindOnly ? kindWanted(args.swapWith!, outgoing, stepProducts) : undefined));
+    // A new colour is the same piece recoloured; otherwise a swap is a different piece: "change the design of the polo".
     const pieces = fillDeal(target, {
       size,
-      colour,
+      ...((pieceColour ?? colour) ? { colour: pieceColour ?? colour } : {}),
       keep,
       exclude: [...(outgoing ? [outgoing.id] : []), ...turnedDown],
-      ...(outgoing ? { avoidDesigns: new Set([garmentName(outgoing.title)]) } : {}),
+      ...(outgoingDesign ? (pieceColour && !redesign ? { preferDesigns: outgoingDesign } : { avoidDesigns: outgoingDesign }) : {}),
+      ...(kind ? { onlyKind: kind.title } : {}),
     });
-    return showDeal(target, pieces, ctx, currency, args.query, { ...(size ? { size } : {}), ...(colour ? { colour } : {}) });
+    const picked = pieces[index];
+    if (kind && !picked) {
+      // The kind they asked for, and none of it to be had in this step: change nothing.
+      return {
+        speech: `There's no ${kind.name} I can put in the ${titleCaseWords(target.title)}${size ? ` in ${size}` : ''} right now, so I've left it as it is. Would another piece do?`,
+        facts:
+          `No ${kind.name} in the ${step.title} step of ${target.title} is in stock${size ? ` in ${size}` : ''}, so the pack is unchanged (still ${outgoing?.title ?? 'as shown'}). ` +
+          'Never say it has been changed.',
+      };
+    }
+    if (pieceColour && (!picked || matchesColourText(picked, pieceColour) === 0)) {
+      // Nothing in that colour for this step: say what it does come in, and change nothing.
+      const offered = coloursOffered(
+        [...step.productIds]
+          .map((id) => productById(id))
+          .filter((p): p is Product => !!p && p.id !== outgoing?.id && p.variants.some((v) => v.available)),
+      ).map((c) => c.toLowerCase());
+      const choices = [...new Set(offered)].slice(0, 6);
+      const piece = step.title.toLowerCase().replace(/\s*\/\s*/g, ' or ');
+      return {
+        speech: `The ${piece} in the ${titleCaseWords(target.title)} doesn't come in ${pieceColour}${choices.length ? ` - it comes in ${choices.join(', ')}` : ''}. Would one of those do?`,
+        facts:
+          `Nothing in the ${step.title} step of ${target.title} comes in ${pieceColour}, so the pack is unchanged (still ${outgoing?.title ?? 'as shown'}). ` +
+          `The colours this step does come in, across all its designs: ${choices.join(', ') || 'none other'} - name these; never say it comes in only the colour on screen. ` +
+          'Never say it has been changed. Offer one of those colours, or the piece they wanted bought separately at full price, outside the pack. Do not call product_info for this - it only knows the one design.',
+      };
+    }
+    // The pack keeps its own colour; one recoloured piece does not recolour the rest on the next swap.
+    const packColour = targetColour;
+    const result = await showDeal(target, pieces, ctx, currency, args.query, { ...(size ? { size } : {}), ...(packColour ? { colour: packColour } : {}) });
+    const card = result.attachment?.kind === 'pack' ? result.attachment.recommendation : undefined;
+    // Only at its own price, as shown: a pack that cannot be bought, or costs its pieces' total, keeps showDeal's words.
+    const asPriced = card?.bundle?.handle === target.handle && !card.bundle.blocked && card.total.amount === target.prices.GBP;
+    if (!picked || picked.id === outgoing?.id || card?.bundle?.handle !== target.handle) return result;
+    const changed = `Changed: ${outgoing?.title ?? 'none'} -> ${picked.title}. Name the new piece exactly as it is titled - what it is and its colour.\n`;
+    return {
+      ...result,
+      ...(asPriced
+        ? { speech: `I've swapped the ${outgoing ? titleCaseWords(outgoing.title) : step.title.toLowerCase()} for the ${titleCaseWords(picked.title)} - the pack is still £${target.prices.GBP}.` }
+        : {}),
+      facts: `${changed}${result.facts ?? ''}`,
+    };
   }
 
   if (namedDeal) {
@@ -998,7 +1687,7 @@ async function dealAnswer(
     if (before && !changing) {
       const again = before.items.map((item) => (item.id ? productById(item.id) : null));
       if (again.every((piece) => piece && piece.variants.some((variant) => variant.available))) {
-        return showDeal(namedDeal, again, ctx, currency, args.query, fill);
+        return withOtherVersions(namedDeal, await showDeal(namedDeal, again, ctx, currency, args.query, fill), said);
       }
     }
 
@@ -1012,7 +1701,7 @@ async function dealAnswer(
       .flatMap(([, pack]) => pack.items.filter((item) => item.title).map((item) => garmentName(item.title)));
     const own = changing && before ? before.items.filter((item) => item.title).map((item) => garmentName(item.title)) : [];
     const avoidDesigns = new Set([...own, ...seenElsewhere]);
-    return showDeal(
+    const shownDeal = await showDeal(
       namedDeal,
       fillDeal(namedDeal, { ...fill, ...(avoidDesigns.size ? { avoidDesigns } : {}) }),
       ctx,
@@ -1020,6 +1709,7 @@ async function dealAnswer(
       args.query,
       fill,
     );
+    return withOtherVersions(namedDeal, shownDeal, said);
   }
   if (choice && 'ask' in choice) {
     const options = choice.ask;
@@ -1058,6 +1748,264 @@ async function dealAnswer(
     };
   }
   return null;
+}
+
+// "A belt instead of a cap" is a swap too - without "instead" it rebuilt the whole pack.
+const CHANGE_WORDS = /\b(swap|switch|change|different|another|replace|other|new|else|design|style|instead|rather)\b/i;
+const CHOICE_WORDS = /\b(select|choose|pick|prefer|go with|make it|use|want|like)\b/i;
+
+/**
+ * The product a customer names by its design - "premium play", "clima golf
+ * trousers" - with the colour they say. Pack choices, the kind of piece they
+ * say, and their colour lead; null when no design is named.
+ */
+function designNamedIn(
+  said: string,
+  step: DealStep | undefined,
+  inPack: Array<{ title: string }>,
+  onScreen: Set<string> = new Set(),
+): Product | null {
+  const spoken = new Set(said.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').split(/[\s-]+/).filter(Boolean));
+  const colour = colourAsked(undefined, said);
+  const kindSaid = PIECE_KINDS.filter((kind) => kind.said.test(said));
+  // "Change the clima trousers", no colour: naming the piece going out, not picking it again.
+  const packDesigns = new Set(inPack.filter((item) => item.title).map((item) => garmentName(item.title)));
+  const named = allProducts().filter((product) => {
+    const design = distinctiveWords(garmentName(product.title)).filter((word) => word.length > 1 && !/^(men|mens|ladies|kids|womens?)$/.test(word));
+    return (
+      design.length > 0 &&
+      design.every((word) => spoken.has(word)) &&
+      product.variants.some((variant) => variant.available) &&
+      // The kind they said: "clima trousers" is not the Clima shorts.
+      (kindSaid.length === 0 || kindSaid.some((kind) => kind.title.test(product.title))) &&
+      (!!colour || !packDesigns.has(garmentName(product.title)))
+    );
+  });
+  if (named.length === 0) return null;
+  // A colour they name comes first: never the navy one when they said white.
+  const inColour = colour ? named.filter((product) => matchesColourText(product, colour) > 0) : named;
+  if (inColour.length) named.splice(0, named.length, ...inColour);
+  // "The white clima ones" with the white Clima trousers on screen is those, not the white Clima shorts.
+  const score = (product: Product) =>
+    (onScreen.has(product.id) ? 16 : 0) +
+    (step?.productIds.has(product.id) ? 8 : 0) +
+    (kindSaid.some((kind) => kind.title.test(product.title)) ? 4 : 0) +
+    (colour ? Math.min(matchesColourText(product, colour), 3) : 0);
+  return named.sort((a, b) => score(b) - score(a))[0]!;
+}
+
+/**
+ * The sizes passed to a cart tool that the customer never gave: not in
+ * anything they said this conversation, and not saved in their profile.
+ */
+export function sizesNeverGiven(values: Array<string | undefined>, ctx: ToolContext): string[] {
+  const said = [...ctx.session.messages.filter((message) => message.role === 'user').map((message) => message.text), ctx.utterance ?? '']
+    .join(' ')
+    .toLowerCase();
+  // "I'm" is not an M, nor "it's" an S: apostrophes join, never split.
+  const tokens = said.replace(/['’]/g, '').replace(/[^a-z0-9\s/-]/g, ' ').split(/[\s/]+/).filter(Boolean);
+  const known = new Set<string>(tokens.filter((token) => /\d/.test(token)));
+  tokens.forEach((token, i) => {
+    for (const phrase of [token, `${token} ${tokens[i + 1] ?? ''}`, `${token} ${tokens[i + 1] ?? ''} ${tokens[i + 2] ?? ''}`]) {
+      const size = normaliseSize(phrase.trim());
+      if (size) known.add(size.toLowerCase());
+    }
+  });
+  const profile = shopperSizes(ctx.session);
+  for (const size of [profile?.size, profile?.waist]) if (size) known.add((normaliseSize(String(size)) ?? String(size)).toLowerCase());
+  const given = (value: string) =>
+    /^one\s*size/i.test(value) ||
+    // "M/L" on a belt is one of their sizes if either half is.
+    value.split('/').some((part) => known.has((normaliseSize(part.trim()) ?? part.trim()).toLowerCase()));
+  return values.filter((value): value is string => !!value?.trim()).filter((value) => !given(value));
+}
+
+/** The size-like values among chosen options - size, waist, leg - never a colour. */
+function sizeValues(options: Record<string, string> | undefined): string[] {
+  return Object.entries(options ?? {})
+    .filter(([key]) => /size|waist|leg|length|fit/i.test(key))
+    .map(([, value]) => value);
+}
+
+/** "trousers", "belt" - what a piece is, by its title. */
+function kindOf(product: Product): string | undefined {
+  return PIECE_KINDS.find((kind) => kind.name !== 'hat' && kind.title.test(product.title))?.name;
+}
+
+/** The pack on the customer's screen right now, if it is one. */
+function packOnScreen(ctx: ToolContext): DealRecipe | undefined {
+  const shown = ctx.session.lastShown;
+  return shown?.kind === 'pack' && shown.bundle ? allDeals().find((deal) => deal.handle === shown.bundle) : undefined;
+}
+
+/** The pack whose choices for one piece are on screen - shown by packStepChoices. */
+function packChoicesInFocus(ctx: ToolContext): DealRecipe | undefined {
+  const shown = ctx.session.lastShown;
+  const handle = ctx.session.packInFocus;
+  if (!handle || shown?.kind !== 'products' || shown.query !== `pack choices: ${handle}`) return undefined;
+  return allDeals().find((deal) => deal.handle === handle);
+}
+
+/**
+ * "Put the first one in", with a pack's choices for one piece on screen: a
+ * swap into that pack, whichever tool the model reached for. It looked the
+ * trousers up and asked for a waist size instead, and the pack stayed navy.
+ */
+async function pickFromPackChoices(ctx: ToolContext): Promise<ToolResult | null> {
+  const deal = packChoicesInFocus(ctx);
+  const said = ctx.utterance ?? '';
+  if (!deal || /\?\s*$/.test(said)) return null;
+  if (!(CHOICE_WORDS.test(said) || /\b(put|add|swap|go for|take|that one|this one|yes)\b/i.test(said))) return null;
+  const hit = resolveProduct(ctx.session, said);
+  if (!hit) return null;
+  const currency = ctx.session.preferences.currency ?? storeCurrency();
+  return dealAnswer({ query: deal.title, swapWith: hit.product.id }, ctx, undefined, currency);
+}
+
+/**
+ * "No - the Premium Play Trousers aren't part of the pack", kept at the front
+ * of the reply unless the reply already says no about that design.
+ */
+function notInPackLead(product: Product, packName: string): { text: string; unless: RegExp } {
+  const design = titleCaseWords(garmentName(product.title));
+  const word = (distinctiveWords(garmentName(product.title))[0] ?? design.split(' ')[0]!).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return {
+    text: `No - the ${design} ${/s$/i.test(design) ? "aren't" : "isn't"} part of the ${packName}.`,
+    unless: new RegExp(`^\\s*no\\b|${word}[^.]*\\b(not|isn't|aren't|can't)\\b|\\b(not|isn't|aren't|can't)\\b[^.]*${word}`, 'i'),
+  };
+}
+
+/** One step of a pack: only what the pack takes, in the colour and kind asked for. */
+async function packStepChoices(deal: DealRecipe, index: number, ctx: ToolContext, colour: string | undefined): Promise<ToolResult> {
+  const step = deal.steps[index]!;
+  const said = ctx.utterance ?? '';
+  const inStock = [...step.productIds]
+    .map((id) => productById(id))
+    .filter((p): p is Product => !!p && p.variants.some((variant) => variant.available));
+  // "Belts" in the belt-or-cap step is belts only.
+  const kinds = PIECE_KINDS.filter((kind) => kind.said.test(said) && inStock.some((p) => kind.title.test(p.title)));
+  const ofKind = kinds.length ? inStock.filter((p) => kinds.some((kind) => kind.title.test(p.title))) : inStock;
+  const matching = colour ? ofKind.filter((p) => matchesColourText(p, colour) > 0) : ofKind;
+  const piece = step.title.toLowerCase().replace(/\s*\/\s*/g, ' or ');
+  const packName = titleCaseWords(deal.title);
+  /*
+   * A product they name that the pack does not take is a no, said first.
+   * "Do you have premium play trousers in white for the pack?" got "Yes, the
+   * pack can include Men's Clima Golf Trousers in white".
+   */
+  const named = designNamedIn(said, step, []);
+  const notInPack = named && !step.productIds.has(named.id) ? named : null;
+  const refusal = notInPack
+    ? `No - the ${titleCaseWords(garmentName(notInPack.title))} ${/s$/i.test(garmentName(notInPack.title)) ? "aren't" : "isn't"} part of the ${packName}; it could only be bought separately at full price. `
+    : '';
+  const refusalFact = notInPack
+    ? `${notInPack.title} is NOT one of the pack's choices. Start the answer with "No" and say so plainly - never "yes". `
+    : '';
+  const lead = notInPack ? notInPackLead(notInPack, packName) : undefined;
+  if (matching.length === 0) {
+    const colours = [...new Set(coloursOffered(ofKind).map((c) => c.toLowerCase()))].slice(0, 6);
+    return {
+      ...(lead ? { lead } : {}),
+      speech: `${refusal}None of the ${piece} choices in the ${packName} come in ${colour ?? 'that'}${colours.length ? ` - they come in ${colours.join(', ')}` : ''}. Would one of those do?`,
+      facts:
+        refusalFact +
+        `Nothing in the ${step.title} step of ${deal.title} matches. Nothing outside the pack has been shown - never suggest a product outside the pack as part of it. ` +
+        'Offer the colours it does come in; only if they ask, search outside the pack and say it is bought separately at full price.',
+    };
+  }
+  const shown = matching.sort((a, b) => (colour ? matchesColourText(b, colour) - matchesColourText(a, colour) : 0)).slice(0, 8);
+  await sessions.patch(ctx.session.id, {
+    lastShown: { kind: 'products', items: shown.map((p) => ({ id: p.id, title: p.title })), query: `pack choices: ${deal.handle}` },
+    packInFocus: deal.handle,
+  });
+  return {
+    speech: `${refusal}Here are the ${piece} choices in the ${packName}${colour ? ` in ${colour}` : ''} - any of these can go in the pack. Which would you like?`,
+    facts:
+      refusalFact +
+      `Every product here is one of the ${step.title} choices in ${deal.title} - nothing from outside the pack:\n${shown.map((p) => `- ${p.title} [${p.id}]`).join('\n')}\n` +
+      'To put one in, call recommend_pack with swapWith its id. The rest of the pack stays as it is.',
+    attachment: { kind: 'products', products: shown },
+    ...(lead ? { lead } : {}),
+  };
+}
+
+/** "Change this trouser with a white trouser" - one piece of that pack, not something bought on its own. */
+function asksToChangePackPiece(deal: DealRecipe, said: string): boolean {
+  if (stepNamed(deal, said) < 0) return false;
+  if (/\b(separately|on its own|on their own|outside the pack|not in the pack|as well|extra)\b/i.test(said)) return false;
+  return CHANGE_WORDS.test(said);
+}
+
+/**
+ * The kinds of piece one pack step can hold: as a customer says it, and as a
+ * title shows it. The belt-or-cap step holds belts, caps, beanies and visors.
+ */
+const PIECE_KINDS: Array<{ name: string; said: RegExp; title: RegExp }> = [
+  { name: 'belt', said: /\bbelts?\b/i, title: /\bbelt\b/i },
+  { name: 'cap', said: /\bcaps?\b/i, title: /\bcap\b/i },
+  { name: 'beanie', said: /\bbeanies?\b/i, title: /\bbeanie\b/i },
+  { name: 'visor', said: /\bvisors?\b/i, title: /\bvisor\b/i },
+  { name: 'hat', said: /\bhats?\b/i, title: /\b(cap|beanie|visor|hat)\b/i },
+  { name: 'shorts', said: /\bshorts\b/i, title: /\bshorts\b/i },
+  { name: 'skort', said: /\bskorts?\b/i, title: /\bskorts?\b/i },
+  { name: 'joggers', said: /\bjoggers?\b/i, title: /\bjoggers?\b/i },
+  { name: 'trousers', said: /\b(trousers?|pants)\b/i, title: /\btrousers?\b/i },
+  { name: 'gilet', said: /\b(gilets?|vests?)\b/i, title: /\bgilet\b/i },
+  { name: 'jacket', said: /\bjackets?\b/i, title: /\bjacket\b/i },
+  { name: 'hoodie', said: /\bhoodies?\b/i, title: /\bhoodie\b/i },
+];
+
+/**
+ * "I need a belt instead of a cap": the kind of piece they want in its place.
+ * Not the kind going out, not the one after "instead of", and only a kind the
+ * step actually holds. Asked for a belt, the Caddie said it had swapped in a
+ * belt and put a beanie on the card.
+ */
+export function kindWanted(
+  said: string,
+  outgoing: Product | null | undefined,
+  stepProducts: Product[],
+): { name: string; title: RegExp } | undefined {
+  const refused = /\b(instead of|rather than|not|no)\s+(an?\s+|the\s+|my\s+)?(\w+)/gi;
+  const notWanted = new Set([...said.matchAll(refused)].map((match) => match[3]!.toLowerCase()));
+  const mentioned = PIECE_KINDS.map((kind) => ({ kind, at: said.search(kind.said) }))
+    .filter(({ kind, at }) => at >= 0 && stepProducts.some((product) => kind.title.test(product.title)))
+    .filter(({ kind }) => !(outgoing && kind.title.test(outgoing.title)))
+    .filter(({ kind }) => ![...notWanted].some((word) => kind.said.test(word)))
+    .sort((a, b) => a.at - b.at);
+  return mentioned[0]?.kind;
+}
+
+/**
+ * "Do you have only one Ambassador Pack?" - the other versions, from the deals
+ * themselves. Shown the mens pack again, the Caddie said "we only have this
+ * one" while a Ladies and a Kids Ambassador Pack were on sale.
+ */
+function withOtherVersions(deal: DealRecipe, result: ToolResult, said: string): ToolResult {
+  const family = /ambassador/.test(deal.handle) ? /ambassador/ : null;
+  if (!family) return result;
+  const others = allDeals().filter((d) => d.handle !== deal.handle && family.test(d.handle));
+  if (others.length === 0) return result;
+  const described = others.map(
+    (d) => `${rangeLabel(d.range) || 'Mens '}${d.conditionTitle ? `${titleCaseWords(d.conditionTitle)} ` : ''}Ambassador Pack - £${d.prices.GBP}`,
+  );
+  const facts = `${result.facts ?? ''}\nOther versions of this pack on sale (there is more than one - never say there is only one): ${described.join('; ')}.`;
+  const asks =
+    /\b(only|just)\s+(one|the one|this one|that one)\b|\bhow many\b|\bany (other|more)\b|\bother (ones?|packs?|versions?|kinds?)\b|\bpacks\b|\bversions\b/i.test(said);
+  if (!asks) return { ...result, facts };
+  const ranges = [...new Set(others.filter((d) => d.range !== deal.range).map((d) => rangeLabel(d.range).trim() || 'Mens'))];
+  const sameRange = others.filter((d) => d.range === deal.range);
+  const extra = [
+    sameRange.length ? `it also comes in ${sameRange.map((d) => titleCaseWords(d.conditionTitle ?? d.title)).join(' and ')} versions` : '',
+    ranges.length ? `there's a ${ranges.join(' and a ')} Ambassador Pack too` : '',
+  ]
+    .filter(Boolean)
+    .join(', and ');
+  return {
+    ...result,
+    speech: `${result.speech} ${extra.charAt(0).toUpperCase()}${extra.slice(1)} - would you like to see one?`,
+    facts,
+  };
 }
 
 /** The weather each Ambassador condition is for - what its pieces should suit. */
@@ -1139,6 +2087,8 @@ async function showDeal(
     if (own > 0 && own < packPrice) {
       recommendation.total = { amount: own, currency: recommendation.total.currency };
       cheaperNote = ` These pieces come to £${own.toFixed(2)} on their own - less than the £${packPrice} pack price - so that is what you would pay.`;
+      // The card's own line said "6 pieces for £159.99" above a £114.00 total.
+      recommendation.reason = `The ${deal.title} is ${deal.steps.length} pieces, one from each step.${cheaperNote}`;
     }
   }
   await sessions.patch(ctx.session.id, {
@@ -1152,6 +2102,7 @@ async function showDeal(
       ...(fill.colour ? { colour: fill.colour } : {}),
     },
     // Remembered by pack, so going back to it - or changing it from another pack - finds this one.
+    packInFocus: deal.handle,
     packsShown: {
       ...((await sessions.getOrCreate(ctx.session.id)).packsShown ?? {}),
       [deal.handle]: {
@@ -1205,12 +2156,29 @@ const packTool = defineTool({
     required: ['query'],
   },
   async run(args, ctx): Promise<ToolResult> {
+    const picked = await pickFromPackChoices(ctx);
+    if (picked) return picked;
     const currency = args.currency ?? ctx.session.preferences.currency ?? storeCurrency();
     const statedBudget = ctx.session.shopper?.budget;
     const budgetAmount =
       args.budgetAmount ?? (statedBudget?.per === 'total' ? statedBudget.amount : undefined) ?? ctx.session.preferences.budgetAmount;
     // Named in their words counts, whether or not the model passed it on.
-    const askedColour = colourAsked(args.colour, args.query);
+    /*
+     * A colour only when the customer gave one. "The cool and wet pack" came
+     * back all blue: the model passed a colour nobody had said. Their last few
+     * messages count, a standing colour counts, and so does another language -
+     * the model translates "azul" to blue.
+     */
+    const recent = [...ctx.session.messages.filter((m) => m.role === 'user').slice(-3).map((m) => m.text), ctx.utterance ?? ''].join(' ');
+    const colourGiven =
+      parseColours(recent).colours.length > 0 ||
+      !!ctx.session.shopper?.colours ||
+      !!ctx.session.preferences.colour ||
+      /[^\x00-\x7F]/.test(ctx.utterance ?? '');
+    const askedColour = colourGiven ? colourAsked(args.colour, args.query) : undefined;
+    if (!colourGiven && (args.colour || parseColours(args.query).colours.length)) {
+      log.warn('pack.colour_not_given', { sessionId: ctx.session.id, colour: args.colour ?? args.query });
+    }
     const colour = askedColour ?? ctx.session.preferences.colour;
 
     const deal = await dealAnswer(args, ctx, colour, currency);
@@ -1656,6 +2624,17 @@ const addToCartTool = defineTool({
     required: ['productId'],
   },
   async run(args, ctx): Promise<ToolResult> {
+    const picked = await pickFromPackChoices(ctx);
+    if (picked) return picked;
+    // A size nobody said is a guess, and a guessed size in the basket is the one rule that does not bend.
+    const invented = sizesNeverGiven(sizeValues(args.options), ctx);
+    if (invented.length) {
+      log.warn('cart.size_not_given', { sessionId: ctx.session.id, sizes: invented });
+      return {
+        speech: 'What size would you like?',
+        facts: `Nothing was added. The customer never gave ${invented.join(', ')} - never choose a size for them. Ask, then add with the size they say.`,
+      };
+    }
     let product = await getProductDetails(args.productId, args.options);
     // "The second one", "the navy one": what they can see, not an id to guess.
     if (!product && !/^(gid:\/\/|\d+$)/.test(args.productId.trim())) {
@@ -2043,6 +3022,22 @@ const addPackTool = defineTool({
       };
     }
     if (!deal) return { speech: 'Which pack would you like - the Ambassador Pack, the Prestige Pack or another?' };
+    /*
+     * Every size must be one the customer gave. Told "select the white clima
+     * trousers", the model added the pack in L, waist 34, leg 32 - sizes
+     * nobody had said - and told them it was in the basket.
+     */
+    const invented = sizesNeverGiven(
+      [args.size, ...sizeValues(args.options), ...(args.choices ?? []).flatMap((choice) => sizeValues(choice.options))],
+      ctx,
+    );
+    if (invented.length) {
+      log.warn('cart.size_not_given', { sessionId: ctx.session.id, sizes: invented });
+      return {
+        speech: `What sizes would you like for the ${titleCaseWords(deal.title)}? I'll need your top size, and your waist and leg length for the trousers.`,
+        facts: `Nothing was added. The customer never gave ${invented.join(', ')} - never choose a size for them. Ask, then add with the sizes they say.`,
+      };
+    }
     const built = deal === onScreen && shown ? null : fillDeal(deal, { size: args.size ?? ctx.session.sizeProfile.usualSize });
     if (built) await showDeal(deal, built, ctx, storeCurrency(), args.pack ?? deal.title);
 
@@ -2252,6 +3247,8 @@ const productInfoTool = defineTool({
     required: [],
   },
   async run(args, ctx): Promise<ToolResult> {
+    const picked = await pickFromPackChoices(ctx);
+    if (picked) return picked;
     const said = ctx.utterance ?? '';
     const question = `${args.question ?? ''} ${said}`.trim();
     const byId = args.which && /^(gid:\/\/|\d+$)/.test(args.which.trim()) ? productById(args.which.trim()) : null;

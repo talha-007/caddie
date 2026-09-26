@@ -67,8 +67,22 @@ export interface CaddieSession {
    * "swap the polo" still has an outfit to swap in. See outfitShown.
    */
   lastOutfit?: CaddieSession['lastShown'];
+  /**
+   * Products shown in the current run of searches, so "another one" leads
+   * with something new. Started again by any search that is not asking for
+   * another.
+   */
+  recentShown?: string[];
+  /** The product the last search led with, and its colour, so the next lead can vary. */
+  lastLead?: { id: string; colour: string };
   /** The product last talked about, so "how much is it in 2XL?" follows "what colours does the first one come in?". */
   focusProductId?: string;
+  /**
+   * The pack being put together, by handle - kept while its choices for one
+   * piece are on screen instead of the pack itself, so "put the second one
+   * in" still knows which pack.
+   */
+  packInFocus?: string;
   /**
    * The tool results of the last couple of turns, for checking replies only
    * (verify.ts) - never sent to the model. "How much is the pack?" is

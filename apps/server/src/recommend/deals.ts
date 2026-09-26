@@ -123,6 +123,17 @@ export interface FillOptions {
    * one only when nothing else in the step fits.
    */
   avoidDesigns?: Set<string>;
+  /**
+   * Designs to stay with, by garment name. "Change the trousers to white" is
+   * the same trousers in white - with only the colour to go on, the white
+   * shorts sold better and would have come first.
+   */
+  preferDesigns?: Set<string>;
+  /**
+   * Only this kind of piece, by title - a step can hold belts and caps, and
+   * "a belt instead of a cap" came back as a beanie.
+   */
+  onlyKind?: RegExp;
 }
 
 function inStock(product: Product): number {
@@ -147,6 +158,7 @@ export function fillDeal(deal: DealRecipe, options: FillOptions = {}): Array<Pro
     return needs.filter((feature) => hasFeature(product, feature)).length + cut;
   };
   const fresh = (product: Product) => (options.avoidDesigns?.has(garmentName(product.title)) ? 0 : 1);
+  const same = (product: Product) => (options.preferDesigns?.has(garmentName(product.title)) ? 1 : 0);
   const price = (product: Product) => priceFor(product, options.size).amount;
 
   // Every step's candidates, best first; kept steps have none - they do not move.
@@ -156,9 +168,11 @@ export function fillDeal(deal: DealRecipe, options: FillOptions = {}): Array<Pro
       .map((id) => productById(id))
       .filter((product): product is Product => !!product && inStock(product) > 0 && !used.has(product.id))
       .filter((product) => stockedInSize(product.variants, options.size))
+      .filter((product) => !options.onlyKind || options.onlyKind.test(product.title))
       .sort(
         (a, b) =>
           colourScore(b) - colourScore(a) ||
+          same(b) - same(a) ||
           fresh(b) - fresh(a) ||
           weatherScore(b) - weatherScore(a) ||
           // What actually sells first - Shopify's own sales rank - not the dearest piece with the most sizes.
@@ -196,6 +210,7 @@ export function fillDeal(deal: DealRecipe, options: FillOptions = {}): Array<Pro
         if (candidate.id === current.id || taken.has(candidate.id)) continue;
         const asGood =
           colourScore(candidate) >= colourScore(current) &&
+          same(candidate) >= same(current) &&
           fresh(candidate) >= fresh(current) &&
           weatherScore(candidate) >= weatherScore(current);
         const gain = price(candidate) - price(current);

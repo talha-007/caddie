@@ -99,6 +99,21 @@ function found(text: string, pattern: RegExp): boolean {
   return false;
 }
 
+/**
+ * The features and fit a piece of text states, read with the same patterns
+ * and the same negation rule as a product description - so a reply is held
+ * to exactly the vocabulary its facts were written in.
+ */
+export function featuresStatedIn(text: string): Feature[] {
+  const lower = text.toLowerCase();
+  return PRODUCT_PATTERNS.filter(([, pattern]) => found(lower, pattern)).map(([feature]) => feature);
+}
+
+export function fitStatedIn(text: string): ProductFit | undefined {
+  const lower = text.toLowerCase().replace(/-/g, ' ');
+  return FIT_PATTERNS.find(([, pattern]) => found(lower, pattern))?.[0];
+}
+
 /** Cached per product object; a changed product is a new object. */
 const cache = new WeakMap<Product, ProductAttributes>();
 

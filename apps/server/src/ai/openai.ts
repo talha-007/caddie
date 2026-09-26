@@ -331,6 +331,8 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
   const keepEvidence = () =>
     sessions.patch(sessionId, { recentEvidence: [...toolEvidence, session.recentEvidence ?? ''].join('\n').slice(0, 8000) });
   let lastToolSpeech = '';
+  // A sentence a tool said the reply must open with - see ToolResult.lead.
+  let lead: { text: string; unless: RegExp } | undefined;
   let rewrote = false;
 
   let attachment: CaddieAttachment | undefined;
@@ -401,6 +403,26 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
       continue;
     }
     /*
+     * A change announced with no tool called. "I'll swap back the cap for the
+     * belt" went out with the cap still in the pack - nothing had been asked
+     * to change it. Sent back once to make the change, then say so.
+     */
+    const claimsChange =
+      /\b(I'?ve|I have|I'?ll|I will|I)\s+(now\s+)?(swapped|changed|switched|replaced|updated|added|removed|swap|change|switch|replace|update|add|remove)\b|\bhas been (swapped|changed|replaced|added|removed)\b/i.test(
+        finalText,
+      );
+    if (calls.length === 0 && !rewrote && step === 0 && claimsChange) {
+      rewrote = true;
+      log.warn('reply.claimed_without_doing', { sessionId });
+      messages.push({ role: 'assistant', content: finalText });
+      messages.push({
+        role: 'system',
+        content:
+          'Nothing has changed yet - no tool was called. Make the change first (recommend_pack with swap for a pack piece, the cart tools for the basket), then tell them what the tool says changed.',
+      });
+      continue;
+    }
+    /*
      * The catalogue check has already answered - nothing is called that - and
      * the reply still hedges: "I couldn't find it, could you check the name?"
      * That reads as though it might exist. Said plainly, once.
@@ -423,11 +445,27 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
         rewrote = true;
         log.warn('reply.unverified', { sessionId, claims: violations.map((v) => `${v.kind}:${v.claim}`) });
         messages.push({ role: 'assistant', content: finalText });
+        const unbacked = violations.filter((v) => v.kind !== 'wording' && v.kind !== 'offer');
+        const worded = violations.filter((v) => v.kind === 'wording');
+        const offered = violations.filter((v) => v.kind === 'offer');
         messages.push({
           role: 'system',
-          content: `Your reply stated things no tool gave you this turn: ${violations
-            .map((v) => v.claim)
-            .join(', ')}. Rewrite it using only prices, product names and counts from this turn's tool results and what is on screen - leave out anything you cannot back. Do not mention this check.`,
+          content: [
+            unbacked.length
+              ? `Your reply stated things no tool gave you this turn: ${unbacked
+                  .map((v) => v.claim)
+                  .join(', ')}. Rewrite it using only prices, product names, colours, counts, features and fit from this turn's tool results and what is on screen - a piece's colour is the one in its title; a product's features, fit and shape (sleeveless, hooded, zip, neck, sleeve length) are only those its own name or facts state, for that product. What the customer wants is not a product fact. Leave out anything you cannot back.`
+              : 'Rewrite your reply.',
+            worded.length
+              ? `Say it as a salesperson would - not "${worded.map((v) => v.claim).join('", "')}". Give the verified reason instead: "it's lightweight and breathable, which is what you asked for".`
+              : '',
+            offered.length
+              ? 'The products are already on screen: do not offer to show them. Ask which one they meant, their size, or whether to add it to the basket.'
+              : '',
+            'Do not mention this check.',
+          ]
+            .filter(Boolean)
+            .join(' '),
         });
         continue;
       }
@@ -473,6 +511,10 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
         });
       }
       if (toolEvidence.length) await keepEvidence();
+      if (lead && finalText && !lead.unless.test(finalText)) {
+        log.warn('reply.lead_restored', { sessionId });
+        finalText = `${lead.text} ${finalText.replace(/^(yes|yeah|sure|of course)\b[,!.]?\s*/i, '')}`;
+      }
       return {
         text: finalText || 'Sorry, I did not catch that.',
         attachment,
@@ -592,6 +634,7 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
       evidence.push(content);
       toolEvidence.push(content);
       if (result.speech) lastToolSpeech = result.speech;
+      if (result.lead) lead = result.lead;
       messages.push({ role: 'tool', tool_call_id: entry.call.id, content });
     }
   }

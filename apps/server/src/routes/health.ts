@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { catalogueReady, catalogueState } from '../catalog/sync.js';
 import { bestSellersState } from '../catalog/bestSellers.js';
+import { semanticState } from '../catalog/semantic.js';
 import { redisState } from '../lib/redis.js';
 import { dealsState } from '../catalog/bundles.js';
 import { modelLoad } from '../ai/openai.js';
@@ -37,6 +38,7 @@ healthRouter.get('/', (_req, res) => {
     // The store's bundle deals, read from the live theme.
     deals: dealsState(),
     bestSellers: bestSellersState(),
+    semantic: semanticState(),
     /*
      * Whether conversations are really in Redis. With the password wrong on
      * the live server, /health said ok while every chat hung - this says

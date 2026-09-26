@@ -57,7 +57,7 @@ async function addPack(handle: string) {
   let session = await sessions.getOrCreate(id);
   await runTool('recommend_pack', { query: 'ambassador pack mixed conditions' }, { session });
   session = await sessions.getOrCreate(id);
-  return runTool('add_pack_to_cart', { size: 'M', pack: `ambassador pack ${handle}` }, { session });
+  return runTool('add_pack_to_cart', { size: 'M', pack: `ambassador pack ${handle}` }, { session, utterance: 'add it in medium' });
 }
 
 describe('a condition pack only goes in at its pack price', () => {

@@ -86,16 +86,19 @@ export interface ColourRequest {
 export function parseColours(query: string): { colours: ColourRequest[]; rest: string; plain: boolean } {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
   const named = new Set<string>();
+  // A family said with its own shade word ("light blue"): a colour in itself, never folded into "navy".
+  const qualified = new Set<string>();
   const rest: string[] = [];
   let plain = false;
 
-  for (const token of tokens) {
+  for (const [index, token] of tokens.entries()) {
     const parts = words(token);
     const colourParts = parts.filter((part) => VOCABULARY.has(part));
     if (PLAIN.has(token.replace(/[^a-z-]/g, ''))) {
       plain = true;
     } else if (colourParts.length && colourParts.length === parts.length) {
       for (const part of colourParts) named.add(part);
+      if (index > 0 && MODIFIERS.has(tokens[index - 1]!.replace(/[^a-z]/g, ''))) for (const part of colourParts) qualified.add(part);
     } else {
       rest.push(token);
     }
@@ -107,9 +110,13 @@ export function parseColours(query: string): { colours: ColourRequest[]; rest: s
 
   for (const shade of shades) colours.push({ word: shade, accepts: new Set([shade]) });
   for (const family of families) {
-    // A shade of this family was named as well: that is the request, not the family.
+    /*
+     * A shade of this family was named as well: that is the request, not the
+     * family - unless the family came with its own shade word. "Light blue
+     * and navy" is two colours; folded together it was navy alone.
+     */
     const members = (FAMILIES[family] ?? []).map(norm);
-    if (shades.some((shade) => members.includes(shade))) continue;
+    if (!qualified.has(family) && shades.some((shade) => members.includes(shade))) continue;
     colours.push({ word: family, accepts: new Set([family, ...members]) });
   }
 

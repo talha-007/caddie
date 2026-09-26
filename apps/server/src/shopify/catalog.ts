@@ -1,6 +1,7 @@
 import type { Cart, CartLine, Product, ProductOption, ProductVariant } from '@caddie/shared';
 import { env } from '../env.js';
-import { inRange, parseRange } from '../catalog/audience.js';
+import { inRange, parseRange, type Range } from '../catalog/audience.js';
+import { isCategory, sizeStatus, type Category } from '../catalog/constraints.js';
 import { colourMatch, parseColours } from '../catalog/colour.js';
 import { searchLocal } from '../catalog/search.js';
 import { catalogueReady, productById, productByTitle } from '../catalog/sync.js';
@@ -122,6 +123,10 @@ export interface SearchOptions {
   available?: boolean;
   /** The range they are known to be shopping. See catalog/audience.ts. */
   known?: 'men' | 'women';
+  /** Hard rules: see catalog/constraints.ts. Applied by the local mirror. */
+  range?: Range;
+  categories?: Category[];
+  size?: string;
 }
 
 interface SearchPayload {
@@ -158,6 +163,9 @@ export async function searchProducts(opts: SearchOptions): Promise<Product[]> {
       ...(opts.minPrice !== undefined ? { minPrice: opts.minPrice } : {}),
       ...(opts.available !== undefined ? { available: opts.available } : {}),
       ...(opts.known ? { known: opts.known } : {}),
+      ...(opts.range ? { range: opts.range } : {}),
+      ...(opts.categories?.length ? { categories: opts.categories } : {}),
+      ...(opts.size ? { size: opts.size } : {}),
     }).filter(isBrandProduct);
   }
 
@@ -189,7 +197,10 @@ export async function searchProducts(opts: SearchOptions): Promise<Product[]> {
   return products
     .filter(isBrandProduct)
     .filter((product) => colourMatch(product, colours, opts.available !== false, plain) > 0)
-    .filter((product) => inRange(product, asked, opts.known))
+    .filter((product) => inRange(product, opts.range ?? asked, opts.known))
+    .filter((product) => !opts.categories?.length || isCategory(product, opts.categories))
+    // A result without variants cannot be ruled out on size here; the basket checks it.
+    .filter((product) => !opts.size || product.variants.length === 0 || sizeStatus(product, opts.size) === 'in-stock')
     .slice(0, wanted);
 }
 

@@ -257,19 +257,20 @@ describe('ranking verified candidates', () => {
 /* ---------------- Named products ---------------- */
 
 describe('whether we stock a named product', () => {
-  it('finds a real name, whatever the colour or garment word', () => {
+  it('finds a real name in its colour, whatever the garment word', () => {
     const result = lookupProductName('the Vento polo in navy');
-    expect(result?.status).toBe('exact');
+    expect(result?.kind).toBe('exact-product');
+    if (result?.kind === 'exact-product') expect(result.product.title).toBe('VENTO POLO - NAVY');
   });
 
   it('proves absence from the whole catalogue, and offers the nearest names', () => {
     const result = lookupProductName('Druids Tour Championship Jacket');
-    expect(result?.status).toBe('not-stocked');
-    if (result?.status === 'not-stocked') expect(titles(result.closest)).toContain('TOUR POLO - NAVY');
+    expect(result?.kind).toBe('not-found');
+    if (result?.kind === 'not-found') expect(titles(result.closest)).toContain('TOUR POLO - NAVY');
   });
 
   it('spots a name in plain search words when a word appears nowhere in the catalogue', () => {
-    expect(unknownNameIn('Tour Championship Jacket')?.status).toBe('not-stocked');
+    expect(unknownNameIn('Tour Championship Jacket')?.kind).toBe('not-found');
     // Ordinary describing words are in descriptions, so they are never taken for a name.
     expect(unknownNameIn('breathable polo')).toBeNull();
     // Nor a place, an occasion or a size - each was once called a product we do not stock.
@@ -284,7 +285,7 @@ describe('whether we stock a named product', () => {
 
   it('claims nothing when the catalogue is not loaded', () => {
     setCatalogueForTests([]);
-    expect(lookupProductName('Tour Championship Jacket')?.status).toBe('unknown');
+    expect(lookupProductName('Tour Championship Jacket')?.kind).toBe('unknown');
   });
 });
 

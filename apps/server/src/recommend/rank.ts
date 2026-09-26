@@ -2,6 +2,7 @@ import type { Product } from '@caddie/shared';
 import { FEATURE_LABEL, WEATHER_NEEDS, attributesOf, hasFeature, type Feature, type Weather } from '../catalog/attributes.js';
 import { rangeOf, type Range } from '../catalog/audience.js';
 import { colourwayName } from '../catalog/colourways.js';
+import { isCategory, type Category } from '../catalog/constraints.js';
 import { matchesColourText } from '../catalog/colour.js';
 import type { Budget } from '../shopper/profile.js';
 import { priceFor } from './pricing.js';
@@ -34,6 +35,10 @@ export interface RankRequest {
   avoidColours?: string[];
   features?: { required: Feature[]; preferred: Feature[] };
   weather?: Weather[];
+  /** The weather was named in this request, not remembered from an earlier one. */
+  weatherAsked?: boolean;
+  /** Kinds preferred, never required, the likeliest first: what "a top for warm weather" means (catalog/concepts.ts). */
+  kinds?: Category[];
   budget?: Budget;
   /** The size they are buying in, when known. */
   size?: string;
@@ -138,13 +143,43 @@ export function rankProducts(products: Product[], request: RankRequest): Ranked[
         missedPrefs.push(`${FEATURE_LABEL[feature]} not confirmed`);
       }
     }
-    // Weather is a need, not a spec: any one suitable feature will do.
-    if (weatherNeeds.size) {
+    /*
+     * Weather is a need, not a spec: any one suitable feature will do - except
+     * that for heat, a product its own description calls warm does not suit,
+     * however breathable. Nearly every Druids midlayer is both, and they led
+     * "a lightweight top for warm weather" on breathable alone. Only for heat:
+     * a cold day, or heat and cold together, leaves warm as it was.
+     */
+    const tooWarm = weatherHotOnly(request.weather) && hasFeature(product, 'warm');
+    if (weatherNeeds.size && tooWarm) {
+      if (request.weatherAsked) missedPrefs.push('its description says it is warm, which is not what heat needs');
+      score -= 3;
+    } else if (weatherNeeds.size) {
       const suits = [...weatherNeeds].filter((feature) => hasFeature(product, feature));
       if (suits.length) {
         const label = suits.slice(0, 2).map((feature) => FEATURE_LABEL[feature]);
         for (const word of label) if (!reasons.includes(word)) reasons.push(word);
         score += 3 + suits.length;
+      } else if (request.weatherAsked) {
+        /*
+         * Nothing it states suits the weather. Still shown - weather is a
+         * preference - but never as an exact match: a softshell that says it
+         * is not waterproof came back "exact" for "rain protection".
+         */
+        missedPrefs.push(`its description states nothing for ${request.weather?.join(' or ')} weather`);
+        score -= 2;
+      }
+    }
+
+    if (request.kinds?.length) {
+      if (isCategory(product, request.kinds.slice(0, 1))) {
+        score += 4;
+      } else if (isCategory(product, request.kinds)) {
+        // A summer dress answers "a top for the heat", but a polo answers it first.
+        score += 2;
+      } else {
+        missedPrefs.push(`not a ${request.kinds.join(' or ')}`);
+        score -= 2;
       }
     }
 
@@ -225,6 +260,11 @@ export function rankProducts(products: Product[], request: RankRequest): Ranked[
   return ranked.sort((a, b) => tier[a.matchLevel] - tier[b.matchLevel] || b.score - a.score);
 }
 
+/** Heat and nothing else: a day that is also cold still wants warm things. */
+export function weatherHotOnly(weather: Weather[] | undefined): boolean {
+  return !!weather?.includes('hot') && !weather.includes('cold');
+}
+
 function joinReasons(parts: string[]): string {
   if (parts.length <= 1) return parts[0] ?? '';
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
@@ -238,6 +278,7 @@ export function hasSignals(request: RankRequest): boolean {
       request.features?.required.length ||
       request.features?.preferred.length ||
       request.weather?.length ||
+      request.kinds?.length ||
       request.budget ||
       request.size ||
       request.waist ||
@@ -247,11 +288,18 @@ export function hasSignals(request: RankRequest): boolean {
   );
 }
 
+const LEVEL_WORDS: Record<MatchLevel, string> = {
+  exact: 'meets everything asked',
+  strong: 'meets every rule, differs on a preference',
+  partial: 'fails a requirement',
+};
+
 /** One line per product for the model: what matched, what did not. Never read aloud. */
 export function rankFacts(ranked: Ranked[]): string {
   return ranked
     .map((entry) => {
-      const bits: string[] = [entry.matchLevel];
+      // Worded for the model to weigh, not to repeat: customers heard "an exact match for your request".
+      const bits: string[] = [LEVEL_WORDS[entry.matchLevel]];
       if (entry.reason) bits.push(`why: ${entry.reason}`);
       if (entry.missedRequirements.length) bits.push(`fails: ${entry.missedRequirements.join('; ')}`);
       if (entry.missedPreferences.length) bits.push(`differs: ${entry.missedPreferences.join('; ')}`);

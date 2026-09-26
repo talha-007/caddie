@@ -192,6 +192,16 @@ export const env = {
      * turning into a wall of 429s at the provider.
      */
     maxConcurrent: Number(optional('OPENAI_MAX_CONCURRENT', '25')),
+    /**
+     * Semantic product search: an embedding per product, held in memory
+     * beside the word index. Off by default - nothing customer-facing reads it
+     * yet, so a deployment should not pay to build it. "on" builds it in the
+     * background after the catalogue lands; search works without it.
+     */
+    semanticIndex: optional('SEMANTIC_INDEX', 'off') === 'on',
+    embeddingModel: optional('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
+    /** 512 of text-embedding-3-small's 1536: about 5MB for the whole catalogue instead of 16MB. */
+    embeddingDimensions: Number(optional('OPENAI_EMBEDDING_DIMENSIONS', '512')),
   },
   /**
    * Opens the usage dashboard at /admin. Without it the route 404s rather

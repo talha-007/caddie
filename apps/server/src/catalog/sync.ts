@@ -126,6 +126,7 @@ function toProduct(raw: AdminProduct): Product {
   return {
     id: raw.id,
     title: raw.title,
+    ...(raw.handle ? { handle: raw.handle } : {}),
     url: raw.onlineStoreUrl ?? '',
     imageUrl: raw.featuredMedia?.image?.url ?? null,
     vendor: raw.vendor,
@@ -334,6 +335,28 @@ async function pullChangedSince(since: Date): Promise<Product[]> {
 }
 
 /** Folds changed products into the mirror without disturbing the rest. */
+/**
+ * Told when the catalogue changes - a full pull, a patch, a removal - so what
+ * is built from it (the semantic index) can follow without keeping its own
+ * copy or polling. A listener that throws never breaks the sync.
+ */
+const changeListeners = new Set<() => void>();
+
+export function onCatalogueChange(listener: () => void): () => void {
+  changeListeners.add(listener);
+  return () => changeListeners.delete(listener);
+}
+
+function catalogueChanged(): void {
+  for (const listener of changeListeners) {
+    try {
+      listener();
+    } catch (err) {
+      log.warn('catalogue.listener_failed', { err: String(err) });
+    }
+  }
+}
+
 export function applyChanges(changed: Product[]): number {
   if (changed.length === 0) return 0;
 
@@ -348,6 +371,7 @@ export function applyChanges(changed: Product[]): number {
   lastSyncedAt = Date.now();
   version += 1;
   log.info('catalogue.patched', { products: changed.length });
+  catalogueChanged();
   return changed.length;
 }
 
@@ -360,6 +384,7 @@ export function removeProduct(productId: string): boolean {
   rebuildInventoryIndex();
   version += 1;
   log.info('catalogue.removed', { productId });
+  catalogueChanged();
   return true;
 }
 
@@ -447,6 +472,7 @@ export async function syncCatalogue(): Promise<CatalogueState> {
         lastCheckedAt = Date.now();
         lastDeltaAt = Date.now();
         version += 1;
+        catalogueChanged();
       } else {
         log.warn('catalogue.empty', { kept: products.length });
       }

@@ -4,6 +4,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { loadBestSellers } from './catalog/bestSellers.js';
 import { loadDeals } from './catalog/bundles.js';
 import { startCatalogueSync, stopCatalogueSync, syncCatalogue } from './catalog/sync.js';
+import { startSemanticIndex } from './catalog/semantic.js';
 import { verifyEnvironment } from './startupCheck.js';
 import { env } from './env.js';
 import { CaddieError } from './lib/errors.js';
@@ -131,6 +132,8 @@ if (isEntrypoint) {
     }
 
     startCatalogueSync();
+    // Semantic search, built in the background when SEMANTIC_INDEX is on. Never waited for.
+    startSemanticIndex();
 
     // The store's bundle deals, from the live theme. Not worth failing boot
     // over: without them the Caddie still sells single items.
