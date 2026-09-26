@@ -96,7 +96,12 @@ export interface CaddieSession {
    * "what size?"): their size answer finishes it without another "add it".
    * `turn` is how many of their messages there were when they asked.
    */
-  pendingAdd?: { productId: string; turn: number };
+  pendingAdd?: {
+    productId: string;
+    turn: number;
+    /** Every product the waiting add may finish with - the one named, or its colourways - so "M" cannot finish a different product's add. */
+    productIds?: string[];
+  };
   /**
    * What the customer has chosen for each pack, by handle (see
    * tools/packState.ts): confirmed values only, and what they asked for that

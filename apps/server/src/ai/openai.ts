@@ -397,6 +397,8 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
   // A sentence a tool said the reply must open with - see ToolResult.lead.
   let lead: { text: string; unless: RegExp } | undefined;
   let rewrote = false;
+  // Whether an add was tried this turn - once it has, a question back is the tool's, not the model skipping it.
+  let addTried = false;
 
   let attachment: CaddieAttachment | undefined;
   const actions: CartAction[] = [];
@@ -455,15 +457,23 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
      * customer had to ask why. add_to_cart knows what the product needs and
      * asks for exactly what is missing, so it goes first.
      */
+    /*
+     * The same, after a search: "Add the One Pair Tour Ankle Socks to my
+     * basket" was searched, then answered "which colour?" and "what size?" -
+     * one size, and only one colour in stock. Whatever the question, when
+     * they asked to add and nothing was tried, the add tool goes first: it
+     * knows which product they named and asks for exactly what is missing.
+     */
     const asksSize = /\b(what|which)\s+size\b|\bsize (would|do|should) you\b|\byour size\b/i.test(finalText);
-    if (calls.length === 0 && !rewrote && step === 0 && asksSize && asksToAdd(userText)) {
+    const askedInstead = asksSize || /\?\s*$/.test(finalText);
+    if (calls.length === 0 && !rewrote && !addTried && askedInstead && asksToAdd(userText)) {
       rewrote = true;
-      log.warn('reply.asked_size_without_trying', { sessionId });
+      log.warn(asksSize ? 'reply.asked_size_without_trying' : 'reply.asked_instead_of_adding', { sessionId });
       messages.push({ role: 'assistant', content: finalText });
       messages.push({
         role: 'system',
         content:
-          'They asked to add it. Call add_to_cart now with the product and any size they have given - many products come in one size and need none. If a size is really needed, the tool says so and you ask for exactly that.',
+          'They asked to add it. Call add_to_cart now (add_pack_to_cart for a pack) with the product they named and any size or colour they have given - many products come in one size, or one colour in stock, and need nothing more. If something is really needed, the tool says exactly what, and you ask for that.',
       });
       continue;
     }
@@ -636,6 +646,7 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
      * So they go one at a time, and each re-reads the session first, which is
      * how the second add finds the basket the first one opened.
      */
+    if (calls.some((call) => call.function.name === 'add_to_cart' || call.function.name === 'add_pack_to_cart')) addTried = true;
     const execute = async (call: (typeof calls)[number]) => {
       let args: unknown = {};
       try {

@@ -2,9 +2,8 @@ import type { Product } from '@caddie/shared';
 import { parseRange, rangeOf, type Range } from '../catalog/audience.js';
 import { parseColours } from '../catalog/colour.js';
 import { categoriesAsked, categoriesOf, withoutSize, sizeInRequest, type Category } from '../catalog/constraints.js';
-import { namingWords } from '../catalog/lookup.js';
-import { allProducts, catalogueVersion, productById } from '../catalog/sync.js';
-import { env } from '../env.js';
+import { resolveCustomerProductIdentity } from '../catalog/productIdentity.js';
+import { productById } from '../catalog/sync.js';
 import { log } from '../lib/logger.js';
 import { sessions, type CaddieSession } from './store.js';
 
@@ -66,63 +65,18 @@ export function customerTurn(session: CaddieSession, counting = true): number {
   return session.messages.filter((message) => message.role === 'user').length + (counting ? 1 : 0);
 }
 
-interface Design {
-  name: string;
-  /** Its own words - "clima" for the Clima Jacket 3.0, "elite" for the Elite Polo. */
-  naming: string[];
-  /** The garment words in its name - "jacket", "polo". */
-  garments: string[];
-  products: Product[];
-}
-
-let designs: { version: number; list: Design[] } | null = null;
-
-/** Every design in the catalogue, built once per catalogue change. */
-function designIndex(): Design[] {
-  const version = catalogueVersion();
-  if (designs?.version === version) return designs.list;
-  const tag = env.shopify.brandTag?.toLowerCase();
-  const byName = new Map<string, Product[]>();
-  for (const product of allProducts()) {
-    if (tag && !product.tags.some((value) => value.toLowerCase() === tag)) continue;
-    const name = designOf(product.title).toUpperCase();
-    byName.set(name, [...(byName.get(name) ?? []), product]);
-  }
-  const list: Design[] = [];
-  for (const [name, products] of byName) {
-    const lower = name.toLowerCase();
-    const naming = namingWords(lower).filter((word) => word.length > 2 && !/^\d/.test(word));
-    const garments = wordsIn(lower).filter((word) => categoriesAsked(word).length > 0);
-    if (naming.length && garments.length) list.push({ name, naming, garments, products });
-  }
-  designs = { version, list };
-  return list;
-}
-
-function wordsIn(text: string): string[] {
-  return text.toLowerCase().replace(/['’]/g, '').split(/[^a-z0-9.]+/).filter(Boolean);
-}
-
 /**
- * A product their words name: its design's own words and its garment word,
- * both said - "the Clima Jacket", "an Elite Polo". Read against the
- * catalogue's designs rather than by looking the whole sentence up, which
- * read "show me jackets and polos" as a possible Elite Polo.
+ * A product their words name - read by the one product-name reader the
+ * basket and search use too (catalog/productIdentity.ts), so "the product
+ * they are shopping for" and "the product they asked to add" can never be
+ * two readings of the same words. Several products it could be: no product
+ * focus, only the kind.
  */
-function productNamed(said: string, preferRange?: Range): { product: Product; design: string } | null {
-  const words = new Set(wordsIn(said));
-  const has = (word: string) => words.has(word) || words.has(`${word}s`) || words.has(`${word}es`);
-  const matches = designIndex().filter((design) => design.naming.every((word) => words.has(word)) && design.garments.some(has));
-  if (!matches.length) return null;
-  // The most specific name; then the range asked for; then the plain name ("Elite Polo" before "Ladies Elite Polo").
-  const range = parseRange(said).range ?? preferRange;
-  const best = matches.sort(
-    (a, b) =>
-      b.naming.length - a.naming.length ||
-      Number(!!range && rangeOf(b.products[0]!) === range) - Number(!!range && rangeOf(a.products[0]!) === range) ||
-      a.name.length - b.name.length,
-  )[0]!;
-  return { product: best.products[0]!, design: best.name };
+function productNamed(said: string): { product: Product; design: string } | null {
+  const identity = resolveCustomerProductIdentity(said);
+  if (identity.status === 'exact') return { product: identity.product, design: identity.design };
+  if (identity.status === 'family') return { product: identity.products[0]!, design: identity.design };
+  return null;
 }
 
 /** "CLIMA JACKET 3.0 - NAVY" is the Clima Jacket 3.0 design. */
@@ -158,7 +112,7 @@ export function readFocus(said: string, prior: ShoppingFocus | undefined, turn: 
   if (!text) return { focus: prior, change: 'none' };
   const kinds = categoriesAsked(withoutSize(text, sizeInRequest(text)));
   const range = parseRange(text).range ?? undefined;
-  const named = productNamed(text, prior?.range);
+  const named = productNamed(text);
   const colours = NEW_COLOURS.test(text) ? [] : parseColours(text).colours.map((colour) => colour.word);
 
   // A product named: that product, of its own kind and range.

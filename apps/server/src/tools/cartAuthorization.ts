@@ -1,4 +1,6 @@
 import { sizeInRequest } from '../catalog/constraints.js';
+import { identityProducts, resolveCustomerProductIdentity, type CustomerIdentity } from '../catalog/productIdentity.js';
+import { singular } from '../catalog/identity.js';
 import { normaliseSize } from '../recommend/sizeWords.js';
 import type { ToolContext } from './types.js';
 
@@ -48,6 +50,12 @@ function customerTurns(ctx: ToolContext): number {
   return ctx.session.messages.filter((message) => message.role === 'user').length;
 }
 
+/** The sentence of the Caddie's last reply that offered an add ("Shall I add the Elite Polo in navy?"), if one did. */
+export function offerSentence(reply: string): string | null {
+  const sentences = reply.split(/(?<=[.!?])\s+/);
+  return [...sentences].reverse().find((sentence) => OFFERED_ADD.test(sentence)) ?? null;
+}
+
 /** Their words ask for something to go in the basket - and do not refuse it. */
 export function asksToAdd(said: string): boolean {
   return ASKS_TO_ADD.test(said) && !REFUSES.test(said);
@@ -65,18 +73,51 @@ export function cartAuthorization(ctx: ToolContext, opts: { replaces?: string } 
   // "Yes" - only to an add the Caddie had just offered. A size, to that offer, is a yes in that size.
   if (offered && (YES.test(said) || sizeAnswer(said))) return { authorized: true, source: 'confirmation' };
 
-  // The size an add they asked for last turn was waiting on.
+  /*
+   * The size an add they asked for last turn was waiting on - for that
+   * product. "Actually the Elite Polo in M", after "what size?" for a jacket,
+   * names another product: it does not finish the jacket's add, and it is not
+   * an add of the polo either until they ask for one.
+   */
   const pending = ctx.session.pendingAdd;
-  if (pending && pending.turn + 1 === customerTurns(ctx) && sizeAnswer(said)) return { authorized: true, source: 'continuation' };
+  if (pending && pending.turn + 1 === customerTurns(ctx) && sizeAnswer(said) && !namesAnotherProduct(said, pending.productIds ?? [pending.productId])) {
+    return { authorized: true, source: 'continuation' };
+  }
 
   return { authorized: false, source: 'none' };
+}
+
+/** Their words name a product, and it is none of these. */
+function namesAnotherProduct(said: string, productIds: string[]): boolean {
+  const named = identityProducts(resolveCustomerProductIdentity(said));
+  return named.length > 0 && !named.some((product) => productIds.includes(product.id));
+}
+
+/**
+ * Their words with the product's own name taken out. "One Pair Tour Ankle
+ * Socks" is one product, not two; "Clima Jacket 3.0" is not three jackets.
+ * A quantity is read from how they buy, never from what the thing is called.
+ */
+function withoutProductName(said: string, identity: CustomerIdentity): string {
+  const names = identityProducts(identity).map((product) => product.title.split(/\s+-\s+/)[0]!.toLowerCase());
+  const own = new Set(names.flatMap((name) => name.replace(/[’']/g, '').split(/[^a-z0-9.]+/).filter(Boolean).map(singular)));
+  return said
+    .replace(/[’']/g, '')
+    .split(/\s+/)
+    .filter((word) => {
+      const bare = word.replace(/[^a-z0-9.]/g, '');
+      return bare && !own.has(singular(bare)) && !/^\d+\.\d+$/.test(bare);
+    })
+    .join(' ');
 }
 
 /** How many they asked for: more than one only when their own words say so. */
 export function quantityAsked(ctx: ToolContext, proposed: number | undefined): number {
   if (!proposed || proposed <= 1 || ctx.direct) return proposed ?? 1;
-  const said = (ctx.utterance ?? '').toLowerCase();
-  const words: Record<string, number> = { two: 2, both: 2, pair: 2, couple: 2, three: 3, four: 4, five: 5, six: 6 };
+  const raw = (ctx.utterance ?? '').toLowerCase();
+  const said = withoutProductName(raw, resolveCustomerProductIdentity(ctx.utterance ?? ''));
+  // "A pair" of socks is one item; "two pairs" is two - the number says it, never the word "pair".
+  const words: Record<string, number> = { two: 2, both: 2, couple: 2, three: 3, four: 4, five: 5, six: 6 };
   const digits = [...said.matchAll(/\b(\d{1,2})\b(?!\s?(?:waist|cm|in|inch|kg|%))/g)].map((match) => Number(match[1]));
   const named = Object.entries(words).filter(([word]) => new RegExp(`\\b${word}\\b`).test(said)).map(([, n]) => n);
   return [...digits, ...named].includes(proposed) ? proposed : 1;

@@ -18,7 +18,7 @@ import {
 } from '../catalog/hybrid.js';
 import { conceptKindsInQuery, topKindsFor, type Climate } from '../catalog/concepts.js';
 import { colourAsked, intentDiagnostics, rememberedWhenEchoed, resolveSearchIntent, sizesNeverGiven } from './searchIntent.js';
-import { cartAuthorization, quantityAsked, turnNow } from './cartAuthorization.js';
+import { cartAuthorization, offerSentence, quantityAsked, turnNow } from './cartAuthorization.js';
 import { packStatus, packStatusFacts, readPackChoices } from './packState.js';
 
 export { sizesNeverGiven };
@@ -31,6 +31,7 @@ import { bestPicks, kindsNamed } from '../recommend/bestPicks.js';
 import { answerAbout, attributesAsked, describeStock, sayAttributes, verifiedFacts } from '../recommend/productFacts.js';
 import { resolveProduct } from '../session/screen.js';
 import { describeFocus, designOf, focusProduct, focusQuery, inFocus, isFollowUp } from '../session/focus.js';
+import { describeIdentity, designMembers, identityProducts, resolveCustomerProductIdentity, type CustomerIdentity, type NamedDesign } from '../catalog/productIdentity.js';
 import { colourMatch, coloursOffered, matchesColourText, parseColours } from '../catalog/colour.js';
 import { allDeals, type DealRecipe, type DealStep } from '../catalog/bundles.js';
 import { log } from '../lib/logger.js';
@@ -326,9 +327,99 @@ function listFacts(products: Product[], evidence?: (product: Product) => string)
  */
 export function bareReference(text: string): boolean {
   const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
-  if (!words.some((word) => ['it', 'this', 'that', 'one'].includes(word))) return false;
-  const filler = new Set(['add', 'put', 'pop', 'get', 'buy', 'take', 'ill', 'i', 'will', 'can', 'you', 'please', 'it', 'this', 'that', 'one', 'the', 'a', 'to', 'in', 'into', 'my', 'basket', 'cart', 'bag', 'yes', 'yeah', 'ok', 'okay', 'go', 'ahead', 'and', 'just', 'size', 'thanks', 'thank', 'now', 'for', 'me', 'then', 'do', 'lets', 'let', 's']);
+  // "Add them" is as bare as "add it": a pair of socks, a set of the cards on screen.
+  if (!words.some((word) => ['it', 'this', 'that', 'one', 'them', 'these', 'those'].includes(word))) return false;
+  const filler = new Set(['add', 'put', 'pop', 'get', 'buy', 'take', 'ill', 'i', 'will', 'can', 'you', 'please', 'it', 'this', 'that', 'one', 'them', 'these', 'those', 'the', 'a', 'to', 'in', 'into', 'my', 'basket', 'cart', 'bag', 'yes', 'yeah', 'ok', 'okay', 'go', 'ahead', 'and', 'just', 'size', 'thanks', 'thank', 'now', 'for', 'me', 'then', 'do', 'lets', 'let', 's']);
   return words.every((word) => filler.has(word) || !!normaliseSize(word));
+}
+
+/**
+ * What the customer authorised adding - decided from them, before the
+ * model's productId is looked at.
+ *
+ * "Add the One Pair Tour Ankle Socks" went into the basket as LADIES TOUR
+ * ANKLE SOCKS: the model searched a shorter name, and whatever id it passed
+ * was added. The target now comes from the customer, in this order - the
+ * product their words name; a card they point at ("the second one", "the
+ * navy one"); the card they just tapped, for a bare "add it"; the product a
+ * waiting add was for, when they answer its size; the product the Caddie
+ * offered, when they say yes; the product they are shopping for. Only when
+ * none of those says anything is the model's pick used as it always was.
+ */
+type ActionTarget =
+  | { kind: 'bound'; products: Product[]; label: string; source: 'customer-words' | 'screen-reference' | 'card-action' | 'pending' | 'offer' | 'focus' }
+  | { kind: 'ambiguous'; designs: NamedDesign[] }
+  | { kind: 'unbound' };
+
+/** Of several designs a name fits, the ones the customer is looking at: on screen, in focus, or waiting to be added. */
+function presented(ctx: ToolContext, designs: NamedDesign[]): NamedDesign[] {
+  const onScreen = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
+  const focus = ctx.session.activeShoppingContext;
+  const waiting = new Set(ctx.session.pendingAdd?.productIds ?? []);
+  return designs.filter(
+    (design) =>
+      design.products.some((product) => onScreen.has(product.id) || waiting.has(product.id) || product.id === focus?.productId) ||
+      (!!focus?.design && design.design === focus.design.toUpperCase()),
+  );
+}
+
+function fromIdentity(identity: CustomerIdentity, ctx: ToolContext, source: 'customer-words' | 'offer'): ActionTarget | null {
+  if (identity.status === 'exact') return { kind: 'bound', products: [identity.product], label: identity.product.title, source };
+  // In a colour it is not made in: bound to nothing, so nothing is added - the add asks which colour.
+  if (identity.status === 'family') return { kind: 'bound', products: identity.colourMissing ? [] : identity.products, label: identity.design, source };
+  if (identity.status === 'ambiguous') {
+    const shown = presented(ctx, identity.designs);
+    if (shown.length === 1) return { kind: 'bound', products: shown[0]!.products, label: shown[0]!.design, source };
+    return { kind: 'ambiguous', designs: identity.designs };
+  }
+  return null;
+}
+
+export function actionTarget(ctx: ToolContext): ActionTarget {
+  // The Add button: the customer clicked that exact product.
+  if (ctx.direct) return { kind: 'unbound' };
+  const said = ctx.utterance ?? '';
+  const named = fromIdentity(resolveCustomerProductIdentity(said), ctx, 'customer-words');
+  if (named) return named;
+
+  const pointed = resolveProduct(ctx.session, said);
+  if (pointed && /^(number \d|last on screen|on screen, from what they described)/.test(pointed.how)) {
+    return { kind: 'bound', products: [pointed.product], label: pointed.product.title, source: 'screen-reference' };
+  }
+  const held = focusProduct(ctx.session.activeShoppingContext);
+  const colours = parseColours(said).colours.map((colour) => colour.word);
+  if (held && colours.length) {
+    const inColour = designMembers(held).filter((product) => matchesColourText(product, colours.join(' or ')) > 0);
+    if (inColour.length === 1) return { kind: 'bound', products: inColour, label: inColour[0]!.title, source: 'focus' };
+  }
+
+  const tappedId = tappedSinceLastSaid(ctx.session);
+  const tapped = tappedId && bareReference(said) ? productById(tappedId) : null;
+  if (tapped) return { kind: 'bound', products: [tapped], label: tapped.title, source: 'card-action' };
+
+  const auth = cartAuthorization(ctx);
+  const pending = ctx.session.pendingAdd;
+  if (auth.authorized && auth.source === 'continuation' && pending) {
+    const waiting = (pending.productIds ?? [pending.productId]).map((id) => productById(id)).filter((product): product is Product => !!product);
+    if (waiting.length) return { kind: 'bound', products: waiting, label: waiting.length === 1 ? waiting[0]!.title : designOf(waiting[0]!.title), source: 'pending' };
+  }
+  if (auth.authorized && auth.source === 'confirmation') {
+    const lastReply = [...ctx.session.messages].reverse().find((message) => message.role === 'assistant')?.text ?? '';
+    const offer = offerSentence(lastReply);
+    const offered = offer ? fromIdentity(resolveCustomerProductIdentity(offer, 'offer'), ctx, 'offer') : null;
+    if (offered) return offered;
+  }
+  /*
+   * The product they are shopping for - while it is still what they are
+   * looking at. After a search has put other cards on screen, "it" is the
+   * Caddie's to resolve from those; a focus left over from before is not.
+   */
+  const members = held ? designMembers(held) : [];
+  const shown = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
+  if (held && members.some((product) => shown.has(product.id)) && (bareReference(said) || (auth.authorized && auth.source !== 'utterance'))) {
+    return { kind: 'bound', products: members, label: designOf(held.title), source: 'focus' };
+  }
+  return { kind: 'unbound' };
 }
 
 /** "Another one", "something else", "a different one" - asking past what was just shown. */
@@ -413,6 +504,19 @@ function possibleCards(candidates: Product[]): Product[] {
   const out: Product[] = [];
   while (lanes.some((lane) => lane.length)) for (const lane of lanes) { const next = lane.shift(); if (next) out.push(next); }
   return out;
+}
+
+/** The customer's named product, as the search's name check reports one. */
+function existenceFrom(identity: CustomerIdentity): Existence | null {
+  const resolution = { type: 'exact' as const, input: identity.status === 'exact' ? identity.product.title : '', corrections: [] };
+  if (identity.status === 'exact') return { kind: 'exact-product', name: identity.product.title, product: identity.product, resolution };
+  // In a colour it is not made in: left to the name check, which says so and shows what it does come in.
+  if (identity.status === 'family' && identity.colourMissing) return null;
+  if (identity.status === 'family') return { kind: 'exact-family', name: identity.design, familyName: identity.design, products: identity.products, resolution: { ...resolution, input: identity.design } };
+  if (identity.status === 'ambiguous') {
+    return { kind: 'possible-match', name: identity.designs.map((design) => design.design).join(' / '), products: identity.designs.flatMap((design) => design.products), reason: 'the name they gave fits more than one product' };
+  }
+  return null;
 }
 
 function catalogueCheck(existence: Existence): string {
@@ -779,7 +883,28 @@ const searchTool = defineTool({
      * about a name nobody gave.
      */
     const unflagged = productName ? null : unknownNameIn(intent.query);
-    const existence = productName ? lookupProductName(nameAsked) : unflagged && intent.namedByCustomer(unflagged.name) ? unflagged : null;
+    const modelExistence = productName ? lookupProductName(nameAsked) : unflagged && intent.namedByCustomer(unflagged.name) ? unflagged : null;
+    /*
+     * A product the customer named, read from their words - never the
+     * model's rewrite of them. "One Pair Tour Ankle Socks" was searched as
+     * "tour ankle socks", and the lookup found the Ladies pair. The model's
+     * name still helps find products; it never decides which one they meant.
+     */
+    const customerIdentity = ctx.direct ? ({ status: 'none' } as CustomerIdentity) : resolveCustomerProductIdentity(ctx.utterance ?? '');
+    const own = new Set(identityProducts(customerIdentity).map((p) => p.id));
+    const modelIds = modelExistence?.kind === 'exact-product' ? [modelExistence.product.id] : modelExistence?.kind === 'exact-family' ? modelExistence.products.map((p) => p.id) : [];
+    // The same product the customer named: the lookup's own report, which says when a misspelling was read ("galatic" is GALACTIC).
+    const agrees = modelIds.length > 0 && modelIds.every((id) => own.has(id));
+    const existence = agrees ? modelExistence : existenceFrom(customerIdentity) ?? modelExistence;
+    if (customerIdentity.status !== 'none') {
+      const rejected = modelIds.length > 0 && !modelIds.some((id) => own.has(id));
+      log[rejected ? 'warn' : 'info'](rejected ? 'identity.rejected_model_target' : 'identity.resolved', {
+        sessionId: ctx.session.id,
+        customer: describeIdentity(customerIdentity),
+        modelProposal: modelExistence ? `${modelExistence.kind}: ${modelExistence.name}` : null,
+        tool: 'search_products',
+      });
+    }
     /*
      * Every rule this request set, checked on every product - the named ones
      * too. The ladies Apex polo in blush once led a search for a black Apex
@@ -2801,14 +2926,47 @@ const addToCartTool = defineTool({
      * for a bare reference: "add that black jacket" names something, and is
      * the model's to resolve.
      */
-    const tappedId = tappedSinceLastSaid(ctx.session);
-    const tapped = tappedId ? productById(tappedId) : null;
     const proposed = productById(args.productId) ?? (/^(gid:\/\/|\d+$)/.test(args.productId.trim()) ? null : resolveProduct(ctx.session, args.productId)?.product ?? null);
-    if (tapped && proposed?.id !== tapped.id && bareReference(ctx.utterance ?? '')) {
-      log.warn('cart.it_is_the_tapped_card', { sessionId: ctx.session.id, proposed: proposed?.id ?? args.productId, tapped: tapped.id });
-      args = { ...args, productId: tapped.id };
+    /*
+     * Which product: the customer's, then the model's (see actionTarget). A
+     * model pick outside what they authorised is corrected when their target
+     * is one product, and asked about when it is several - never added.
+     */
+    const target = actionTarget(ctx);
+    const diagnostics = {
+      sessionId: ctx.session.id,
+      customer: describeIdentity(resolveCustomerProductIdentity(ctx.utterance ?? '')),
+      focus: ctx.session.activeShoppingContext?.design ?? ctx.session.activeShoppingContext?.productId ?? null,
+      pending: ctx.session.pendingAdd?.productIds ?? (ctx.session.pendingAdd ? [ctx.session.pendingAdd.productId] : null),
+      proposed: proposed?.title ?? args.productId,
+      target: target.kind === 'bound' ? `${target.source}: ${target.label}` : target.kind,
+    };
+    if (target.kind === 'ambiguous') {
+      log.warn('cart.add_target', { ...diagnostics, decision: 'ambiguous - nothing added' });
+      const names = target.designs.map((design) => titleCaseWords(design.design));
+      return {
+        speech: `Which do you mean - ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}?`,
+        facts: `Nothing was added. What they named fits more than one product: ${target.designs.map((design) => `${design.design} (${design.range}) [${design.products.map((p) => p.id).join(', ')}]`).join('; ')}. Ask which one - never pick for them.`,
+      };
     }
-    const onCard = tapped && args.productId === tapped.id ? tapped : proposed;
+    if (target.kind === 'bound' && !(proposed && target.products.some((product) => product.id === proposed.id))) {
+      const shown = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
+      const onScreen = target.products.filter((product) => shown.has(product.id));
+      const pick = target.products.length === 1 ? target.products[0]! : onScreen.length === 1 ? onScreen[0]! : null;
+      log.warn('identity.rejected_model_target', { ...diagnostics, corrected: pick?.title ?? null });
+      if (!pick) {
+        const made = target.products.length ? target.products : designMembers(proposed ?? productById(args.productId) ?? target.products[0]!).filter(Boolean);
+        return {
+          speech: `Which colour of the ${titleCaseWords(target.label)} would you like?`,
+          facts: target.products.length
+            ? `Nothing was added. They mean the ${target.label} - one of: ${target.products.map((product) => `${product.title} [${product.id}]`).join(', ')}. ${proposed ? `${proposed.title} is not one of them. ` : ''}Ask which colour; never add another product.`
+            : `Nothing was added. The ${target.label} is not made in the colour they asked for.${made.length ? ` It comes in: ${made.map((product) => colourwayName(product.title)).join(', ')}.` : ''} Say so, and ask which colour; never add another.`,
+        };
+      }
+      args = { ...args, productId: pick.id };
+    }
+    log.info('cart.add_target', { ...diagnostics, resolved: productById(args.productId)?.title ?? args.productId, decision: target.kind === 'bound' ? 'bound' : 'model pick (nothing from the customer to bind to)' });
+    const onCard = productById(args.productId) ?? proposed;
     const card = onCard ? ctx.session.cardChoices?.[onCard.id] : undefined;
     const saysSize = !!sizeInRequest(ctx.utterance ?? '');
     const options: Record<string, string> | undefined =
@@ -3061,6 +3219,16 @@ const otherColoursTool = defineTool({
   },
   async run(args, ctx): Promise<ToolResult> {
     let named = args.productId ? await getProductDetails(args.productId) : null;
+    // "What other colours does the Elite Polo come in?" - the design they named, whatever the model passed.
+    const namedByThem = ctx.direct ? ({ status: 'none' } as CustomerIdentity) : resolveCustomerProductIdentity(ctx.utterance ?? '');
+    if (namedByThem.status === 'ambiguous') {
+      const names = namedByThem.designs.map((design) => titleCaseWords(design.design));
+      return { speech: `Which do you mean - ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}?`, facts: `What they named fits more than one product: ${namedByThem.designs.map((design) => design.design).join('; ')}. Ask which.` };
+    }
+    if (namedByThem.status === 'exact' || namedByThem.status === 'family') {
+      const own = identityProducts(namedByThem);
+      if (!named || !own.some((product) => product.id === named!.id)) named = namedByThem.status === 'exact' ? namedByThem.product : own[0]!;
+    }
     const page = ctx.session.page?.productId ? productById(ctx.session.page.productId) : null;
     let screen = (ctx.session.lastShown?.items ?? []).map((item) => (item.id ? productById(item.id) : null)).filter((p): p is Product => !!p);
     /*
@@ -3449,10 +3617,29 @@ const productInfoTool = defineTool({
      * now, whatever the model looked up last. A reference in their own words
      * ("the second one", "the navy one") is theirs and stands.
      */
+    /*
+     * A product they named is the one asked about - "Is the One Pair Tour
+     * Ankle Socks one size?" is never answered about the Ladies pair the
+     * model looked up. Several it could be: ask.
+     */
+    const named = resolveCustomerProductIdentity(said);
+    if (named.status === 'ambiguous') {
+      const names = named.designs.map((design) => titleCaseWords(design.design));
+      return { speech: `Which do you mean - ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}?`, facts: `What they named fits more than one product: ${named.designs.map((design) => design.design).join('; ')}. Ask which.` };
+    }
+    let member: Product | null = null;
+    if (named.status === 'exact' && resolved?.product.id !== named.product.id) resolved = { product: named.product, how: 'named by the customer' };
+    if (named.status === 'family') {
+      const own = named.products;
+      const shown = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
+      member = own.find((product) => shown.has(product.id)) ?? own[0]!;
+      // The design, answered as the design below - never a sibling the model looked up.
+      if (resolved && !own.some((product) => product.id === resolved!.product.id)) resolved = null;
+    }
     const focus = ctx.session.activeShoppingContext;
     const theirs = resolveProduct(ctx.session, said);
     const pointedAt = !!theirs && /^(number \d|last on screen|on screen, from what they described)/.test(theirs.how);
-    if (focus && !pointedAt && isFollowUp(said)) {
+    if (focus && named.status === 'none' && !pointedAt && isFollowUp(said)) {
       const held = focusProduct(focus);
       const picked = resolved?.product;
       if (held && (!picked || designOf(picked.title) !== designOf(held.title))) {
@@ -3466,7 +3653,7 @@ const productInfoTool = defineTool({
         resolved = instead ? { product: instead, how: 'the one they are shopping for' } : null;
       }
     }
-    const product = resolved?.product ?? (args.which && !byId && !(focus && isFollowUp(said)) ? await getProductDetails(args.which) : null);
+    const product = resolved?.product ?? (args.which && !byId && named.status === 'none' && !(focus && isFollowUp(said)) ? await getProductDetails(args.which) : null);
 
     if (!product) {
       /*
@@ -3476,21 +3663,30 @@ const productInfoTool = defineTool({
        * answers the same, the design is answered; only when they differ, or
        * no design is named, is the customer asked which.
        */
-      const named = lookupProductName(args.which ?? said);
+      // The design they named; else the model's name for it; else one design on screen.
+      const byName: Existence | null = named.status === 'family' ? existenceFrom(named) : lookupProductName(args.which ?? said);
       // Or "is this relaxed fit?" with one design on screen in several colours: that design.
       const onScreen = (ctx.session.lastShown?.items ?? []).map((item) => productById(item.id)).filter((found): found is Product => !!found);
       const oneDesign = onScreen.length > 0 && new Set(onScreen.map((found) => garmentName(found.title))).size === 1 ? onScreen : [];
-      const family = named?.kind === 'exact-family' ? named.products : named?.kind === 'exact-product' ? [named.product] : oneDesign;
+      const family = byName?.kind === 'exact-family' ? byName.products : byName?.kind === 'exact-product' ? [byName.product] : oneDesign;
       const answers = family.map((member) => attributesAsked(member, question));
       if (family.length && answers[0]!.length && answers.every((answer) => JSON.stringify(answer) === JSON.stringify(answers[0]))) {
         const design =
-          named?.kind === 'exact-family' ? titleCaseWords(named.familyName) : named?.kind === 'exact-product' ? titleCaseWords(family[0]!.title) : titleCaseWords(garmentName(family[0]!.title));
+          byName?.kind === 'exact-family' ? titleCaseWords(byName.familyName) : byName?.kind === 'exact-product' ? titleCaseWords(family[0]!.title) : titleCaseWords(garmentName(family[0]!.title));
         await sessions.patch(ctx.session.id, { focusProductId: family[0]!.id });
         return {
           speech: sayAttributes(design, answers[0]!),
           facts: `About: the ${design} design - every colourway shares this description (${family.map((member) => `${member.title} [${member.id}]`).join(', ')}).\n${verifiedFacts(family[0]!)}\nAsked about: ${answers[0]!
             .map((answer) => `${answer.asked} - ${answer.state === 'yes' ? 'yes, its description states it' : answer.state === 'other' ? `its description says ${answer.instead}${answer.unsaid ? ` - ${answer.asked} itself is not stated (never say no)` : ' instead'}` : 'not stated (never say no)'}`)
             .join('; ')}. Answer this first; colour does not change it, so do not ask which colour.`,
+        };
+      }
+      if (member) {
+        const answer = answerAbout(member, question);
+        await sessions.patch(ctx.session.id, { focusProductId: member.id });
+        return {
+          speech: answer.speech,
+          facts: `About: ${member.title} [${member.id}] (the ${named.status === 'family' ? named.design : 'design'} they named).\n${answer.facts}\nAnswer only from these facts. Sizes, stock and prices are exact; do not add any.`,
         };
       }
       const screen = (ctx.session.lastShown?.items ?? []).filter((item) => item.id);
@@ -3753,13 +3949,16 @@ export async function runTool(name: string, rawArgs: unknown, ctx: ToolContext):
     if (args.quantity !== undefined && quantity !== args.quantity) log.warn('cart.quantity_not_asked', { sessionId: ctx.session.id, proposed: args.quantity });
     data = { ...args, ...(args.quantity !== undefined ? { quantity } : {}) } as typeof data;
   }
+  // What this add is for, read before the tool runs - so a waiting add remembers the product, not whatever the model passed.
+  const bound = name === 'add_to_cart' && !ctx.direct ? actionTarget(ctx) : null;
   const result = await tool.run(data, ctx);
 
   if ((name === 'add_to_cart' || name === 'add_pack_to_cart') && !ctx.direct) {
     const added = (result.actions?.length ?? 0) > 0 || result.attachment?.kind === 'cart';
     const productId = name === 'add_pack_to_cart' ? `pack:${ctx.session.lastShown?.bundle ?? ctx.session.packInFocus ?? ''}` : (data as { productId: string }).productId;
-    // Asked to add, waiting on a size or colour: their answer next turn finishes it. Added: nothing waits.
-    await sessions.patch(ctx.session.id, added ? { pendingAdd: undefined } : { pendingAdd: { productId, turn: turnNow(ctx) } });
+    const productIds = bound?.kind === 'bound' ? bound.products.map((product) => product.id) : bound?.kind === 'ambiguous' ? bound.designs.flatMap((design) => design.products.map((product) => product.id)) : [productId];
+    // Asked to add, waiting on a size or colour: their answer next turn finishes it - for that product. Added: nothing waits.
+    await sessions.patch(ctx.session.id, added ? { pendingAdd: undefined } : { pendingAdd: { productId: productIds[0] ?? productId, turn: turnNow(ctx), productIds } });
   }
 
   /*
