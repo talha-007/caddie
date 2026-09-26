@@ -1,7 +1,9 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import type { BasketSync, CardChoice, ProfileRequest, SessionRestartResponse } from '@caddie/shared';
 import { rememberShopper } from '../shopper/remember.js';
 import { log } from '../lib/logger.js';
+import { LIMITS } from '../lib/rateLimit.js';
+import { limitRoute } from '../lib/routeLimit.js';
 import { productById } from '../catalog/sync.js';
 import { sessions } from '../session/store.js';
 import { customerTurn, describeFocus, focusFromCard } from '../session/focus.js';
@@ -24,6 +26,14 @@ import { runTool } from '../tools/index.js';
 
 export const sessionRouter: Router = Router();
 
+/*
+ * Every route here changes a shopper's session, and none needs a login - the
+ * session id is all a caller has to know. Limited per session and per
+ * address, generously: a shopper tapping sizes and opening the basket never
+ * gets near it; a script hammering one session, or many, does.
+ */
+const writeLimit = limitRoute('session', (req) => req.params.id, LIMITS.sessionWritesPerSession, LIMITS.sessionWritesPerAddress) as RequestHandler<{ id: string }>;
+
 /**
  * POST /api/session/:id/choice
  *
@@ -33,7 +43,7 @@ export const sessionRouter: Router = Router();
  * now says what they picked; it is kept for that product, and that product
  * becomes the one "it" means. Only options the product really has are kept.
  */
-sessionRouter.post('/:id/choice', async (req, res, next) => {
+sessionRouter.post('/:id/choice', writeLimit, async (req, res, next) => {
   const sessionId = req.params.id;
   try {
     const body = (req.body ?? {}) as Partial<CardChoice>;
@@ -66,7 +76,7 @@ sessionRouter.post('/:id/choice', async (req, res, next) => {
   }
 });
 
-sessionRouter.post('/:id/restart', async (req, res, next) => {
+sessionRouter.post('/:id/restart', writeLimit, async (req, res, next) => {
   const sessionId = req.params.id;
   try {
     const existing = await sessions.get(sessionId);
@@ -132,7 +142,7 @@ sessionRouter.post('/:id/restart', async (req, res, next) => {
  * Checked against what the store sells rather than taken as given - the body
  * comes from a browser.
  */
-sessionRouter.post('/:id/profile', async (req, res, next) => {
+sessionRouter.post('/:id/profile', writeLimit, async (req, res, next) => {
   try {
     const body = (req.body ?? {}) as Partial<ProfileRequest>;
     const range = body.range === 'men' || body.range === 'women' || body.range === 'kids' ? body.range : undefined;
@@ -161,7 +171,7 @@ sessionRouter.post('/:id/profile', async (req, res, next) => {
  * every page load, so "swap the orange polo" and "what is in my basket" are
  * answered from what is really there.
  */
-sessionRouter.post('/:id/basket', async (req, res, next) => {
+sessionRouter.post('/:id/basket', writeLimit, async (req, res, next) => {
   try {
     const body = req.body as Partial<BasketSync> | undefined;
     const lines = Array.isArray(body?.lines) ? body.lines.slice(0, 100) : [];

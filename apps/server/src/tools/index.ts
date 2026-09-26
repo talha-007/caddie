@@ -1452,7 +1452,15 @@ const sizeTool = defineTool({
      */
     const measurements = { ...proposed };
     const asUsual = proposed.usualSize ? (normaliseSize(proposed.usualSize) ?? proposed.usualSize.trim().toUpperCase()) : undefined;
-    if (asUsual && !usualSizeGiven(asUsual, ctx)) {
+    /*
+     * Typed into the size form by the customer (routes/tools.ts validated it):
+     * theirs, though no words came with it. The form sends none, and these
+     * checks - written for a model's arguments - threw away the usual size
+     * and height the customer had just entered, then asked for them again.
+     */
+    const form = ctx.sizeForm;
+    const formUsual = form?.usualSize ? (normaliseSize(form.usualSize) ?? form.usualSize.trim().toUpperCase()) : undefined;
+    if (asUsual && asUsual !== formUsual && !usualSizeGiven(asUsual, ctx)) {
       delete measurements.usualSize;
       log.warn('size.usual_not_given', { sessionId: ctx.session.id, proposed: asUsual, said: ctx.utterance?.slice(0, 120) });
       const measured = [measurements.heightValue, measurements.weightValue, measurements.chestCm, measurements.waistCm].some((value) => value !== undefined);
@@ -1476,6 +1484,7 @@ const sizeTool = defineTool({
     if (
       measurements.heightValue !== undefined &&
       measurements.heightValue !== ctx.session.sizeProfile.heightValue &&
+      measurements.heightValue !== form?.heightValue &&
       !HEIGHT_SAID.test(ctx.utterance ?? '')
     ) {
       log.warn('size.height_not_given', { sessionId: ctx.session.id, proposed: measurements.heightValue, said: ctx.utterance?.slice(0, 120) });
@@ -1525,7 +1534,10 @@ const sizeTool = defineTool({
      * The size worked out becomes their size, so every picker opens on it.
      * A waist size for bottoms, a top size for everything else - separate scales.
      */
-    if (recommendation.size && recommendation.basis !== 'none') {
+    // A usual size they typed into the form stays theirs: the chart's answer is a recommendation beside it, not a replacement.
+    if (formUsual) {
+      await rememberShopper(ctx.session.id, { usualSize: formUsual, ...(audience ? { range: audience } : {}) });
+    } else if (recommendation.size && recommendation.basis !== 'none') {
       const bySize = /^\d{2}$/.test(recommendation.size) && /short|trouser|skort/.test(category ?? '');
       await rememberShopper(ctx.session.id, {
         ...(bySize ? { waist: recommendation.size } : { usualSize: recommendation.size }),

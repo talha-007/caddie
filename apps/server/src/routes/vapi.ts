@@ -1,7 +1,10 @@
-import { Router } from 'express';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { Router, type Request, type RequestHandler } from 'express';
 import { env } from '../env.js';
 import { UpstreamError } from '../lib/errors.js';
 import { log } from '../lib/logger.js';
+import { LIMITS } from '../lib/rateLimit.js';
+import { limitRoute } from '../lib/routeLimit.js';
 import { publish } from '../session/bus.js';
 import { noteShoppingFocus } from '../session/focus.js';
 import { sessions } from '../session/store.js';
@@ -70,14 +73,48 @@ function resolveSessionId(message: VapiMessage): string {
   return message.call?.id ?? 'anonymous';
 }
 
-vapiRouter.post('/webhook', async (req, res) => {
-  if (env.vapi.webhookSecret) {
-    const provided = req.get('x-vapi-secret') ?? req.get('x-caddie-secret');
-    if (provided !== env.vapi.webhookSecret) {
-      log.warn('vapi.webhook.unauthorised');
-      return res.status(401).json({ error: 'unauthorised' });
-    }
+/** Compared in constant time, hashed first so the comparison does not leak the secret's length. */
+function secretMatches(supplied: string | undefined, expected: string): boolean {
+  if (!supplied) return false;
+  const a = createHash('sha256').update(supplied).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
+/*
+ * Whose conversation a webhook call belongs to, for the rate limit - read
+ * before anything else, so it cannot fail.
+ */
+function webhookSession(req: Request): string | undefined {
+  const message = (req.body?.message ?? {}) as VapiMessage;
+  return resolveSessionId(message);
+}
+
+/*
+ * Voice through Vapi is not customer-ready: no guard, no reply check, no
+ * history, and basket actions are not passed on to the widget. Until it is,
+ * it must not be a way round the protections chat has. So in production the
+ * webhook answers only with VAPI_WEBHOOK_SECRET set and matching - without
+ * it, it refuses everything (fails closed) rather than running tools for
+ * anyone. In development a missing secret still leaves it open for testing.
+ */
+const webhookAuth: RequestHandler = (req, res, next) => {
+  const secret = env.vapi.webhookSecret;
+  if (!secret && env.isProd) {
+    log.warn('vapi.webhook.disabled', { reason: 'VAPI_WEBHOOK_SECRET is not set' });
+    res.status(503).json({ error: 'voice_unavailable' });
+    return;
   }
+  if (secret && !secretMatches(req.get('x-vapi-secret') ?? req.get('x-caddie-secret'), secret)) {
+    log.warn('vapi.webhook.unauthorised');
+    res.status(401).json({ error: 'unauthorised' });
+    return;
+  }
+  next();
+};
+
+// Checked before it is counted: a flood of bad requests must not use up a real caller's allowance.
+vapiRouter.post('/webhook', webhookAuth, limitRoute('vapi', webhookSession, LIMITS.vapiPerSession), async (req, res) => {
 
   const message = (req.body?.message ?? {}) as VapiMessage;
   const type = message.type ?? 'unknown';

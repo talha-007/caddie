@@ -115,4 +115,14 @@ export const LIMITS = {
   perAddress: { max: 120, windowMs: 60 * 60 * 1000 },
   /** Voice costs more per request, so it gets its own, tighter, budget. */
   voicePerSession: { max: 30, windowMs: 60 * 60 * 1000 },
+  /*
+   * The widget's own calls that change a session: a size tapped on a card,
+   * the basket sync, the quick start, "New chat", and the direct tool calls a
+   * card makes to resolve a variant or the size form makes. A busy shopper
+   * taps a few times a minute; ten a minute for an hour is not one.
+   */
+  sessionWritesPerSession: { max: 600, windowMs: 60 * 60 * 1000 },
+  sessionWritesPerAddress: { max: 3000, windowMs: 60 * 60 * 1000 },
+  /** Vapi's servers call on behalf of every caller, so only per call - never per address. */
+  vapiPerSession: { max: 300, windowMs: 60 * 60 * 1000 },
 } as const satisfies Record<string, Limit>;

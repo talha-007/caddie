@@ -1,4 +1,4 @@
-import type { CaddieAttachment, CartAction } from '@caddie/shared';
+import type { CaddieAttachment, CartAction, SizeInput } from '@caddie/shared';
 import type { z } from 'zod';
 import type { CaddieSession } from '../session/store.js';
 
@@ -19,6 +19,14 @@ export interface ToolContext {
    * proposals (see tools/searchIntent.ts).
    */
   direct?: boolean;
+  /**
+   * The size form's fields as the customer filled them in, validated by
+   * routes/tools.ts. They count as said: the widget's form sends no words,
+   * and find_my_size's checks against the customer's words discarded the
+   * usual size and height the customer had typed into it. Only these fields
+   * - never a model's arguments, never a direct call's other arguments.
+   */
+  sizeForm?: SizeInput;
   /**
    * Store-cart changes already decided earlier in this same reply. The widget
    * makes them only once the reply arrives, so a basket read in the meantime
