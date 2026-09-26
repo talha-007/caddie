@@ -141,3 +141,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Saved widget builds: live/ (calls the live server) and local/ (calls localhost:8787)
+apps/widget/builds/
