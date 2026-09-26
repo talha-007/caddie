@@ -185,7 +185,7 @@ describe('"add it": the product they tapped, were offered, or were waiting on', 
   });
 
   it('"yes" to "shall I add the Elite Polo in navy?": the Elite navy, never what the model swaps in', async () => {
-    await rememberShopper(id, { usualSize: 'L' });
+    await rememberShopper(id, { usualSize: 'L' }, 'customer-words');
     await onScreen([ELITE_NAVY, CLIMA_NAVY]);
     await said('Show me polos');
     await caddie('The Elite Polo in navy is a great pick. Shall I add the Elite Polo in navy in L?');

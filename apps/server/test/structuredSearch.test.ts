@@ -5,6 +5,7 @@ import { categoriesAsked, categoriesOf, sizeInRequest, sizeStatus } from '../src
 import { setCatalogueForTests } from '../src/catalog/sync.js';
 import { env } from '../src/env.js';
 import { sessions } from '../src/session/store.js';
+import { rememberShopper } from '../src/shopper/remember.js';
 import { runTool } from '../src/tools/index.js';
 import { lastHybridDiagnostics } from '../src/catalog/hybrid.js';
 
@@ -245,14 +246,14 @@ describe('a size is a rule only when the customer gave it', () => {
   });
 
   it('a usual size they told us is still trusted later', async () => {
-    await sessions.patch(id, { shopper: { usualSize: 'XL' } });
+    await rememberShopper(id, { usualSize: 'XL' }, 'customer-words');
     const { products } = await search({ query: 'polo', size: 'XL' }, 'Show me another polo');
     expect(provenance()).toMatchObject({ trustedSize: 'XL', sizeSource: 'conversation or profile' });
     expect(products.every((p) => inStockIn(p, 'XL'))).toBe(true);
   });
 
   it('the model cannot swap their usual size for another, nor rewrite it', async () => {
-    await sessions.patch(id, { shopper: { usualSize: 'XL' } });
+    await rememberShopper(id, { usualSize: 'XL' }, 'customer-words');
     const { result } = await search({ query: 'polo', size: 'M' }, 'Show me another polo');
     expect(provenance()).toMatchObject({ requestedSize: 'M', trustedSize: null, ignoredModelSize: true });
     expect(result.facts ?? '').not.toMatch(/\bM in stock|in M\b/);

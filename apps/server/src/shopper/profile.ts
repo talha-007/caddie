@@ -22,11 +22,36 @@ import { normaliseSize } from '../recommend/sizeWords.js';
  * the model through note_shopper for what needs interpreting ("Portugal in
  * July" is hot weather). A later statement replaces an earlier one.
  *
- * Kept for the session only, like the rest of it - nothing here outlives the
- * two-hour idle expiry, and measurements stay in sizeProfile where they were.
+ * Three kinds of thing, never promoted one into another (Phase 3A):
+ *
+ *   durable facts      what the customer normally is or prefers - "I'm
+ *                      usually L", "I usually wear navy". `session.shopper`,
+ *                      with where each came from (`provenance`). Only the
+ *                      customer's own words, the size form or a customer
+ *                      action can put a fact here; see shopper/facts.ts.
+ *   current intent     what they want right now - "red polos under £30",
+ *                      "I need a waterproof jacket". The shopping focus and
+ *                      its constraints (session/focus.ts), gone with New chat.
+ *   recommendations    what the Caddie worked out - a size from their chest.
+ *                      `session.sizeRecommendation`: advice, never their size.
+ *
+ * "Show me red polos under £30" once remembered red and £30 as the customer's
+ * own; a size find_my_size worked out became "usually wears M". Neither was
+ * anything they had said about themselves.
  */
 
 export type Strength = 'required' | 'preferred';
+
+/**
+ * Where a fact came from. Only the first four are the customer's evidence:
+ * a recommendation is ours, and a model hint is a guess.
+ */
+export type FactSource = 'customer-words' | 'ui-form' | 'ui-selection' | 'customer-confirmation' | 'derived-recommendation' | 'model-hint';
+export type FactScope = 'turn' | 'shopping-session' | 'profile';
+export interface FactRecord {
+  source: FactSource;
+  at: number;
+}
 
 export interface Budget {
   amount: number;
@@ -56,7 +81,13 @@ export interface ShopperProfile {
   rejected?: string[];
   /** "Just the jacket": the garment they drew a line under. No cross-selling while set. */
   justThis?: string;
+  /** Where each durable fact came from. A fact with no trusted record here is not read as one. */
+  provenance?: Partial<Record<string, FactRecord>>;
 }
+
+/** What can be a durable fact about the customer. Liked, rejected and "just this" belong to one shopping session. */
+export const DURABLE_FIELDS = ['range', 'usualSize', 'waist', 'fit', 'colours', 'avoidColours', 'features', 'budget', 'weather'] as const;
+export type DurableField = (typeof DURABLE_FIELDS)[number];
 
 /* ---------------- Reading it from their words ---------------- */
 
@@ -219,12 +250,57 @@ export function readIntent(text: string): Intent {
 
 /* ---------------- Keeping it ---------------- */
 
-/** What of one message is worth remembering: a one-off colour or feature is not. */
+/**
+ * What of one message holds for the rest of this shopping session: a colour
+ * or feature stated as a rule or a taste ("only navy", "I'd prefer navy"),
+ * a budget, a fit, the weather. A colour named for this one request ("show
+ * me blue polos") is the focus's (session/focus.ts), not this.
+ */
 export function standingPart(intent: Intent): Partial<ShopperProfile> {
   const { coloursStanding, featuresStanding, ...rest } = intent;
   if (!coloursStanding) delete rest.colours;
   if (!featuresStanding) delete rest.features;
   return rest;
+}
+
+/**
+ * Words that say something is how they are, not what they want today: "I'm
+ * usually", "I normally play in", "my usual colours", "I prefer". Kept
+ * deliberately narrow - when unsure, a statement stays with this shopping
+ * session and is not remembered about them.
+ */
+const STANDING =
+  /\b(usually|normally|generally|typically|always|mostly|tend to|in general|these days|from now on|any ?more|my (?:usual|normal|regular|standard|favourite|favorite)|i (?:really )?prefer|i (?:really )?(?:like|love) (?:wearing|to wear|my|them|it|things|tops|clothes|shirts)|i (?:only )?ever wear|i never wear|i wear mostly)\b/i;
+/** "I don't like black any more", "I never wear orange": about them, not this search. */
+const STANDING_AVOID = /\b(any ?more|never wear|i (?:don'?t|do not) (?:like|wear)|i hate|can'?t stand|not a fan of)\b/i;
+/** "I'm a woman", "I shop ladies": a range that is who they are. */
+const STANDING_RANGE = /\b(?:i'?m|i am)\s+(?:a\s+)?(?:man|woman|lady|gent|guy|girl|boy|female|male)\b|\bi (?:usually |normally |always |only )?(?:wear|buy|shop(?: in| for)?) (?:mens|men'?s|ladies|ladies'|womens|women'?s)\b/i;
+
+/**
+ * What of one message is a durable fact about the customer. Their usual size
+ * and waist are said about themselves by the readers that find them; anything
+ * else needs words that make it standing. "Polos under £30" is this search;
+ * "I usually spend under £50" is them.
+ */
+export function durablePart(intent: Intent, text: string): Partial<ShopperProfile> {
+  const lower = text.toLowerCase();
+  const standing = STANDING.test(lower);
+  const out: Partial<ShopperProfile> = {};
+  if (intent.usualSize) out.usualSize = intent.usualSize;
+  if (intent.waist) out.waist = intent.waist;
+  if (intent.range && STANDING_RANGE.test(lower)) out.range = intent.range;
+  if (!standing) {
+    if (intent.avoidColours?.length && STANDING_AVOID.test(lower)) out.avoidColours = intent.avoidColours;
+    return out;
+  }
+  if (intent.range && !out.range && /\b(usually|normally|always|generally|mostly)\b/.test(lower)) out.range = intent.range;
+  if (intent.colours) out.colours = intent.colours;
+  if (intent.avoidColours?.length) out.avoidColours = intent.avoidColours;
+  if (intent.fit) out.fit = intent.fit;
+  if (intent.features) out.features = intent.features;
+  if (intent.budget) out.budget = intent.budget;
+  if (intent.weather?.length) out.weather = intent.weather;
+  return out;
 }
 
 /** A later statement replaces an earlier one, field by field. Lists of ids accumulate. */
@@ -241,6 +317,12 @@ export function mergeProfile(current: ShopperProfile | undefined, update: Partia
     } else {
       (next as Record<string, unknown>)[key] = value;
     }
+  }
+  // A colour they now avoid is no longer one they want.
+  if (update.avoidColours?.length && next.colours && !update.colours) {
+    const words = next.colours.words.filter((colour) => !update.avoidColours!.includes(colour));
+    if (words.length) next.colours = { ...next.colours, words };
+    else delete next.colours;
   }
   // A colour they now want cannot also be one they avoid.
   if (update.colours && next.avoidColours) {
@@ -268,7 +350,13 @@ export function describeBudget(budget: Budget, currency = 'GBP'): string {
  * call and so never caches.
  */
 export function describeProfile(profile: ShopperProfile | undefined, currency = 'GBP'): string | null {
-  if (!profile) return null;
+  const bits = profileBits(profile, currency);
+  return bits.length ? `What this customer has told us (use it, never ask again): ${bits.join('; ')}.` : null;
+}
+
+/** Each thing a profile holds, as a short phrase - shared by every description of the customer. */
+export function profileBits(profile: Partial<ShopperProfile> | undefined, currency = 'GBP'): string[] {
+  if (!profile) return [];
   const bits: string[] = [];
   if (profile.range) bits.push(`range: ${profile.range === 'women' ? 'ladies' : profile.range === 'men' ? 'mens' : 'kids'}`);
   if (profile.usualSize) bits.push(`usually wears ${profile.usualSize}`);
@@ -284,5 +372,5 @@ export function describeProfile(profile: ShopperProfile | undefined, currency = 
   if (profile.weather?.length) bits.push(`weather: ${profile.weather.join(', ')}`);
   if (profile.rejected?.length) bits.push(`turned down ${profile.rejected.length} product(s) - never offer them again`);
   if (profile.justThis) bits.push(`said "just the ${profile.justThis}" - do not cross-sell`);
-  return bits.length ? `What this customer has told us (use it, never ask again): ${bits.join('; ')}.` : null;
+  return bits;
 }

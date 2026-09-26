@@ -5,6 +5,8 @@ import { categoriesAsked, categoriesOf, withoutSize, sizeInRequest, type Categor
 import { resolveCustomerProductIdentity } from '../catalog/productIdentity.js';
 import { productById } from '../catalog/sync.js';
 import { log } from '../lib/logger.js';
+import { logFact, trustedShopperFacts } from '../shopper/facts.js';
+import { durablePart, mergeProfile, readIntent, standingPart, type FactSource, type ShopperProfile } from '../shopper/profile.js';
 import { sessions, type CaddieSession } from './store.js';
 
 /**
@@ -45,7 +47,19 @@ export interface ShoppingFocus {
   /** Which of their messages set it, counted from one. */
   turn: number;
   source: 'explicit' | 'card-action' | 'inherited';
+  /**
+   * What this shopping session asks of everything shown, from their words
+   * along the way: "only navy", "under £30", "a relaxed fit", "for the rain",
+   * and what they chose or turned down. Carried through every change of
+   * focus - a budget said about polos still holds when they move to jackets -
+   * and gone with New chat. Never a fact about the customer: that needs
+   * words that say so (shopper/profile.ts durablePart).
+   */
+  constraints?: ShoppingConstraints;
 }
+
+export type ShoppingConstraints = Pick<ShopperProfile, 'colours' | 'avoidColours' | 'budget' | 'fit' | 'layering' | 'features' | 'weather' | 'liked' | 'rejected' | 'justThis'>;
+const CONSTRAINT_FIELDS = ['colours', 'avoidColours', 'budget', 'fit', 'layering', 'features', 'weather', 'liked', 'rejected', 'justThis'] as const;
 
 export type FocusChange = 'explicit' | 'inherited' | 'none';
 
@@ -59,6 +73,9 @@ const FOLLOW_UP =
   /\b(different|other|others|another|more|cheaper|cheapest|less expensive|similar|like (?:this|that|these|those|it)|same|it|its|this|that|these|those|them|one|ones|sizes?|colou?rs?|colou?rways?|waterproof|water[- ]resistant|breathable|warm|stretch|in stock|price|how much|instead|else|lighter|warmer|add)\b/i;
 /** "Different colours", "other colours": a change of colour, so any colour held so far is let go. */
 const NEW_COLOURS = /\b(different|other|another|more|new)\s+colou?r(s|ways?)?\b|\bcolou?rs?\s+(else|instead)\b/i;
+
+/** "My usual colours", "the colours I normally wear". */
+const USUAL_COLOURS = /\b(?:my|the)\s+(?:usual|normal|regular|standard|favourite|favorite)\s+colou?rs?\b|\bcolou?rs?\s+i\s+(?:usually|normally|always)\s+wear\b/i;
 
 /** How many messages the customer has sent, this one included. */
 export function customerTurn(session: CaddieSession, counting = true): number {
@@ -183,6 +200,7 @@ export function focusFromCard(product: Product, prior: ShoppingFocus | undefined
     request: prior?.request ?? '',
     turn,
     source: 'card-action',
+    ...(prior?.constraints ? { constraints: prior.constraints } : {}),
   };
 }
 
@@ -217,8 +235,38 @@ export function focusQuery(focus: ShoppingFocus): string {
 export async function noteShoppingFocus(sessionId: string, said: string): Promise<ShoppingFocus | undefined> {
   const session = await sessions.getOrCreate(sessionId);
   const prior = session.activeShoppingContext;
-  const { focus, change } = readFocus(said, prior, customerTurn(session));
-  if (change === 'none') return prior;
+  const read = readFocus(said, prior, customerTurn(session));
+  let { focus } = read;
+  const { change } = read;
+  /*
+   * The session's constraints carry through a follow-up - "another one",
+   * "cheaper", "different colours" - and through a new request for the same
+   * kind of garment. A new mission does not inherit them: after "I need a
+   * waterproof jacket", "show me polos" is polos, not waterproof polos. Only
+   * what this message says holds for it, with the products they chose or
+   * turned down (their actions, not a request). Their durable facts are
+   * untouched - they apply to every mission (shopper/facts.ts).
+   */
+  if (focus && prior?.constraints && focus !== prior) {
+    const fresh = newMission(prior, focus, change);
+    const { liked, rejected } = prior.constraints;
+    const constraints: ShoppingConstraints = fresh ? { ...(liked ? { liked } : {}), ...(rejected ? { rejected } : {}), ...constraintsIn(said) } : prior.constraints;
+    if (fresh) log.info('focus.new_mission', { sessionId, prior: describeFocus(prior), resolved: describeFocus(focus), dropped: Object.keys(prior.constraints).filter((key) => !(key in constraints)) });
+    focus = { ...focus, ...(Object.keys(constraints).length ? { constraints } : {}) };
+    if (!Object.keys(constraints).length) delete focus.constraints;
+  }
+  /*
+   * "Go back to my usual colours": the colours they told us they wear, in
+   * place of the red this search was in. Without this the red was held, as
+   * any colour is on a follow-up.
+   */
+  const backToUsual = USUAL_COLOURS.test(said);
+  if (focus && backToUsual) {
+    const { colours: _held, ...rest } = focus;
+    const usual = trustedShopperFacts(session).colours?.words ?? [];
+    focus = usual.length ? { ...rest, colours: usual } : rest;
+  }
+  if (change === 'none' && !backToUsual) return prior;
   log.info('focus.updated', {
     sessionId,
     utterance: said.slice(0, 160),
@@ -229,4 +277,50 @@ export async function noteShoppingFocus(sessionId: string, said: string): Promis
   });
   if (focus && JSON.stringify(focus) !== JSON.stringify(prior)) await sessions.patch(sessionId, { activeShoppingContext: focus });
   return focus;
+}
+
+/**
+ * Whether this request starts a new mission: named explicitly, and of kinds
+ * the focus was not on. "Show me jackets" and "what about jackets?" after red
+ * polos both are - a garment kind named is a new request however it is
+ * phrased (isFollowUp says the same). A range alone ("the ladies ones"), the
+ * same kind again, or a product of that kind carries on the mission. A focus
+ * with no kind yet ("my budget is £50" before anything was asked for) is not
+ * a mission to leave.
+ */
+export function newMission(prior: ShoppingFocus, next: ShoppingFocus, change: FocusChange): boolean {
+  if (change !== 'explicit' || !prior.kinds.length || !next.kinds.length) return false;
+  return !next.kinds.some((kind) => prior.kinds.includes(kind));
+}
+
+/** What one message asks of this shopping session - read the same way wherever it is kept (shopper/remember.ts). */
+export function constraintsIn(text: string): ShoppingConstraints {
+  const intent = readIntent(text);
+  const held = { ...standingPart(intent), ...durablePart(intent, text) } as Partial<ShopperProfile>;
+  return Object.fromEntries(CONSTRAINT_FIELDS.filter((key) => key !== 'liked' && key !== 'rejected' && held[key] !== undefined).map((key) => [key, held[key]])) as ShoppingConstraints;
+}
+
+/**
+ * Something that holds for the rest of this shopping session - a budget, a
+ * colour rule, a fit, a product they chose or turned down. The customer's
+ * words or their own actions only: a model's reading of them, or something
+ * we worked out, is not their evidence and is not kept (Phase 3A).
+ */
+export async function noteShoppingConstraints(sessionId: string, update: ShoppingConstraints, source: FactSource): Promise<ShoppingConstraints | undefined> {
+  const fields = CONSTRAINT_FIELDS.filter((field) => update[field] !== undefined);
+  if (!fields.length) return undefined;
+  if (source === 'model-hint' || source === 'derived-recommendation') {
+    for (const field of fields) logFact(sessionId, field, source, 'shopping-session', false, update[field], 'not the customer’s evidence');
+    return undefined;
+  }
+  const session = await sessions.getOrCreate(sessionId);
+  const prior = session.activeShoppingContext;
+  const picked = Object.fromEntries(fields.map((field) => [field, update[field]])) as ShoppingConstraints;
+  const { provenance: _provenance, ...merged } = mergeProfile(prior?.constraints, picked);
+  const constraints = Object.fromEntries(CONSTRAINT_FIELDS.filter((field) => merged[field] !== undefined).map((field) => [field, merged[field]])) as ShoppingConstraints;
+  // No focus yet ("under £30" before any garment): a focus of nothing in particular, holding them.
+  const focus: ShoppingFocus = prior ? { ...prior, constraints } : { kinds: [], request: '', turn: customerTurn(session), source: 'explicit', constraints };
+  await sessions.patch(sessionId, { activeShoppingContext: focus });
+  for (const field of fields) logFact(sessionId, field, source, 'shopping-session', true, update[field]);
+  return constraints;
 }

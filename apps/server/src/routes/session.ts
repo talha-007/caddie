@@ -3,12 +3,14 @@ import type { BasketSync, CardChoice, CartAction, ProfileRequest, SessionClaimRe
 import { z } from 'zod';
 import { noteCartMode } from '../lib/request.js';
 import { executeCommerceAction } from '../tools/actionGateway.js';
+import { trustedShopperFacts } from '../shopper/facts.js';
+import type { ShopperProfile } from '../shopper/profile.js';
 import { rememberShopper } from '../shopper/remember.js';
 import { log } from '../lib/logger.js';
 import { LIMITS } from '../lib/rateLimit.js';
 import { limitRoute } from '../lib/routeLimit.js';
 import { productById } from '../catalog/sync.js';
-import { sessions } from '../session/store.js';
+import { sessions, type CaddieSession } from '../session/store.js';
 import { customerTurn, describeFocus, focusFromCard } from '../session/focus.js';
 import { claimSession, requireSessionOwner } from '../session/ownership.js';
 import { runTool } from '../tools/index.js';
@@ -120,21 +122,14 @@ sessionRouter.post('/:id/restart', owner, writeLimit, async (req, res, next) => 
       id: sessionId,
       createdAt: existing.createdAt,
       updatedAt: now,
-      sizeProfile: existing.sizeProfile,
-      preferences: existing.preferences.audience ? { audience: existing.preferences.audience } : {},
-      // Who they shop for and their sizes are about them, not the old chat.
-      ...(existing.shopper
-        ? {
-            shopper: Object.fromEntries(
-              Object.entries({
-                range: existing.shopper.range,
-                usualSize: existing.shopper.usualSize,
-                waist: existing.shopper.waist,
-                fit: existing.shopper.fit,
-              }).filter(([, value]) => value !== undefined),
-            ),
-          }
-        : {}),
+      /*
+       * What they told us about themselves is about them, not the old chat,
+       * and stays: their usual size, range, waist, standing preferences and
+       * measurements - each with where it came from. What this shopping
+       * session asked for goes with it (the focus is not carried), and so
+       * does any size we recommended: after New chat it would read as theirs.
+       */
+      ...carriedAcrossNewChat(existing),
       messages: [],
       ...(existing.cartId ? { cartId: existing.cartId } : {}),
       // A new conversation on the same shopping session: the same owner, the same capability.
@@ -161,6 +156,24 @@ sessionRouter.post('/:id/restart', owner, writeLimit, async (req, res, next) => 
   }
 });
 
+/** The durable facts a New chat keeps, and the compatibility mirrors that match them. */
+function carriedAcrossNewChat(existing: CaddieSession): Pick<CaddieSession, 'sizeProfile' | 'preferences' | 'shopper'> {
+  const { measurements, sources, ...facts } = trustedShopperFacts(existing);
+  const provenance = Object.fromEntries(Object.keys(sources).map((field) => [field, existing.shopper?.provenance?.[field]]).filter(([, record]) => !!record));
+  const shopper: ShopperProfile | undefined = Object.keys(provenance).length ? { ...facts, provenance } : undefined;
+  const audience = facts.range === 'men' || facts.range === 'women' ? facts.range : undefined;
+  return {
+    sizeProfile: {
+      ...measurements,
+      ...(facts.usualSize ? { usualSize: facts.usualSize } : {}),
+      ...(facts.fit ? { fitPreference: facts.fit } : {}),
+      ...(audience ? { audience } : {}),
+    },
+    preferences: audience ? { audience } : {},
+    ...(shopper ? { shopper } : {}),
+  };
+}
+
 /**
  * POST /api/session/:id/profile - who they are shopping for, and their sizes.
  *
@@ -180,11 +193,16 @@ sessionRouter.post('/:id/profile', owner, writeLimit, async (req, res, next) => 
     const size = clean(body.size);
     const waist = typeof body.waist === 'string' && /^\d{2}$/.test(body.waist.trim()) ? body.waist.trim() : undefined;
     await sessions.getOrCreate(req.params.id);
-    const shopper = await rememberShopper(req.params.id, {
-      ...(range ? { range } : {}),
-      ...(size ? { usualSize: size } : {}),
-      ...(waist ? { waist } : {}),
-    });
+    // Typed into the quick start by the customer: theirs, as firmly as if they had said it.
+    const shopper = await rememberShopper(
+      req.params.id,
+      {
+        ...(range ? { range } : {}),
+        ...(size ? { usualSize: size } : {}),
+        ...(waist ? { waist } : {}),
+      },
+      'ui-form',
+    );
     res.json({ ok: true, shopper: { range: shopper.range, size: shopper.usualSize, waist: shopper.waist } });
   } catch (err) {
     next(err);

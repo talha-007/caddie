@@ -133,7 +133,7 @@ describe('what counts as chosen', () => {
   });
 
   it('a card opening on 34/34 is not a choice: with no leg said, the leg is open', async () => {
-    await rememberShopper(id, { usualSize: 'S', waist: '34' });
+    await rememberShopper(id, { usualSize: 'S', waist: '34' }, 'customer-words');
     const now = await status();
     expect(now.ready).toBe(false);
     expect(now.pieces.find((p) => p.product === TROUSERS)!.missing.map((m) => m.kind)).toEqual(['leg']);
@@ -142,7 +142,7 @@ describe('what counts as chosen', () => {
 
 describe('readiness', () => {
   it('the red Warrior sold out in S: not ready, and a swap is what is asked', async () => {
-    await rememberShopper(id, { usualSize: 'S' });
+    await rememberShopper(id, { usualSize: 'S' }, 'customer-words');
     await choose('waist 34 leg 34');
     const now = await status();
     expect(now.ready).toBe(false);
@@ -151,7 +151,7 @@ describe('readiness', () => {
   });
 
   it('only the one missing thing is asked - the top and waist are known', async () => {
-    await rememberShopper(id, { usualSize: 'M' });
+    await rememberShopper(id, { usualSize: 'M' }, 'customer-words');
     await choose('Waist 34, leg 36');
     const now = await status();
     expect(now.next).toBe("Waist 34 is fine, but the trousers don't come in a 36 leg. Would you like 30, 32 or 34?");
@@ -161,7 +161,7 @@ describe('readiness', () => {
 
 describe('which question comes first', () => {
   it('a chosen piece sold out in their size comes before the missing leg; then the leg', async () => {
-    await rememberShopper(id, { usualSize: 'S' });
+    await rememberShopper(id, { usualSize: 'S' }, 'customer-words');
     await choose('Waist 34, leg 36');
     const first = await status();
     expect(first.next).toBe('The red Warrior Jacket is sold out in S. I can swap it for another jacket in S - shall I?');
@@ -179,7 +179,7 @@ describe('which question comes first', () => {
     const pieces = [TEX_BLACK, MIDLAYER, POLO, TROUSERS, BELT, SOCKS];
     const at = async () => packStatus(await sessions.getOrCreate(id), COOL_WET.handle, pieces).next;
     expect(await at()).toBe('What top size do you wear?');
-    await rememberShopper(id, { usualSize: 'S' });
+    await rememberShopper(id, { usualSize: 'S' }, 'customer-words');
     expect(await at()).toBe('What waist size do you need for the trousers?');
     await choose('waist 34');
     expect(await at()).toBe('Which leg length for the trousers: 30, 32 or 34?');
@@ -188,7 +188,7 @@ describe('which question comes first', () => {
 
 describe('adding the pack', () => {
   it('"add this pack" before it is complete: nothing added, the one missing thing asked', async () => {
-    await rememberShopper(id, { usualSize: 'M' });
+    await rememberShopper(id, { usualSize: 'M' }, 'customer-words');
     await choose('waist 34');
     const result = await say('Add this pack');
     expect(result.actions ?? []).toEqual([]);
@@ -197,7 +197,7 @@ describe('adding the pack', () => {
   });
 
   it('complete: the six exact variants go in', async () => {
-    await rememberShopper(id, { usualSize: 'M' });
+    await rememberShopper(id, { usualSize: 'M' }, 'customer-words');
     await choose('34 waist, 32 leg');
     const result = await say('Add this pack');
     // The pack goes in as one bundle - its pieces, each a variant.
@@ -218,7 +218,7 @@ describe('adding the pack', () => {
   });
 
   it('a search since has taken the screen: the pack they saw goes in, not a fresh build', async () => {
-    await rememberShopper(id, { usualSize: 'M' });
+    await rememberShopper(id, { usualSize: 'M' }, 'customer-words');
     await choose('34 waist, 32 leg');
     await sessions.patch(id, { lastShown: { kind: 'products', items: [{ id: MIDLAYER.id, title: MIDLAYER.title }] } });
     const result = await say('Add the Cool & Wet pack', 'add_pack_to_cart', { pack: COOL_WET.title });
@@ -227,7 +227,7 @@ describe('adding the pack', () => {
   });
 
   it('refused for want of consent: the facts say what is confirmed, so "selected leg 36" has nothing to stand on', async () => {
-    await rememberShopper(id, { usualSize: 'S' });
+    await rememberShopper(id, { usualSize: 'S' }, 'customer-words');
     await choose('Waist 34, leg 36');
     const result = await say('OK, select that size.');
     expect(result.actions ?? []).toEqual([]);
@@ -237,7 +237,7 @@ describe('adding the pack', () => {
   });
 
   it('the model adding it without being asked: nothing added', async () => {
-    await rememberShopper(id, { usualSize: 'M' });
+    await rememberShopper(id, { usualSize: 'M' }, 'customer-words');
     await choose('34 waist, 32 leg');
     const result = await say("I'm usually M.");
     expect(result.actions ?? []).toEqual([]);
@@ -245,7 +245,7 @@ describe('adding the pack', () => {
   });
 
   it('"yes" to "shall I add it?": added', async () => {
-    await rememberShopper(id, { usualSize: 'M' });
+    await rememberShopper(id, { usualSize: 'M' }, 'customer-words');
     await choose('34 waist, 32 leg');
     await sessions.append(id, [
       { id: 'u1', role: 'user', text: '34 waist, 32 leg', createdAt: new Date(Date.now() - 2000).toISOString() },
@@ -258,7 +258,7 @@ describe('adding the pack', () => {
 
 describe('changing the jacket', () => {
   it('only the jacket changes; every choice stands, and the new one is in stock in S', async () => {
-    await rememberShopper(id, { usualSize: 'S' });
+    await rememberShopper(id, { usualSize: 'S' }, 'customer-words');
     await choose('waist 34 leg 34');
     const before = (await sessions.getOrCreate(id)).packChoices;
     const result = await say('Change the jacket.', 'recommend_pack', { query: 'Ambassador Pack', swap: WARRIOR_RED.id });

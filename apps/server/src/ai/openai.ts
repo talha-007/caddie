@@ -4,8 +4,8 @@ import { UpstreamError } from '../lib/errors.js';
 import { fetchWithTimeout, Semaphore } from '../lib/http.js';
 import { log } from '../lib/logger.js';
 import { sessions, tappedSinceLastSaid, type CaddieSession } from '../session/store.js';
-import { describeProfile, readIntent, standingPart } from '../shopper/profile.js';
-import { rememberShopper } from '../shopper/remember.js';
+import { acceptedRecommendation, describeShopper } from '../shopper/facts.js';
+import { noteCustomerWords } from '../shopper/remember.js';
 import { runTool, toolDefinitionsForVapi } from '../tools/index.js';
 import { costOfTokens } from '../usage/pricing.js';
 import { record } from '../usage/store.js';
@@ -255,7 +255,7 @@ function basketContext(session: CaddieSession): ChatMessage | null {
  * the stable prompt, like the rest of the per-turn context, so the cache holds.
  */
 export function shopperContext(session: CaddieSession): ChatMessage | null {
-  const text = describeProfile(session.shopper, session.preferences.currency);
+  const text = describeShopper(session, session.preferences.currency);
   return text ? { role: 'system', content: text } : null;
 }
 
@@ -340,9 +340,10 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
    * is kept before the model runs, so every tool this turn already uses it.
    * Code reads it, not the model: it was the model's job before, and "I'm
    * usually XL, relaxed fit, max £50" was forgotten by the next request.
+   * What is about them goes to the profile; what is about this search stays
+   * with the shopping session (shopper/remember.ts).
    */
-  const learned = standingPart(readIntent(userText));
-  if (Object.keys(learned).length) await rememberShopper(sessionId, learned);
+  await noteCustomerWords(sessionId, userText);
   /*
    * "Waist 34, leg 36" said about the pack on screen is a choice for that
    * pack - read by code, checked against what its pieces come in, before the
@@ -355,7 +356,9 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
       const pieces = packPieces(before, handle);
       const lastReply = [...before.messages].reverse().find((message) => message.role === 'assistant')?.text ?? '';
       const current = before.packChoices?.[handle] ?? {};
-      const next = readPackChoices(userText, lastReply, pieces, current);
+      // "Use that size", straight after we recommended one: their acceptance, so it counts as theirs for this pack.
+      const accepted = acceptedRecommendation(before, userText);
+      const next = readPackChoices(userText, lastReply, pieces, current, accepted ? { [accepted.scale]: accepted.size } : undefined);
       if (JSON.stringify(next) !== JSON.stringify(current)) await sessions.patch(sessionId, { packChoices: { ...(before.packChoices ?? {}), [handle]: next } });
     }
   }

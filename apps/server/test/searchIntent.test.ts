@@ -4,7 +4,7 @@ import { setDealsForTests } from '../src/catalog/bundles.js';
 import { setCatalogueForTests } from '../src/catalog/sync.js';
 import { env } from '../src/env.js';
 import { readIntent, standingPart } from '../src/shopper/profile.js';
-import { rememberShopper } from '../src/shopper/remember.js';
+import { noteCustomerWords, rememberShopper } from '../src/shopper/remember.js';
 import { sessions } from '../src/session/store.js';
 import { runTool } from '../src/tools/index.js';
 import { resolveSearchIntent, type SearchArgs } from '../src/tools/searchIntent.js';
@@ -58,7 +58,7 @@ beforeEach(() => {
 async function customer(...said: string[]) {
   const id = `intent-${Math.random()}`;
   await sessions.getOrCreate(id);
-  for (const text of said) await rememberShopper(id, standingPart(readIntent(text)));
+  for (const text of said) await noteCustomerWords(id, text);
   return id;
 }
 

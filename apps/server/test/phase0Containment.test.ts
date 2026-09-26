@@ -78,7 +78,7 @@ async function someoneElse(): Promise<string> {
   const id = `victim-${Math.random()}`;
   await sessions.getOrCreate(id);
   await sessions.patch(id, { cartMode: 'theme' });
-  await rememberShopper(id, { usualSize: 'M', range: 'men' });
+  await rememberShopper(id, { usualSize: 'M', range: 'men' }, 'customer-words');
   return id;
 }
 

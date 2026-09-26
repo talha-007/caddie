@@ -12,7 +12,7 @@ import { normaliseSize } from '../recommend/sizeWords.js';
 import { phoneticEnglish } from '../ai/phoneticEnglish.js';
 import { readIntent } from '../shopper/profile.js';
 import { describeFocus, focusQuery, inFocus, isFollowUp, type ShoppingFocus } from '../session/focus.js';
-import { shopperSizes } from '../shopper/remember.js';
+import { acceptedRecommendation, currentRange, shopperView, trustedShopperFacts } from '../shopper/facts.js';
 import type { ToolContext } from './types.js';
 
 /**
@@ -203,7 +203,8 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
   const said = phonetic ? phonetic.normalised : raw;
   const verifiable = !!said && ENGLISH.test(said);
   const turn: Turn = phonetic ? readIntent(said) : spoken;
-  const profile = ctx.session.shopper;
+  // This shopping session's constraints over what they told us about themselves - one order, shopper/facts.ts.
+  const profile = shopperView(ctx.session);
   const previous = ctx.session.lastSearch;
   const followUp = FOLLOW_UP.test(said) || said.split(/\s+/).length <= 3;
   /*
@@ -280,13 +281,14 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
   if (inherit && searched.trim().toLowerCase() !== query.trim().toLowerCase()) reject('query', args.query, `a follow-up to ${describeFocus(focus)}: searched as "${query}"`, 'ignored');
 
   /*
-   * Range. Their words, or what we already know of them (the range they shop,
-   * or the last search's when this follows it). A range only the model
-   * proposed is not a rule - and so it is never remembered either.
+   * Range. Their words, then the range they are shopping now (the focus),
+   * then the range they told us is theirs - or the last search's when this
+   * follows it. A range only the model proposed is not a rule - and so it is
+   * never remembered either. The range of the results shown never counts.
    */
   const proposedRange = (args.range ? RANGE_ARG[args.range] : undefined) ?? parseRange(args.query).range ?? undefined;
   const saidRange = parseRange(said).range ?? undefined;
-  const knownRange = ctx.session.sizeProfile.audience ?? ctx.session.preferences.audience ?? profile?.range;
+  const knownRange = currentRange(ctx.session);
   let range: IntentValue<Range> | undefined;
   if (saidRange) {
     range = { value: saidRange, source: 'utterance', strength: 'hard' };
@@ -315,7 +317,9 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
   const saidColours = parseColours(said).colours.map((colour) => colour.word);
   const rememberedColours = profile?.colours?.words ?? [];
   // Followed up, the colours held are the focus's - none after "different colours".
-  const previousColours = inherit ? (focus!.colours ?? []) : previous?.colour ? parseColours(previous.colour).colours.map((colour) => colour.word) : [];
+  // A new kind named ("show me other jackets" after red polos) is a new mission: the last search's colour is not followed.
+  const newKind = saidCategories.length > 0 && !saidCategories.some((kind) => previousCategories.includes(kind));
+  const previousColours = inherit ? (focus!.colours ?? []) : previous?.colour && !newKind ? parseColours(previous.colour).colours.map((colour) => colour.word) : [];
   const within = (pool: string[]) => colourWords.length > 0 && colourWords.every((word) => pool.includes(word));
   let colourText: string | undefined;
   let colourSource: IntentSource | undefined;
@@ -463,7 +467,7 @@ function direct(args: SearchArgs, ctx: ToolContext, turn: Turn): SearchIntent {
   const categories = (args.category ? categoriesAsked(args.category) : []).length ? categoriesAsked(args.category!) : categoriesAsked(withoutSize(args.query, proposedSize));
   const range = (args.range ? RANGE_ARG[args.range] : undefined) ?? parseRange(args.query).range ?? undefined;
   const query = withoutSize(args.query, proposedSize);
-  const colour = rememberedWhenEchoed(colourAsked(args.colour, normaliseQuery(query).query), turn, ctx.session.shopper?.colours);
+  const colour = rememberedWhenEchoed(colourAsked(args.colour, normaliseQuery(query).query), turn, shopperView(ctx.session).colours);
   const features = [...new Set([...normaliseQuery(query).features, ...knownFeatures(args.features).known])];
   return {
     query,
@@ -613,8 +617,10 @@ export function sizesNeverGiven(values: Array<string | undefined>, ctx: ToolCont
       if (size) known.add(size.toLowerCase());
     }
   });
-  const profile = shopperSizes(ctx.session);
-  for (const size of [profile?.size, profile?.waist]) if (size) known.add((normaliseSize(String(size)) ?? String(size)).toLowerCase());
+  // Their own usual size and waist - never one we recommended, unless they have just accepted it.
+  const facts = trustedShopperFacts(ctx.session);
+  const accepted = acceptedRecommendation(ctx.session, ctx.utterance);
+  for (const size of [facts.usualSize, facts.waist, accepted?.size]) if (size) known.add((normaliseSize(String(size)) ?? String(size)).toLowerCase());
   // What they picked on this product's card themselves - for this product only.
   const card = productId ? ctx.session.cardChoices?.[productById(productId)?.id ?? productId] : undefined;
   for (const value of Object.values(card?.options ?? {})) known.add((normaliseSize(value) ?? value).toLowerCase());

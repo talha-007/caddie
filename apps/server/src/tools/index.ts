@@ -1,6 +1,6 @@
 import type { Cart, CartAction, OutfitPiece, Product } from '@caddie/shared';
 import { z } from 'zod';
-import { FEATURE_LABEL, WEATHER_NEEDS, attributesOf, hasFeature, type Feature, type Weather } from '../catalog/attributes.js';
+import { FEATURE_LABEL, WEATHER_NEEDS, attributesOf, featuresAsked, hasFeature, type Feature, type Weather } from '../catalog/attributes.js';
 import { inRange, parseRange, rangeOf, type Range } from '../catalog/audience.js';
 import { distinctiveWords, lookupProductName, unknownNameIn, type Existence } from '../catalog/lookup.js';
 import { normaliseQuery } from '../catalog/taxonomy.js';
@@ -27,7 +27,9 @@ import { searchLocalScored } from '../catalog/search.js';
 import { nextStep } from '../recommend/nextStep.js';
 import { hasSignals, rankFacts, rankProducts, weatherHotOnly } from '../recommend/rank.js';
 import { describeProfile, readIntent, type Budget } from '../shopper/profile.js';
-import { rankRequestFor, rememberShopper, shopperSizes } from '../shopper/remember.js';
+import { acceptedRecommendation, currentRange, describeShopper, logFact, shopperView, trustedShopperFacts, type SizeRecommendationRecord } from '../shopper/facts.js';
+import { rankRequestFor, rememberMeasurements, rememberShopper, shopperSizes } from '../shopper/remember.js';
+import { customerTurn, noteShoppingConstraints } from '../session/focus.js';
 import { bestPicks, kindsNamed } from '../recommend/bestPicks.js';
 import { answerAbout, attributesAsked, describeStock, sayAttributes, verifiedFacts } from '../recommend/productFacts.js';
 import { resolveProduct } from '../session/screen.js';
@@ -87,9 +89,14 @@ function saidRange(utterance: string | undefined): 'men' | 'women' | undefined {
   return range === 'men' || range === 'women' ? range : undefined;
 }
 
-/** The range the customer is shopping, as far as we know it. */
+/**
+ * The range the customer is shopping, as far as we know it: their words, the
+ * range they are shopping now, then the one they told us is theirs
+ * (shopper/facts.ts). The range of whatever was last shown is not evidence.
+ */
 function knownRange(ctx: ToolContext): 'men' | 'women' | undefined {
-  return ctx.session.sizeProfile.audience ?? ctx.session.preferences.audience;
+  const range = currentRange(ctx.session, ctx.utterance);
+  return range === 'men' || range === 'women' ? range : undefined;
 }
 
 /**
@@ -646,7 +653,7 @@ function colourTurns<T extends { product: Product; matchLevel: string }>(
 function colourStrength(asked: string, turn: ReturnType<typeof readIntent>, ctx: ToolContext): 'required' | 'preferred' {
   const words = parseColours(asked).colours.map((colour) => colour.word);
   if (turn.colours?.words.some((word) => words.includes(word))) return turn.colours.strength;
-  const standing = ctx.session.shopper?.colours;
+  const standing = shopperView(ctx.session).colours;
   if (standing?.words.some((word) => words.includes(word))) return standing.strength;
   return 'required';
 }
@@ -692,7 +699,7 @@ const searchTool = defineTool({
   },
   async run(args, ctx): Promise<ToolResult> {
     const turn = readIntent(ctx.utterance ?? '');
-    const profile = ctx.session.shopper;
+    const profile = shopperView(ctx.session);
     const currency = ctx.session.preferences.currency ?? storeCurrency();
 
     /*
@@ -1214,7 +1221,6 @@ const searchTool = defineTool({
       lastSearch: { categories, ...(askedRange ? { range: askedRange } : {}), ...(intent.colour ? { colour: intent.colour.value } : {}) },
       recentShown: [...new Set([...(wantsAnother ? (ctx.session.recentShown ?? []) : []), ...products.map((p) => p.id)])].slice(-40),
       ...(lead ? { lastLead: { id: lead.id, colour: colourwayName(lead.title).toLowerCase() } } : {}),
-      ...(askedRange === 'men' || askedRange === 'women' ? { preferences: { audience: askedRange } } : {}),
     });
 
     // Cards that are not the possible matches the facts name would be the Hexi polo again: log it rather than let it pass unseen.
@@ -1457,7 +1463,7 @@ const detailsTool = defineTool({
     await sessions.patch(ctx.session.id, { focusProductId: product.id });
     const verified = [
       attributes.features.length ? `Its description states: ${attributes.features.map((f) => FEATURE_LABEL[f]).join(', ')}.` : 'Its description states no technical features - do not claim any.',
-      attributes.fit ? `Cut: ${attributes.fit}.` : ctx.session.shopper?.fit ? 'Cut: not stated in its description - never describe its fit.' : '',
+      attributes.fit ? `Cut: ${attributes.fit}.` : shopperView(ctx.session).fit ? 'Cut: not stated in its description - never describe its fit.' : '',
       attributes.materials.length ? `Fabric: ${attributes.materials.join(', ')}.` : '',
       // Every size and colour, in stock or not, from the full product - a narrowed lookup holds one variant.
       `Stock: ${describeStock(productById(product.id) ?? product)}`,
@@ -1465,7 +1471,7 @@ const detailsTool = defineTool({
       .filter(Boolean)
       .join(' ');
     const next = await nextStep([product], {
-      profile: ctx.session.shopper,
+      profile: shopperView(ctx.session, ctx.utterance),
       basketProductIds: (ctx.session.basket ?? []).map((line) => line.productId),
     });
 
@@ -1588,7 +1594,8 @@ const sizeTool = defineTool({
     const { productId, layering, ...proposed } = args;
     const product = productId ? productById(productId) : null;
     const productRange = product ? rangeOf(product) : undefined;
-    const shopper = ctx.session.shopper;
+    const facts = trustedShopperFacts(ctx.session);
+    const view = shopperView(ctx.session, ctx.utterance);
 
     /*
      * A usual size is one they said they usually wear, or the one already
@@ -1630,19 +1637,37 @@ const sizeTool = defineTool({
      */
     if (
       measurements.heightValue !== undefined &&
-      measurements.heightValue !== ctx.session.sizeProfile.heightValue &&
+      measurements.heightValue !== facts.measurements.heightValue &&
       measurements.heightValue !== form?.heightValue &&
       !HEIGHT_SAID.test(ctx.utterance ?? '')
     ) {
-      log.warn('size.height_not_given', { sessionId: ctx.session.id, proposed: measurements.heightValue, said: ctx.utterance?.slice(0, 120) });
+      log.warn('size.height_not_given', { sessionId: ctx.session.id, said: ctx.utterance?.slice(0, 120) });
       delete measurements.heightValue;
       delete measurements.heightUnit;
     }
+    /*
+     * The same for weight, chest and waist: a number the model supplies
+     * must be one they gave - typed into the form, told us before, or said
+     * in their words (in any unit the model converted from). A chest nobody
+     * gave would size them as firmly as one they measured.
+     */
+    for (const field of ['weightValue', 'chestCm', 'waistCm'] as const) {
+      const value = measurements[field];
+      if (value === undefined || value === form?.[field] || value === facts.measurements[field] || measurementSaid(field, value, ctx)) continue;
+      logFact(ctx.session.id, field, 'model-hint', 'turn', false, undefined, 'no such measurement in their words');
+      delete measurements[field];
+      if (field === 'weightValue') delete measurements.weightUnit;
+    }
 
-    // Merge with anything they told us earlier, and with the range they are
-    // already browsing, so we only ask mens/womens when we truly cannot tell.
+    /*
+     * Which chart: the form's answer, their words, the garment's own range,
+     * the range they are shopping now, the range they told us is theirs - and
+     * only then the model's guess, or what is on screen. The model's audience
+     * once came first, and replaced what the customer had said.
+     */
+    const current = currentRange(ctx.session);
     const audience =
-      args.audience ??
+      form?.audience ??
       /*
        * Said in their own words. "I need a womens polo, my chest is 100cm"
        * reached this tool without the range four times in five, and the
@@ -1651,8 +1676,8 @@ const sizeTool = defineTool({
       saidRange(ctx.utterance) ??
       // The garment they asked about knows its own range.
       (productRange === 'men' || productRange === 'women' ? productRange : undefined) ??
-      ctx.session.sizeProfile.audience ??
-      ctx.session.preferences.audience ??
+      (current === 'men' || current === 'women' ? current : undefined) ??
+      (form ? undefined : args.audience) ??
       audienceOf(onScreen(ctx)) ??
       // A store that only sells one range has already answered the question.
       audienceOf(allProducts().filter(isBrandProduct));
@@ -1660,36 +1685,64 @@ const sizeTool = defineTool({
     const category =
       (product && audience ? categoryForProduct(audience, `${product.productType ?? ''} ${product.title}`) : undefined) ?? args.category;
 
+    /*
+     * Fit and layering move the size, so they need the customer's evidence
+     * like anything else: the form's fit, or their own words - this turn,
+     * earlier in this shopping, or what they told us about themselves. The
+     * model's `relaxed` or `layering: true` alone once moved a size up that
+     * nobody had asked to move.
+     */
+    const fit = form?.fitPreference ?? view.fit;
+    if (measurements.fitPreference !== undefined && measurements.fitPreference !== fit) {
+      logFact(ctx.session.id, 'fit', 'model-hint', 'turn', false, measurements.fitPreference, 'not in the customer’s words or profile');
+    }
+    delete measurements.fitPreference;
+    const layers = !!view.layering;
+    if (layering !== undefined && layering !== layers) logFact(ctx.session.id, 'layering', 'model-hint', 'turn', false, layering, 'not in the customer’s words');
+
+    // What they gave us before, then what they gave now.
     const profile = {
-      ...ctx.session.sizeProfile,
+      ...facts.measurements,
       ...measurements,
-      ...(shopper?.usualSize && !measurements.usualSize ? { usualSize: shopper.usualSize } : {}),
-      ...(shopper?.fit && !measurements.fitPreference ? { fitPreference: shopper.fit } : {}),
+      ...(facts.usualSize && !measurements.usualSize ? { usualSize: facts.usualSize } : {}),
+      ...(fit ? { fitPreference: fit } : {}),
       audience,
       ...(category ? { category } : {}),
     };
     const recommendation = recommendSize(profile, {
-      layering: layering ?? shopper?.layering,
+      layering: layers,
       ...(product ? { productTitle: product.title } : {}),
       ...(product && attributesOf(product).fit ? { productFit: attributesOf(product).fit } : {}),
     });
-    // A category read off one product is not a fact about the customer.
-    const { category: _category, ...remembered } = profile;
-    await sessions.patch(ctx.session.id, { sizeProfile: args.category ? profile : remembered });
-    if (layering !== undefined) await rememberShopper(ctx.session.id, { layering });
+
     /*
-     * The size worked out becomes their size, so every picker opens on it.
-     * A waist size for bottoms, a top size for everything else - separate scales.
+     * What is theirs is kept as theirs: measurements they gave, the usual
+     * size and range they typed into the form. The answer is kept as ours -
+     * a recommendation beside their usual size, never in its place. It once
+     * became "usually wears M" for every picker, search and pack after.
      */
-    // A usual size they typed into the form stays theirs: the chart's answer is a recommendation beside it, not a replacement.
-    if (formUsual) {
-      await rememberShopper(ctx.session.id, { usualSize: formUsual, ...(audience ? { range: audience } : {}) });
-    } else if (recommendation.size && recommendation.basis !== 'none') {
+    const source = form ? 'ui-form' : 'customer-words';
+    await rememberMeasurements(ctx.session.id, measurements, source);
+    // A usual size in their words that nothing recorded yet - only the latest they gave, so an old "XL" never undoes "I'm usually M now".
+    if (!form && asUsual && measurements.usualSize && !facts.usualSize && latestUsualSaid(ctx) === asUsual.toUpperCase()) {
+      await rememberShopper(ctx.session.id, { usualSize: asUsual }, 'customer-words');
+    }
+    if (formUsual || form?.audience) {
+      await rememberShopper(ctx.session.id, { ...(formUsual ? { usualSize: formUsual } : {}), ...(form?.audience ? { range: form.audience } : {}) }, 'ui-form');
+    }
+    if (recommendation.size && recommendation.basis !== 'none') {
       const bySize = /^\d{2}$/.test(recommendation.size) && /short|trouser|skort/.test(category ?? '');
-      await rememberShopper(ctx.session.id, {
-        ...(bySize ? { waist: recommendation.size } : { usualSize: recommendation.size }),
-        ...(audience ? { range: audience } : {}),
-      });
+      const record: SizeRecommendationRecord = {
+        size: recommendation.size,
+        scale: bySize ? 'waist' : 'top',
+        ...(category ? { category } : {}),
+        ...(product ? { productId: product.id } : {}),
+        basis: recommendation.basis,
+        turn: customerTurn(ctx.session),
+        at: Date.now(),
+      };
+      await sessions.patch(ctx.session.id, { sizeRecommendation: record });
+      logFact(ctx.session.id, 'recommendedSize', 'derived-recommendation', 'shopping-session', true, record.size);
     }
 
     if (!recommendation.size) {
@@ -1729,10 +1782,49 @@ const sizeTool = defineTool({
 function usualSizeGiven(size: string, ctx: ToolContext): boolean {
   const key = (value: string | undefined) => (value ? (normaliseSize(value) ?? value).toUpperCase() : undefined);
   const wanted = key(size);
-  const known = [ctx.session.shopper?.usualSize, ctx.session.sizeProfile.usualSize].map(key);
+  const known = [trustedShopperFacts(ctx.session).usualSize].map(key);
   if (known.includes(wanted)) return true;
   const said = [...ctx.session.messages.filter((message) => message.role === 'user').map((message) => message.text), ctx.utterance ?? ''];
   return said.some((text) => key(readIntent(text).usualSize) === wanted);
+}
+
+/** The usual size in the most recent of their messages that states one. */
+function latestUsualSaid(ctx: ToolContext): string | undefined {
+  const said = [...ctx.session.messages.filter((message) => message.role === 'user').map((message) => message.text), ctx.utterance ?? ''];
+  for (const text of said.reverse()) {
+    const size = readIntent(text).usualSize;
+    if (size) return (normaliseSize(size) ?? size).toUpperCase();
+  }
+  return undefined;
+}
+
+/**
+ * Whether a measurement is one the customer said: a number in their words
+ * this conversation, as said or as the model would have converted it -
+ * inches to centimetres, pounds or stone to kilograms. "My chest is 40
+ * inches" arrives as 101.6cm.
+ */
+function measurementSaid(field: 'weightValue' | 'chestCm' | 'waistCm', value: number, ctx: ToolContext): boolean {
+  const said = [...ctx.session.messages.filter((message) => message.role === 'user').map((message) => message.text), ctx.utterance ?? ''].join(' ').toLowerCase();
+  const word = field === 'weightValue' ? /\b(weigh|weight|kg|kilos?|lbs?|pounds|stone|st)\b/ : field === 'chestCm' ? /\bchest\b/ : /\bwaist\b/;
+  if (!word.test(said)) return false;
+  const numbers = [...said.matchAll(/\d+(?:\.\d+)?/g)].map((match) => Number(match[0]));
+  const factors = field === 'weightValue' ? [1, 0.4536, 6.35, 2.2046] : [1, 2.54, 1 / 2.54];
+  return numbers.some((number) => factors.some((factor) => Math.abs(number * factor - value) <= Math.max(1.5, value * 0.02)));
+}
+
+/**
+ * A budget the model passed, when the customer gave that amount - in this
+ * message or earlier, or as the budget this shopping session holds. Otherwise
+ * none: a spending limit nobody gave is not one to build a pack under.
+ */
+function groundedBudget(amount: number | undefined, ctx: ToolContext): number | undefined {
+  if (amount === undefined) return undefined;
+  const said = [...ctx.session.messages.filter((message) => message.role === 'user').slice(-6).map((message) => message.text), ctx.utterance ?? ''];
+  const inWords = said.some((text) => readIntent(text).budget?.amount === amount || new RegExp(`(?:£|\\$|€)\\s?${String(amount).replace('.', '\\.')}(?![\\d])`).test(text));
+  if (inWords || shopperView(ctx.session).budget?.amount === amount) return amount;
+  logFact(ctx.session.id, 'budget', 'model-hint', 'turn', false, amount, 'no budget of that amount was given');
+  return undefined;
 }
 
 /* ---------------- recommend_pack ---------------- */
@@ -1764,7 +1856,7 @@ async function dealAnswer(
   currency: string,
 ): Promise<ToolResult | null> {
   if (allDeals().length === 0) return null;
-  const size = args.size ?? ctx.session.sizeProfile.usualSize;
+  const size = args.size ?? trustedShopperFacts(ctx.session).usualSize;
   const shown = ctx.session.lastShown;
   const onScreen =
     shown?.kind === 'pack' && shown.bundle ? allDeals().find((deal) => deal.handle === shown.bundle) : undefined;
@@ -1805,7 +1897,7 @@ async function dealAnswer(
    * this turn (the model paraphrases, so the utterance too), then the weather
    * they have told us about. Nothing to go on is a question, not a default.
    */
-  const weather = readIntent(said).weather ?? ctx.session.shopper?.weather;
+  const weather = readIntent(said).weather ?? shopperView(ctx.session).weather;
   const choice = chooseDeal(`${args.query} ${said}`, dealRange(ctx), weather);
   const namedDeal = choice && 'deal' in choice ? choice.deal : undefined;
   const remembered = ctx.session.packsShown ?? {};
@@ -1898,8 +1990,9 @@ async function dealAnswer(
     });
     if (chosen) keep.set(index, chosen);
     const outgoing = current[index];
-    if (outgoing) await rememberShopper(ctx.session.id, { rejected: [outgoing.id], ...(chosen ? { liked: [chosen.id] } : {}) });
-    const turnedDown = ctx.session.shopper?.rejected ?? [];
+    // A swap they asked for: the piece is turned down for this shopping session, not for good.
+    if (outgoing) await noteShoppingConstraints(ctx.session.id, { rejected: [outgoing.id], ...(chosen ? { liked: [chosen.id] } : {}) }, 'customer-confirmation');
+    const turnedDown = shopperView(ctx.session).rejected ?? [];
     /*
      * The colour asked for this one piece, in the customer's own words first.
      * "Change the colour of trouser to white" reached here with no colour -
@@ -2404,7 +2497,6 @@ async function showDeal(
         total: recommendation.total.amount,
       },
     },
-    ...(deal.range !== 'kids' ? { preferences: { audience: deal.range } } : {}),
   });
   const lines = deal.steps
     .map((step, i) => `- ${step.title}: ${pieces[i] ? `${pieces[i]!.title} [${pieces[i]!.id}]` : 'none picked'}`)
@@ -2469,9 +2561,8 @@ const packTool = defineTool({
     const picked = await pickFromPackChoices(ctx);
     if (picked) return picked;
     const currency = args.currency ?? ctx.session.preferences.currency ?? storeCurrency();
-    const statedBudget = ctx.session.shopper?.budget;
-    const budgetAmount =
-      args.budgetAmount ?? (statedBudget?.per === 'total' ? statedBudget.amount : undefined) ?? ctx.session.preferences.budgetAmount;
+    const statedBudget = shopperView(ctx.session).budget;
+    const budgetAmount = groundedBudget(args.budgetAmount, ctx) ?? (statedBudget?.per === 'total' ? statedBudget.amount : undefined);
     // Named in their words counts, whether or not the model passed it on.
     /*
      * A colour only when the customer gave one. "The cool and wet pack" came
@@ -2482,14 +2573,13 @@ const packTool = defineTool({
     const recent = [...ctx.session.messages.filter((m) => m.role === 'user').slice(-3).map((m) => m.text), ctx.utterance ?? ''].join(' ');
     const colourGiven =
       parseColours(recent).colours.length > 0 ||
-      !!ctx.session.shopper?.colours ||
-      !!ctx.session.preferences.colour ||
+      !!shopperView(ctx.session).colours ||
       /[^\x00-\x7F]/.test(ctx.utterance ?? '');
     const askedColour = colourGiven ? colourAsked(args.colour, args.query) : undefined;
     if (!colourGiven && (args.colour || parseColours(args.query).colours.length)) {
       log.warn('pack.colour_not_given', { sessionId: ctx.session.id, colour: args.colour ?? args.query });
     }
-    const colour = askedColour ?? ctx.session.preferences.colour;
+    const colour = askedColour;
 
     const deal = await dealAnswer(args, ctx, colour, currency);
     if (deal) return deal;
@@ -2518,7 +2608,7 @@ const packTool = defineTool({
     if (named) {
       const real = await recommendNamedPack(named, {
         colour,
-        size: args.size ?? ctx.session.sizeProfile.usualSize,
+        size: args.size ?? trustedShopperFacts(ctx.session).usualSize,
       });
 
       if (real?.pack) {
@@ -2533,7 +2623,7 @@ const packTool = defineTool({
             query: args.query,
             colour: askedColour,
           },
-          preferences: { colour: askedColour, currency, audience: audienceOf(real.items) },
+          preferences: { currency },
         });
 
         return {
@@ -2552,7 +2642,7 @@ ${listFacts(real.items)}`,
     const recommendation = await recommendPack({
       query: args.query,
       colour,
-      size: args.size ?? ctx.session.sizeProfile.usualSize,
+      size: args.size ?? trustedShopperFacts(ctx.session).usualSize,
       itemCount: args.itemCount,
       ...(budgetAmount !== undefined ? { budget: { amount: budgetAmount, currency } } : {}),
     }, knownRange(ctx));
@@ -2565,7 +2655,7 @@ ${listFacts(real.items)}`,
         budgetAmount,
         colour: askedColour,
       },
-      preferences: { colour: askedColour, budgetAmount, currency, audience: audienceOf(recommendation.items) },
+      preferences: { currency },
     });
 
     if (recommendation.items.length === 0) return { speech: recommendation.reason };
@@ -2666,13 +2756,14 @@ const outfitTool = defineTool({
   },
   async run(args, ctx): Promise<ToolResult> {
     const currency = args.currency ?? ctx.session.preferences.currency ?? storeCurrency();
-    const budgetAmount = args.budgetAmount ?? ctx.session.preferences.budgetAmount;
+    const heldBudget = shopperView(ctx.session).budget;
+    const budgetAmount = groundedBudget(args.budgetAmount, ctx) ?? (heldBudget?.per === 'total' ? heldBudget.amount : undefined);
     const askedColour = colourAsked(args.colour, args.seed, args.swap ? outfitShown(ctx)?.query : undefined);
-    const colour = askedColour ?? ctx.session.preferences.colour;
+    const colour = askedColour;
     const input = {
       seed: args.seed,
       colour,
-      size: args.size ?? ctx.session.sizeProfile.usualSize,
+      size: args.size ?? trustedShopperFacts(ctx.session).usualSize,
       ...(budgetAmount !== undefined ? { budget: { amount: budgetAmount, currency } } : {}),
     };
 
@@ -2774,8 +2865,8 @@ const outfitTool = defineTool({
       }
     }
 
-    const shopper = ctx.session.shopper;
-    const weather = readIntent(ctx.utterance ?? '').weather ?? shopper?.weather;
+    const shopper = shopperView(ctx.session);
+    const weather = readIntent(ctx.utterance ?? '').weather ?? shopper.weather;
     const turnedDown = shopper?.rejected ?? [];
     const aim = shopper?.budget?.per === 'total' && shopper.budget.kind === 'around' && budgetAmount === shopper.budget.amount;
     const recommendation = outgoing
@@ -2793,8 +2884,9 @@ const outfitTool = defineTool({
           ...(knownRange(ctx) ? { known: knownRange(ctx) } : {}),
         });
     // Swapped out is turned down: it is never offered again this session.
-    if (outgoing && outgoing.product.id !== chosen?.id) await rememberShopper(ctx.session.id, { rejected: [outgoing.product.id] });
-    if (chosen) await rememberShopper(ctx.session.id, { liked: [chosen.id] });
+    // A swap they asked for: for this shopping session, not for good.
+    if (outgoing && outgoing.product.id !== chosen?.id) await noteShoppingConstraints(ctx.session.id, { rejected: [outgoing.product.id] }, 'customer-confirmation');
+    if (chosen) await noteShoppingConstraints(ctx.session.id, { liked: [chosen.id] }, 'customer-confirmation');
 
     const shownOutfit = {
       kind: 'outfit' as const,
@@ -2811,8 +2903,8 @@ const outfitTool = defineTool({
     await sessions.patch(ctx.session.id, {
       lastShown: shownOutfit,
       lastOutfit: shownOutfit,
-      // What they were shown decides the range, so "what size am I" does not ask mens or womens again.
-      preferences: { colour: askedColour, budgetAmount, currency, audience: audienceOf(recommendation.pieces.map((piece) => piece.product)) },
+      // The range of what they were shown is not theirs; find_my_size reads the outfit on screen itself.
+      preferences: { currency },
     });
 
     if (outgoing && !recommendation.pieces.some((piece) => piece.slot === outgoing.slot)) {
@@ -3125,11 +3217,12 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
         .map((line) => line.productId)
         .filter((id) => !sameProduct(id, product.id))
     : [];
-  const next = await nextStep([product], { profile: ctx.session.shopper ?? {}, basketProductIds: (ctx.session.basket ?? []).map((line) => line.productId) });
+  const next = await nextStep([product], { profile: shopperView(ctx.session, ctx.utterance), basketProductIds: (ctx.session.basket ?? []).map((line) => line.productId) });
   const nextLine = next ? next.line : '';
   // Chosen is liked; what it replaces is turned down - once it is in, never before.
   const afterSuccess = async () => {
-    await rememberShopper(ctx.session.id, { liked: [product.id], ...(replacedIds.length ? { rejected: replacedIds } : {}) });
+    // In their basket through the gateway: their choice, for this shopping session.
+    await noteShoppingConstraints(ctx.session.id, { liked: [product.id], ...(replacedIds.length ? { rejected: replacedIds } : {}) }, 'customer-confirmation');
   };
   const choice = Object.values(variant.options).filter((value) => value !== 'Default Title').join(', ');
   const charge = Number((variant.price.amount * quantity).toFixed(2));
@@ -3583,7 +3676,7 @@ async function planAddPack(ctx: ToolContext, action: CommerceAction, source: Act
     const shown = ctx.session.lastShown;
     const onScreen = shown?.kind === 'pack' && shown.bundle ? allDeals().find((entry) => entry.handle === shown.bundle) : undefined;
     // An Ambassador Pack named without its conditions is the one on screen, never a guess at one.
-    const weather = readIntent(ctx.utterance ?? '').weather ?? ctx.session.shopper?.weather;
+    const weather = readIntent(ctx.utterance ?? '').weather ?? shopperView(ctx.session).weather;
     const choice = action.pack ? chooseDeal(`${action.pack} ${ctx.utterance ?? ''}`, dealRange(ctx), weather) : null;
     const named = choice && 'deal' in choice ? choice.deal : null;
     deal = named && named.handle !== onScreen?.handle ? named : onScreen;
@@ -3603,7 +3696,7 @@ async function planAddPack(ctx: ToolContext, action: CommerceAction, source: Act
      */
     const seen = deal === onScreen && shown ? null : ctx.session.packsShown?.[deal.handle]?.items.map((item) => (item.id ? productById(item.id) : null));
     if (!(deal === onScreen && shown) && !(seen?.length && seen.every(Boolean))) {
-      const built = fillDeal(deal, { size: ctx.session.sizeProfile.usualSize });
+      const built = fillDeal(deal, { size: trustedShopperFacts(ctx.session).usualSize });
       const shownDeal = await showDeal(deal, built, ctx, storeCurrency(), action.pack ?? deal.title);
       return { ok: false, reason: 'not-ready', speech: `${shownDeal.speech} Take a look first.`.trim(), facts: `The ${deal.title} had not been shown - it is on screen now. Nothing was added; ask if they want it.\n${shownDeal.facts ?? ''}` };
     }
@@ -3886,7 +3979,7 @@ const bestPicksTool = defineTool({
   },
   async run(args, ctx): Promise<ToolResult> {
     const sizes = shopperSizes(ctx.session);
-    const range: Range = parseRange(ctx.utterance ?? '').range ?? sizes?.range ?? 'men';
+    const range: Range = currentRange(ctx.session, ctx.utterance) ?? 'men';
     /*
      * The kinds their own words name. Asked only for "your best picks", the
      * model passed a garment list of its own and a limit of 12, and the screen
@@ -3929,13 +4022,16 @@ const bestPicksTool = defineTool({
 /* ---------------- note_shopper ---------------- */
 
 /**
- * What the customer told us that needs understanding rather than parsing.
+ * The model's reading of what the customer needs - kept as nothing.
  *
- * Most of the profile is read from their words by code every turn (see
- * shopper/profile.ts): budgets, colours, fit, sizes. Some of it needs a
- * reader - "a golf trip to Portugal in July" is hot weather, "I don't like the
- * look of that one" turns down a product. The model records those here, and
- * code keeps them: every later search, size and outfit uses them.
+ * Everything the profile and the shopping session hold is read from the
+ * customer's words by code (shopper/remember.ts noteCustomerWords), or comes
+ * from their own actions. This tool used to write whatever the model thought
+ * they meant straight into the profile as hard rules: a colour, a budget, a
+ * required feature, products turned down - none of which they had to have
+ * said (Phase 3A). Now each value is checked against their words this turn:
+ * one they said is already recorded; one they did not is a hint for this
+ * reply only, logged and never kept - never a filter, never a fact.
  */
 const noteSchema = z.object({
   occasion: z.string().max(80).optional(),
@@ -3958,7 +4054,7 @@ const noteSchema = z.object({
 const noteShopperTool = defineTool({
   name: 'note_shopper',
   description:
-    'Remember something the customer told you about what they need, when it takes understanding rather than a keyword: the occasion, the weather a place or season means ("Portugal in July" is hot), products they liked or turned down (by id), that they only want this one thing ("just the jacket"), or a budget\'s kind ("max" is a hard limit, "around" is near it, "ideal" is a wish; per item or total). Call it alongside your other tools; say nothing about it to the customer.',
+    'Check what you understood the customer to need against what they actually said: the occasion, the weather a place or season means ("Portugal in July" is hot), products they liked or turned down, "just the jacket", a budget\'s kind. What they said in their own words is already recorded; anything else comes back as a guess, which is never kept and never treated as their requirement. Returns what is known about them. Call it alongside your other tools; say nothing about it to the customer.',
   schema: noteSchema,
   parameters: {
     type: 'object',
@@ -3992,31 +4088,46 @@ const noteShopperTool = defineTool({
     required: [],
   },
   async run(args, ctx): Promise<ToolResult> {
-    const existing = ctx.session.shopper?.features;
-    const update = {
-      ...(args.occasion ? { occasion: args.occasion } : {}),
-      ...(args.weather?.length ? { weather: args.weather } : {}),
-      ...(args.fit ? { fit: args.fit } : {}),
-      ...(args.layering !== undefined ? { layering: args.layering } : {}),
-      ...(args.colours ? { colours: { words: args.colours.words.map((w) => w.toLowerCase()), strength: args.colours.strength } } : {}),
-      ...(args.avoidColours?.length ? { avoidColours: args.avoidColours.map((w) => w.toLowerCase()) } : {}),
-      ...(args.requiredFeatures || args.preferredFeatures
-        ? {
-            features: {
-              required: args.requiredFeatures ?? existing?.required ?? [],
-              preferred: args.preferredFeatures ?? existing?.preferred ?? [],
-            },
-          }
-        : {}),
-      ...(args.budget ? { budget: args.budget } : {}),
-      ...(args.liked?.length ? { liked: args.liked } : {}),
-      ...(args.rejected?.length ? { rejected: args.rejected } : {}),
-      ...(args.justThis ? { justThis: args.justThis } : args.clearJustThis ? { justThis: '' } : {}),
-    };
-    const profile = await rememberShopper(ctx.session.id, update);
+    const said = ctx.utterance ?? '';
+    const words = readIntent(said);
+    const asked = new Set<Feature>([...featuresAsked(said), ...(words.features?.required ?? []), ...(words.features?.preferred ?? [])]);
+    const within = (values: string[] | undefined, pool: string[] | undefined) => !!values?.length && values.every((value) => (pool ?? []).includes(value.toLowerCase()));
+    // Each proposal, and whether their own words this turn carry it.
+    const proposals: Array<[string, unknown, boolean]> = [
+      ['weather', args.weather, within(args.weather, words.weather)],
+      ['fit', args.fit, !!args.fit && args.fit === words.fit],
+      ['layering', args.layering, args.layering !== undefined && args.layering === !!words.layering],
+      ['colours', args.colours, within(args.colours?.words, words.colours?.words)],
+      ['avoidColours', args.avoidColours, within(args.avoidColours, words.avoidColours)],
+      ['requiredFeatures', args.requiredFeatures, !!args.requiredFeatures?.length && args.requiredFeatures.every((feature) => asked.has(feature))],
+      ['preferredFeatures', args.preferredFeatures, !!args.preferredFeatures?.length && args.preferredFeatures.every((feature) => asked.has(feature))],
+      ['budget', args.budget, !!args.budget && words.budget?.amount === args.budget.amount],
+      ['justThis', args.justThis ?? (args.clearJustThis ? '' : undefined), (args.justThis !== undefined || !!args.clearJustThis) && words.justThis !== undefined],
+      // Which product "that one" was is the model's reading: a turned-down product needs their action (a swap, a basket change).
+      ['occasion', args.occasion, false],
+      ['liked', args.liked?.length ? args.liked : undefined, false],
+      ['rejected', args.rejected?.length ? args.rejected : undefined, false],
+    ];
+    const hints: string[] = [];
+    for (const [field, value, theirs] of proposals) {
+      if (value === undefined || (Array.isArray(value) && !value.length)) continue;
+      // Said by them: code has already recorded it this turn. Not said: a guess, and guesses are not kept.
+      if (!theirs) {
+        logFact(ctx.session.id, field, 'model-hint', 'turn', false, value, 'not in the customer’s words');
+        hints.push(field);
+      }
+    }
+    const known = describeShopper(await sessions.getOrCreate(ctx.session.id), ctx.session.preferences.currency ?? storeCurrency());
     return {
       speech: '',
-      facts: `Noted. ${describeProfile(profile, ctx.session.preferences.currency ?? storeCurrency()) ?? ''}`.trim(),
+      facts: [
+        known ?? 'Nothing recorded about them yet.',
+        hints.length
+          ? `Not kept, because the customer did not say it: ${hints.join(', ')}. At most a guess for this reply - never a requirement, never a reason to leave something out, and never repeated to them as something they said.`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
     };
   },
 });

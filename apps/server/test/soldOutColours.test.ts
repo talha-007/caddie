@@ -62,7 +62,7 @@ const colours = async (utterance = 'Show me different colours', args: Record<str
 
 describe('other colours: only what they can buy', () => {
   it('in their size S: grey (sold out in S) and jade (sold out) are not shown, and not counted', async () => {
-    await rememberShopper(id, { usualSize: 'S' });
+    await rememberShopper(id, { usualSize: 'S' }, 'customer-words');
     const { result, titles } = await colours();
     expect(titles.sort()).toEqual(['ELITE POLO - NAVY', 'ELITE POLO - WHITE']);
     expect(result.speech).not.toMatch(/4 colourways|grey|jade/i);
@@ -75,7 +75,7 @@ describe('other colours: only what they can buy', () => {
   });
 
   it('"does it come in grey?" in S: no - the grey cannot be bought in S', async () => {
-    await rememberShopper(id, { usualSize: 'S' });
+    await rememberShopper(id, { usualSize: 'S' }, 'customer-words');
     const { result, titles } = await colours('Does it come in grey?', { productId: WHITE.id, colour: 'grey' });
     expect(titles).toEqual([]);
     expect(result.speech).toMatch(/do not have the ELITE POLO in grey/);
@@ -85,7 +85,7 @@ describe('other colours: only what they can buy', () => {
     setCatalogueForTests([polo('RED', ['M']), polo('BLUE', ['M'])]);
     const red = (await import('../src/catalog/sync.js')).allProducts()[0]!;
     await sessions.patch(id, { lastShown: { kind: 'products', items: [{ id: red.id, title: red.title }] } });
-    await rememberShopper(id, { usualSize: 'M' });
+    await rememberShopper(id, { usualSize: 'M' }, 'customer-words');
     const { result, titles } = await colours('Show me different colours', { productId: red.id });
     expect(titles).toEqual([]);
     expect(result.speech).toMatch(/isn't in stock in M in any colour/);

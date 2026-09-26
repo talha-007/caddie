@@ -1,5 +1,6 @@
 import type { CaddieMessage, PageContext, SizeInput } from '@caddie/shared';
 import { redisEnabled, redisUsable } from '../lib/redis.js';
+import type { SizeRecommendationRecord } from '../shopper/facts.js';
 import type { ShopperProfile } from '../shopper/profile.js';
 import type { ShoppingFocus } from './focus.js';
 
@@ -56,8 +57,16 @@ export interface CaddieSession {
   }>;
   /** Packs the Caddie has put in the store cart, so a change replaces one rather than adding another. */
   packsAdded?: Array<{ handle: string; bundleId: string }>;
-  /** Everything we have learned about fit. */
+  /**
+   * Measurements the customer gave (height, weight, chest, waist), with their
+   * provenance in shopper.provenance. `usualSize`, `fitPreference` and
+   * `audience` here are compatibility mirrors of the shopper profile, written
+   * only by rememberShopper and read by nothing that decides (Phase 3A;
+   * removed in 3B).
+   */
   sizeProfile: SizeInput;
+  /** The size the Caddie last worked out - advice, never their size. See shopper/facts.ts. */
+  sizeRecommendation?: SizeRecommendationRecord;
   /**
    * Last thing we showed, so "that one" and "cheaper" resolve.
    *
@@ -169,6 +178,11 @@ export interface CaddieSession {
    * field, so a stated "no longer" can remove something.
    */
   shopper?: ShopperProfile;
+  /**
+   * `currency` is live. `colour` and `budgetAmount` are no longer written, and
+   * `audience` only mirrors the shopper profile's range - nothing reads them
+   * as the customer's (Phase 3A; removed in 3B).
+   */
   preferences: {
     colour?: string;
     budgetAmount?: number;

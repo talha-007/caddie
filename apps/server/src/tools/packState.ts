@@ -3,6 +3,7 @@ import { sizeInRequest } from '../catalog/constraints.js';
 import { productById } from '../catalog/sync.js';
 import { normaliseSize, optionValueMatches } from '../recommend/sizeWords.js';
 import type { CaddieSession } from '../session/store.js';
+import { trustedShopperFacts } from '../shopper/facts.js';
 import { readIntent } from '../shopper/profile.js';
 
 /**
@@ -55,6 +56,8 @@ export interface PackStatus {
   choices: PackChoices;
   /** The one thing to ask next, in a short sentence - empty when ready. */
   next: string;
+  /** Sizes standing in from the usual size they told us, not chosen for this pack. */
+  fromProfile?: { top?: string; waist?: string };
 }
 
 const WAIST = /\bwaist(?:\s*size)?\s*(?:is\s*|of\s*|:\s*)?(\d{2})\b|\b(\d{2})\s*(?:"|in|inch(?:es)?)?\s*waist\b/i;
@@ -85,7 +88,14 @@ function valuesFor(pieces: Product[], kind: Kind): string[] {
  * against the pieces: one they come in is confirmed; one they do not is kept
  * as requested and left open.
  */
-export function readPackChoices(said: string, lastReply: string, pieces: Product[], before: PackChoices = {}): PackChoices {
+export function readPackChoices(
+  said: string,
+  lastReply: string,
+  pieces: Product[],
+  before: PackChoices = {},
+  /** A recommended size the customer has just accepted ("use that size") - theirs now, for this pack. */
+  accepted?: { top?: string; waist?: string },
+): PackChoices {
   const text = said.toLowerCase();
   const next: PackChoices = { ...before, requested: { ...(before.requested ?? {}) } };
   const set = (kind: 'top' | 'waist' | 'leg', value: string) => {
@@ -128,6 +138,8 @@ export function readPackChoices(said: string, lastReply: string, pieces: Product
     const alone = normaliseSize(text.replace(/\b(please|thanks|in|size|a|an|the|for the tops?|tops?)\b/g, ' ').replace(/[^a-z0-9\s]/g, ' ').trim());
     if (alone && !/^\d/.test(alone)) set('top', alone);
   }
+  if (accepted?.top && !next.top && !next.requested?.top) set('top', accepted.top);
+  if (accepted?.waist && !next.waist && !next.requested?.waist) set('waist', accepted.waist);
   if (!Object.keys(next.requested!).length) delete next.requested;
   return next;
 }
@@ -135,9 +147,14 @@ export function readPackChoices(said: string, lastReply: string, pieces: Product
 /** Each piece resolved against the confirmed choices - and whether the pack is ready. */
 export function packStatus(session: CaddieSession, handle: string, pieces: Product[] = packPieces(session, handle)): PackStatus {
   const choices = session.packChoices?.[handle] ?? {};
-  // Their usual size stands for the tops until they say otherwise: stated, or measured by find_my_size.
-  const top = choices.top ?? session.shopper?.usualSize ?? session.sizeProfile.usualSize;
-  const waist = choices.waist ?? session.shopper?.waist;
+  /*
+   * The usual size they told us stands for the tops until they say otherwise
+   * (Task 28). A size find_my_size recommended does not: it is our advice,
+   * and becomes the pack's only when they accept it (readPackChoices).
+   */
+  const facts = trustedShopperFacts(session);
+  const top = choices.top ?? facts.usualSize;
+  const waist = choices.waist ?? facts.waist;
 
   const plans: PiecePlan[] = pieces.map((product, index) => {
     const tapped = session.cardChoices?.[product.id]?.options ?? {};
@@ -168,7 +185,14 @@ export function packStatus(session: CaddieSession, handle: string, pieces: Produ
   });
 
   const ready = plans.length > 0 && plans.every((plan) => plan.variant && !plan.soldOut);
-  return { ready, pieces: plans, choices: { ...choices, ...(top ? { top } : {}), ...(waist ? { waist } : {}) }, next: ready ? '' : nextQuestion(plans, { ...choices, ...(top ? { top } : {}), ...(waist ? { waist } : {}) }) };
+  const fromProfile = { ...(!choices.top && top ? { top } : {}), ...(!choices.waist && waist ? { waist } : {}) };
+  return {
+    ready,
+    pieces: plans,
+    ...(Object.keys(fromProfile).length ? { fromProfile } : {}),
+    choices: { ...choices, ...(top ? { top } : {}), ...(waist ? { waist } : {}) },
+    next: ready ? '' : nextQuestion(plans, { ...choices, ...(top ? { top } : {}), ...(waist ? { waist } : {}) }),
+  };
 }
 
 const title = (text: string) => text.toLowerCase().replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
@@ -222,9 +246,16 @@ function nextQuestion(plans: PiecePlan[], choices: PackChoices): string {
 
 /** The pack's state for the model: what is confirmed, what is not, and the one thing to ask. */
 export function packStatusFacts(status: PackStatus): string {
-  const confirmed = [status.choices.top ? `top ${status.choices.top}` : '', status.choices.waist ? `waist ${status.choices.waist}` : '', status.choices.leg ? `leg ${status.choices.leg}` : '']
+  const profiled = status.fromProfile ?? {};
+  const confirmed = [
+    status.choices.top && !profiled.top ? `top ${status.choices.top}` : '',
+    status.choices.waist && !profiled.waist ? `waist ${status.choices.waist}` : '',
+    status.choices.leg ? `leg ${status.choices.leg}` : '',
+  ]
     .filter(Boolean)
     .join(', ');
+  // Their usual size stands in for the pack (Task 28) - said as theirs, never as a choice they made for it.
+  const usual = [profiled.top ? `top ${profiled.top}` : '', profiled.waist ? `waist ${profiled.waist}` : ''].filter(Boolean).join(', ');
   if (status.ready) {
     return `Pack status: READY - every piece chosen and in stock (${status.pieces.map((plan) => `${plan.product.title}${Object.values(plan.chosen).length ? ` ${Object.values(plan.chosen).join('/')}` : ''}`).join('; ')}). Offer to add it in one short question.`;
   }
@@ -241,6 +272,7 @@ export function packStatusFacts(status: PackStatus): string {
   return [
     `Pack status: NOT READY - never say it is ready or complete, and never add it.`,
     confirmed ? `Confirmed, do not ask again: ${confirmed}.` : '',
+    usual ? `From the usual size they told us (do not ask again; they may change it): ${usual}.` : '',
     requested.length ? `Requested but unavailable: ${requested.join('; ')}.` : '',
     open.length ? `Open: ${open.join('; ')}.` : '',
     `Ask only this: "${status.next}"`,

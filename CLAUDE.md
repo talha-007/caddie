@@ -191,7 +191,7 @@ The model runs the conversation; code decides what is true and what is best.
 
 | | Where | What it does |
 | --- | --- | --- |
-| **Shopper profile** | `src/shopper/` | Budget (max / around / ideal, per item or total), colours (required or preferred), avoided colours, fit, layering, usual size, weather, features, liked and turned-down products, "just the jacket". Read from every message by code (`readIntent`), and by the model through `note_shopper` for what needs interpreting. Shown to the model each turn. |
+| **Shopper facts** | `src/shopper/` | Three things, never promoted one into another. **Durable facts** (`session.shopper`, each with its `provenance`): usual size, waist, range, standing colours, fit, budget, weather, measurements - only from the customer's words (`durablePart`), the size form or quick start. **Current intent**: this turn's words, then the shopping focus and its `constraints` (budget, colour rule, fit, features, liked/turned down) - gone with New chat. **Recommendations**: `session.sizeRecommendation`, advice only. Read through `trustedShopperFacts` / `currentShoppingIntent` / `shopperView` in `facts.ts`, never field by field. `note_shopper` writes nothing: a model's reading is a hint for one reply. |
 | **Verified attributes** | `src/catalog/attributes.ts` | Waterproof, breathable, stretch, cut, fabric - read from Shopify's own title and description only. |
 | **Taxonomy** | `src/catalog/taxonomy.ts` | "Rain top" searches jackets and requires waterproof; "jumper" searches midlayers. Every other word is kept. |
 | **Ranking** | `src/recommend/rank.ts` | Each result is exact, strong or partial against the profile, with a reason made only of verified facts. |
@@ -199,10 +199,13 @@ The model runs the conversation; code decides what is true and what is best.
 | **Sizing** | `src/recommend/size.ts` | Chart first, then fit: a loose fit, layering or a close-cut garment only moves the size in the top half of the band; otherwise it is the alternative, with its reason. Confidence is high, medium or estimate. |
 | **Next step** | `src/recommend/nextStep.ts` | One cross-sell that completes the purpose, or a deal saving with both prices from Shopify. None after "just the jacket". |
 
-**A colour or feature for this request is not a standing rule.** "Show me blue
-polos" filters that search; "only navy" filters every later one; "I'd prefer
-navy" only ranks. `standingPart` decides what is remembered - remembering
-every colour turned later jackets blue.
+**A colour or feature for this request is not a standing rule, and a size we
+recommended is not their size.** "Show me blue polos" filters that search;
+"only navy" holds for this shopping session; "I usually wear navy" is theirs.
+`durablePart` decides what is remembered about them - remembering every
+colour turned later jackets blue, and saving find_my_size's answer as their
+usual size made every picker, search and pack use it. A profile value with no
+trusted provenance is not read as a fact.
 
 **Never call a product something its description does not say.** A title
 containing "RAINSUIT" is not evidence of waterproofing. If a feature matters

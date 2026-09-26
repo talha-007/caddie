@@ -1,4 +1,5 @@
 import type { CaddieSession } from '../session/store.js';
+import { trustedShopperFacts } from '../shopper/facts.js';
 
 /**
  * A deliberately dumb keyword router, used only when no Vapi keys are present.
@@ -91,7 +92,7 @@ export function route(text: string, session: CaddieSession): DevIntent | null {
         seed: text,
         ...(budget(lower) !== undefined ? { budgetAmount: budget(lower) } : {}),
         ...(colour(lower) ? { colour: colour(lower) } : {}),
-        ...(session.sizeProfile.usualSize ? { size: session.sizeProfile.usualSize } : {}),
+        ...(trustedShopperFacts(session).usualSize ? { size: trustedShopperFacts(session).usualSize } : {}),
         ...(CURRENCY_HINT.test(text) ? { currency: 'GBP' } : {}),
       },
     };
@@ -105,7 +106,7 @@ export function route(text: string, session: CaddieSession): DevIntent | null {
         query: text,
         ...(budget(lower) !== undefined ? { budgetAmount: budget(lower) } : {}),
         ...(colour(lower) ? { colour: colour(lower) } : {}),
-        ...(session.sizeProfile.usualSize ? { size: session.sizeProfile.usualSize } : {}),
+        ...(trustedShopperFacts(session).usualSize ? { size: trustedShopperFacts(session).usualSize } : {}),
       },
     };
   }

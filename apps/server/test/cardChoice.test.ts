@@ -116,7 +116,7 @@ describe('"add it" after tapping M', () => {
 
   it('the card wins over the size the model took from their profile, and the profile stays XL', async () => {
     const id = await shopper();
-    await rememberShopper(id, { usualSize: 'XL' });
+    await rememberShopper(id, { usualSize: 'XL' }, 'customer-words');
     await tap(id, TEX, { Size: 'M' });
     const { variantIds } = await add(id, { productId: TEX.id, options: { Size: 'XL' } }, 'Add it.');
     expect(variantIds).toEqual(['102']);

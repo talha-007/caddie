@@ -97,7 +97,7 @@ describe('the quick start', () => {
   it('is remembered, sent back to the widget, and best picks use it', async () => {
     const id = `quick-${Math.random()}`;
     await sessions.getOrCreate(id);
-    await rememberShopper(id, { range: 'men', usualSize: 'L', waist: '34' });
+    await rememberShopper(id, { range: 'men', usualSize: 'L', waist: '34' }, 'customer-words');
     const session = await sessions.getOrCreate(id);
     expect(shopperSizes(session)).toEqual({ range: 'men', size: 'L', waist: '34' });
 

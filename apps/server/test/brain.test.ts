@@ -11,6 +11,7 @@ import { slotWeight } from '../src/recommend/outfit.js';
 import { rankProducts } from '../src/recommend/rank.js';
 import { categoryForProduct, recommendSize } from '../src/recommend/size.js';
 import { sessions } from '../src/session/store.js';
+import { rememberShopper } from '../src/shopper/remember.js';
 import { describeProfile, mergeProfile, readIntent, standingPart } from '../src/shopper/profile.js';
 import { runTool } from '../src/tools/index.js';
 
@@ -418,7 +419,9 @@ describe('search_products with a shopper profile', () => {
   });
 
   it('a hard per-item budget from earlier is kept on the next search', async () => {
-    const session = await sessions.patch(id, { shopper: { budget: { amount: 50, kind: 'max', per: 'item' }, usualSize: 'XL' } });
+    // Said as theirs: "I usually spend no more than £50 a garment, I'm usually XL".
+    await rememberShopper(id, { budget: { amount: 50, kind: 'max', per: 'item' }, usualSize: 'XL' }, 'customer-words');
+    const session = await sessions.getOrCreate(id);
     const result = await runTool('search_products', { query: 'polo' }, { session, utterance: 'show me another polo' });
     const shown = result.attachment?.kind === 'products' ? result.attachment.products : [];
     expect(shown.length).toBeGreaterThan(0);

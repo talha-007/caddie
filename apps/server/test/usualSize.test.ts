@@ -4,7 +4,7 @@ import { setDealsForTests } from '../src/catalog/bundles.js';
 import { setCatalogueForTests } from '../src/catalog/sync.js';
 import { env } from '../src/env.js';
 import { readIntent, standingPart } from '../src/shopper/profile.js';
-import { rememberShopper } from '../src/shopper/remember.js';
+import { noteCustomerWords, rememberShopper } from '../src/shopper/remember.js';
 import { sessions } from '../src/session/store.js';
 import { runTool } from '../src/tools/index.js';
 
@@ -40,7 +40,7 @@ async function customer(...said: string[]) {
   const id = `usual-${Math.random()}`;
   await sessions.getOrCreate(id);
   await sessions.patch(id, { cartMode: 'theme' });
-  for (const text of said) await rememberShopper(id, standingPart(readIntent(text)));
+  for (const text of said) await noteCustomerWords(id, text);
   return id;
 }
 
@@ -95,7 +95,7 @@ describe('a usual size they said is stored', () => {
 
   it('"I\'m usually M now" changes it, through the tool as well', async () => {
     const id = await customer("I'm usually XL");
-    await rememberShopper(id, standingPart(readIntent("I'm usually M now.")));
+    await noteCustomerWords(id, "I'm usually M now.");
     await sizeTool(id, { usualSize: 'M' }, "I'm usually M now.");
     expect(await usual(id)).toBe('M');
   });
@@ -109,12 +109,13 @@ describe('a usual size they said is stored', () => {
   });
 });
 
-describe('a size worked out from their measurements is stored, as before', () => {
-  it('height and weight: the recommended size becomes theirs', async () => {
+describe('a size worked out from their measurements is a recommendation, not their size (Phase 3A)', () => {
+  it('height and weight: the recommended size is kept beside them, never as their usual size', async () => {
     const id = await customer();
     const result = await sizeTool(id, { heightValue: 180, heightUnit: 'cm', weightValue: 80, weightUnit: 'kg', audience: 'men' }, "I'm 180cm and 80kg, what size am I?");
     expect(result.attachment?.kind).toBe('size');
-    expect(await usual(id)).toMatch(/^(S|M|L|XL|2XL)$/);
+    expect(await usual(id)).toBeUndefined();
+    expect((await sessions.getOrCreate(id)).sizeRecommendation?.size).toMatch(/^(S|M|L|XL|2XL)$/);
   });
 
   it('with measurements, an unsupported usual size is set aside but the sizing still runs', async () => {
@@ -136,7 +137,7 @@ describe('waist', () => {
 
   it('so "add the 34 waist" leaves a remembered 36 alone', async () => {
     const id = await customer('I have a 36 waist');
-    await rememberShopper(id, standingPart(readIntent('Add the 34 waist')));
+    await noteCustomerWords(id, 'Add the 34 waist');
     expect((await sessions.getOrCreate(id)).shopper?.waist).toBe('36');
   });
 });
