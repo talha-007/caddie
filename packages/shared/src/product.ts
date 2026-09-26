@@ -41,6 +41,12 @@ export interface ProductOption {
 export interface Product {
   id: string;
   title: string;
+  /**
+   * Shopify's handle, "elite-polo-navy". Optional: the server's catalogue
+   * mirror fills it, and it is used to match a product by name. The widget
+   * does not need it.
+   */
+  handle?: string;
   url: string;
   imageUrl: string | null;
   vendor: string | null;
