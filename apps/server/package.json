@@ -12,6 +12,8 @@
     "sync:assistant": "tsx scripts/syncAssistant.ts",
     "publish:profile": "node scripts/publishAgentProfile.mjs",
     "eval:model": "node scripts/evalModel.mjs",
+    "cert:harness": "tsx scripts/certification/harness.ts",
+    "cert:run": "node scripts/certification/run.mjs",
     "webhooks": "node scripts/registerWebhooks.mjs",
     "semantic-search": "tsx scripts/semanticSearch.ts"
   },
