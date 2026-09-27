@@ -198,7 +198,7 @@ describe('a swap that changes the price', () => {
     setDealsForTests([{ ...base, steps: [{ ...base.steps[0]!, productIds: new Set(['gid://shopify/Product/1', 'gid://shopify/Product/3']) }, base.steps[1]!] }]);
     const id = `swap-${Math.random()}`;
     await sessions.patch(id, { cartMode: 'theme' });
-    const first = await runTool('recommend_pack', { query: 'ambassador pack mixed conditions' }, { session: await sessions.getOrCreate(id), utterance: 'the mixed one' });
+    const first = await runTool('recommend_pack', { query: 'ambassador pack mixed conditions' }, { session: await sessions.getOrCreate(id), utterance: 'the mixed conditions pack please' });
     expect(first.facts).not.toContain('This change takes it');
     const lead = first.attachment?.kind === 'pack' ? first.attachment.recommendation.items[0]!.id : '';
     const before = lead.endsWith('/3') ? '£129.99' : '£120';

@@ -4,7 +4,8 @@ import { FEATURE_LABEL, SHAPES, SHAPE_FEATURES, STRONGER, attributesOf, features
 export { shapesOf, shapesSaid, strongerOf, strongerSaid } from '../catalog/attributes.js';
 import { colourMatch, isColourWord, parseColours } from '../catalog/colour.js';
 import { garmentName } from '../catalog/colourways.js';
-import { sizeScale, supportsSize } from '../catalog/commerce.js';
+import { isBuyable, sizeScale, supportsSize } from '../catalog/commerce.js';
+import { parseRange, rangeOf } from '../catalog/audience.js';
 import { categoriesAsked, isCategory } from '../catalog/constraints.js';
 import { normaliseSize } from '../recommend/sizeWords.js';
 import { distinctiveWords } from '../catalog/lookup.js';
@@ -114,6 +115,7 @@ export function verifyReply(reply: string, evidence: string, attachment?: Caddie
   // What each product is said to be - features, fit - held to its own data, never to what was asked.
   violations.push(...unsupportedAttributes(reply, productsInEvidence(products, evidence), products[0]));
   violations.push(...stockClaims(reply, productsInEvidence(products, evidence), products));
+  violations.push(...absenceClaims(reply));
   violations.push(...sizeRequests(reply, [...new Map([...productsInEvidence(products, evidence), ...(context.screen ?? [])].map((product) => [product.id, product])).values()], context.sizeSettled));
   violations.push(...salesWording(reply, products));
   violations.push(...priceComparisons(reply, evidence));
@@ -438,6 +440,33 @@ export function stockClaims(reply: string, products: Product[], card: Product[])
     }
   }
   return [...new Map(found.map((violation) => [violation.claim, violation])).values()];
+}
+
+/* ---------------- "We don't have ..." ---------------- */
+
+const ABSENCE = /\b(?:we\s+)?(?:don'?t|do not|doesn'?t|does not)\s+(?:currently\s+)?(?:have|stock|carry|sell|do)\s+(?:any\s+)?((?:[a-z']+\s+){0,3}?)(polos?|jackets?|gilets?|midlayers?|hoodies?|trousers|joggers|shorts|skorts?|caps?|belts?|socks)\b|\bthere (?:are|is) no\s+((?:[a-z']+\s+){0,3}?)(polos?|jackets?|gilets?|midlayers?|hoodies?|trousers|joggers|shorts|skorts?|caps?|belts?|socks)\b/gi;
+
+/**
+ * "We don't have red jackets" - said while the red Warrior Jacket was on the
+ * shelf (certification). A claim that the store has none of a colour of a
+ * kind is checked against the whole catalogue, through the same readers
+ * search uses (kind, range, colour, in stock); one product that fits makes
+ * it false.
+ */
+export function absenceClaims(reply: string): Violation[] {
+  const found: Violation[] = [];
+  for (const match of reply.matchAll(new RegExp(ABSENCE.source, ABSENCE.flags))) {
+    const words = (match[1] ?? match[3] ?? '').trim();
+    const kinds = categoriesAsked(match[2] ?? match[4] ?? '');
+    const { colours } = parseColours(words);
+    if (!colours.length || !kinds.length) continue;
+    const range = parseRange(words).range;
+    const exists = allProducts().some(
+      (product) => isBuyable(product) && isCategory(product, kinds) && (range ? rangeOf(product) === range : rangeOf(product) !== 'kids') && colourMatch(product, colours, true) > 0,
+    );
+    if (exists) found.push({ kind: 'stock', claim: match[0] });
+  }
+  return found;
 }
 
 /* ---------------- Size questions ---------------- */

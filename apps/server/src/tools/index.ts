@@ -19,7 +19,7 @@ import {
 } from '../catalog/hybrid.js';
 import { conceptKindsInQuery, topKindsFor, type Climate } from '../catalog/concepts.js';
 import { colourAsked, intentDiagnostics, rememberedWhenEchoed, resolveSearchIntent, sizesNeverGiven } from './searchIntent.js';
-import { asksToRemove, cartAuthorization, offerSentence, offeredAction, quantityAsked, quantityInWords } from './cartAuthorization.js';
+import { asksToAdd, asksToRemove, cartAuthorization, lineChangeAuthorization, offerSentence, offeredAction, quantityAsked, quantityInWords } from './cartAuthorization.js';
 import { executeCommerceAction, registerPlanner, type ActionOutcome, type ActionPlan, type ActionSource, type CommerceAction } from './actionGateway.js';
 import { packStatus, packStatusFacts, readPackChoices } from './packState.js';
 
@@ -36,7 +36,7 @@ import { answerAbout, attributesAsked, describeStock, sayAttributes, verifiedFac
 import { resolveProduct } from '../session/screen.js';
 import { describeFocus, designOf, focusProduct, focusQuery, inFocus, isFollowUp } from '../session/focus.js';
 import { describeIdentity, designMembers, identityProducts, resolveCustomerProductIdentity, type CustomerIdentity, type NamedDesign } from '../catalog/productIdentity.js';
-import { colourMatch, coloursOffered, matchesColourText, parseColours } from '../catalog/colour.js';
+import { colourMatch, coloursOffered, matchesColourText, parseColours, type ColourRequest } from '../catalog/colour.js';
 import { allDeals, type DealRecipe, type DealStep } from '../catalog/bundles.js';
 import { log } from '../lib/logger.js';
 import { checkoutTotal, storefrontCartEnabled } from '../shopify/storefrontCart.js';
@@ -1897,6 +1897,9 @@ function chooseDealMatches(proposed: string, deal: DealRecipe): boolean {
   return !!found && (('deal' in found && found.deal.handle === deal.handle) || ('ask' in found && found.ask.includes(deal)));
 }
 
+/** Words that ask for a pack or a selection of things, not one garment. */
+const PACK_REQUEST = /\b(packs?|bundles?|deals?|kits?|sets?|a few (things|bits|pieces)|several (things|pieces)|some (things|bits|pieces)|essentials|basics|starter|everything I need|whole (kit|lot|outfit)|selection)\b/i;
+
 /* ---------------- recommend_pack ---------------- */
 
 const packSchema = z.object({
@@ -2635,6 +2638,32 @@ const packTool = defineTool({
   async run(args, ctx): Promise<ToolResult> {
     const picked = await pickFromPackChoices(ctx);
     if (picked) return picked;
+    /*
+     * A pack only when they asked for one: a pack or deal by name, a kit, a
+     * few things, a total budget - or a change to the pack in hand. "Is it
+     * waterproof?" about a polo once brought up the Cool & Wet pack, because
+     * the model heard rain (certification). Their question is answered
+     * instead.
+     */
+    const asked = ctx.utterance ?? '';
+    const lastSaid = [...ctx.session.messages].reverse().find((message) => message.role === 'assistant')?.text ?? '';
+    const wantsPack =
+      ctx.direct ||
+      !asked.trim() ||
+      // "The mixed one", answering "which Ambassador Pack?".
+      namesADeal(lastSaid) ||
+      /\bpacks?\b/i.test(lastSaid) ||
+      !!args.swap ||
+      !!currentPack(ctx.session) ||
+      // "Waterproof" alone names the Rainsuit deal to the deal picker - as a question about a polo it asks for no pack.
+      namesADeal(asked.replace(/\bwater ?proof\b/gi, ' ')) ||
+      asksForDeals(asked) ||
+      PACK_REQUEST.test(asked) ||
+      readIntent(asked).budget?.per === 'total';
+    if (!wantsPack) {
+      log.warn('pack.not_asked', { sessionId: ctx.session.id, said: asked.slice(0, 120) });
+      return { speech: '', facts: 'The customer did not ask for a pack - nothing was built or shown. Answer what they did ask, about what they are looking at.' };
+    }
     const currency = args.currency ?? ctx.session.preferences.currency ?? storeCurrency();
     const statedBudget = shopperView(ctx.session).budget;
     const budgetAmount = groundedBudget(args.budgetAmount, ctx) ?? (statedBudget?.per === 'total' ? statedBudget.amount : undefined);
@@ -3107,6 +3136,19 @@ const addToCartTool = defineTool({
     // Choosing a piece for a pack on screen is a change to the pack, not the basket.
     const picked = await pickFromPackChoices(ctx);
     if (picked) return picked;
+    /*
+     * "Make it two" is a change to a line already in the basket, not an add.
+     * The model sent it here every time (certification: 5 of 5), the add was
+     * rightly refused - nobody asked to add - and the customer's request was
+     * lost. Their words ask for a quantity and not an add: it goes to the
+     * gateway as the line change it is, which reads the line and the number
+     * from their words (planUpdateLine), never from this call.
+     */
+    const said = ctx.utterance ?? '';
+    if (!ctx.direct && (ctx.session.basket ?? []).length && !asksToAdd(said) && lineChangeAuthorization(ctx) === 'customer-utterance' && !asksToRemove(said)) {
+      log.info('cart.add_as_quantity_change', { sessionId: ctx.session.id, said: said.slice(0, 80) });
+      return fromOutcome(await executeCommerceAction(ctx, { type: 'update-line', lineId: '', quantity: args.quantity ?? 1 }));
+    }
     return fromOutcome(await executeCommerceAction(ctx, { type: 'add-product', ...args }));
   },
 });
@@ -3179,10 +3221,20 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
         : `Nothing they said, tapped, were offered or were waiting on says which product. ${screen.length ? `On screen: ${screen.map((item, i) => `${i + 1}. ${item.title}`).join('; ')}.` : ''} Ask which one - never pick for them.`,
     };
   }
-  if (!(proposed && target.products.some((product) => product.id === proposed.id))) {
+  /*
+   * A design in several colours is not one product. "Add it in M" after "the
+   * Elite Polo in white or black" took white - the model's pick - every time
+   * (certification). Within a family the customer's words pin the colour, or
+   * only one of its colours is on screen; otherwise the colour is asked.
+   */
+  const inTarget = !!proposed && target.products.some((product) => product.id === proposed.id);
+  const saidColours = parseColours(ctx.utterance ?? '').colours;
+  const byColour = saidColours.length ? target.products.filter((product) => colourMatch(product, saidColours, false) > 0) : [];
+  const familyGuess = inTarget && target.products.length > 1 && !(byColour.length === 1 && byColour[0]!.id === proposed!.id);
+  if (!inTarget || familyGuess) {
     const shown = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
     const onScreen = target.products.filter((product) => shown.has(product.id));
-    const pick = target.products.length === 1 ? target.products[0]! : onScreen.length === 1 ? onScreen[0]! : null;
+    const pick = target.products.length === 1 ? target.products[0]! : byColour.length === 1 ? byColour[0]! : onScreen.length === 1 ? onScreen[0]! : null;
     log.warn('identity.rejected_model_target', { ...diagnostics, corrected: pick?.title ?? null });
     if (!pick) {
       const made = target.products.length ? target.products : proposed ? designMembers(proposed) : [];
@@ -3366,6 +3418,23 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
  * "it" for what they just added, or the only one - never the model's pick
  * alone; the quantity their words give; a pack's pieces only ever as a whole.
  */
+/** A size ("the M one", "in L", "the 34") or colours ("the navy one") that pick a basket line. */
+function lineDescriptors(said: string): { size?: string; colours: ColourRequest[] } {
+  const sized = /\b(?:the|in|size)\s+(xxs|xs|xxxl|xxl|[2-5]xl|xl|x-?large|small|medium|large|s|m|l|\d{2})\b(?!\s*(?:pack|of|pairs?|more))/i.exec(said);
+  const size = sized ? (normaliseSize(sized[1]!.replace(/-/g, ' ')) ?? undefined) : undefined;
+  return { ...(size ? { size } : {}), colours: parseColours(said).colours };
+}
+
+/** Whether a basket line is that size and colour - its own variant title, its own product's colourway. */
+function lineMatches(line: { productId: string; variantTitle: string }, wanted: { size?: string; colours: ColourRequest[] }): boolean {
+  if (wanted.size && !line.variantTitle.split(/\s*\/\s*/).some((part) => optionValueMatches(part, wanted.size!))) return false;
+  if (wanted.colours.length) {
+    const product = productById(line.productId);
+    if (!product || colourMatch(product, wanted.colours, false) === 0) return false;
+  }
+  return true;
+}
+
 async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: ActionSource): Promise<ActionPlan> {
   if (action.type !== 'update-line') throw new Error('planUpdateLine: wrong action');
   const theme = ctx.session.cartMode === 'theme';
@@ -3390,12 +3459,27 @@ async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: 
       const kinds = categoriesAsked(said);
       if (kinds.length) candidates = lines.filter((entry) => { const own = productById(entry.productId); return !!own && isCategory(own, kinds); });
     }
-    if (!candidates.length && identity.status === 'none' && !categoriesAsked(said).length) {
-      // "It", "that": the one they just added, or the one they are shopping for - or the only line there is.
-      const recent = ctx.session.lastAdded?.productId;
-      const held = ctx.session.activeShoppingContext?.productId;
-      candidates = recent ? byIds([recent]) : [];
-      if (!candidates.length && held) candidates = byIds(designMembers(productById(held) ?? ({ id: held } as Product)).map((p) => p.id));
+    /*
+     * A size or colour they name picks among the lines - "the M one", "the
+     * navy one" - and is never set aside for a guess. "Remove the M one"
+     * once took out the jacket just added, in L, beside the M polo they
+     * meant (certification). No single line fits: ask.
+     */
+    const descriptors = lineDescriptors(said);
+    if (descriptors.size || descriptors.colours.length) {
+      candidates = (candidates.length ? candidates : lines).filter((entry) => lineMatches(entry, descriptors));
+    } else if (!candidates.length && identity.status === 'none' && !categoriesAsked(said).length) {
+      /*
+       * "It", "that": whichever came last - the one they just added, or a
+       * product they have talked about since (the focus moved after the add)
+       * - or the only line there is.
+       */
+      const recent = ctx.session.lastAdded;
+      const focus = ctx.session.activeShoppingContext;
+      const heldSince = focus?.productId && (!recent || focus.turn > recent.turn) ? focus.productId : undefined;
+      if (heldSince) candidates = byIds(designMembers(productById(heldSince) ?? ({ id: heldSince } as Product)).map((p) => p.id));
+      if (!candidates.length && recent) candidates = byIds([recent.productId]);
+      if (!candidates.length && focus?.productId) candidates = byIds(designMembers(productById(focus.productId) ?? ({ id: focus.productId } as Product)).map((p) => p.id));
       if (!candidates.length && lines.length === 1) candidates = lines;
     }
     // Two lines it could be (two sizes of one polo): ask - the model's pick between them is still a guess.
@@ -3416,7 +3500,15 @@ async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: 
   // How many: a click's own number; "remove" is none; otherwise the number their words give.
   let quantity: number;
   if (source === 'ui-cart-change') quantity = action.quantity;
-  else if (asksToRemove(said)) quantity = 0;
+  else if (asksToRemove(said)) {
+    /*
+     * "Remove one" of two is one fewer, not none: it once emptied a line of
+     * two jackets, and the reply said one remained (certification). A count
+     * they give comes off; no count takes the line out.
+     */
+    const count = quantityInWords(said)?.set;
+    quantity = count !== undefined && count < line.quantity ? line.quantity - count : 0;
+  }
   else {
     const offered = source === 'customer-confirmation' ? offeredAction(ctx) : null;
     const amount = quantityInWords(said);
