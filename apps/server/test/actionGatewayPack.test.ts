@@ -88,7 +88,8 @@ beforeEach(async () => {
   await sessions.patch(id, {
     cartMode: 'theme',
     lastShown: { kind: 'pack', bundle: DEAL.handle, items: [POLO, SOCKS].map((p, i) => ({ id: p.id, title: p.title, slot: DEAL.steps[i]!.title })) },
-    packInFocus: DEAL.handle,
+    // The pack in hand (session/shoppingSession.ts), as showDeal leaves it.
+    activeShoppingContext: { kinds: [], request: '', turn: 1, source: 'explicit', pack: DEAL.handle, mission: 1, missionTurn: 1 },
     packsShown: { [DEAL.handle]: { items: [POLO, SOCKS].map((p) => ({ id: p.id, title: p.title })) } },
   });
 });

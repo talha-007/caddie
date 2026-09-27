@@ -7,6 +7,7 @@ import { productById } from '../catalog/sync.js';
 import { log } from '../lib/logger.js';
 import { logFact, trustedShopperFacts } from '../shopper/facts.js';
 import { durablePart, mergeProfile, readIntent, standingPart, type FactSource, type ShopperProfile } from '../shopper/profile.js';
+import { resolveProduct } from './screen.js';
 import { sessions, type CaddieSession } from './store.js';
 
 /**
@@ -56,6 +57,22 @@ export interface ShoppingFocus {
    * words that say so (shopper/profile.ts durablePart).
    */
   constraints?: ShoppingConstraints;
+  /**
+   * Which mission this is, counted from one. A mission is what they set out
+   * to shop for: it changes when they ask for a kind of garment they were
+   * not on, or choose a pack (Phase 3B). A size said, a waiting basket add
+   * and a pack's choices belong to the mission they were given in.
+   */
+  mission?: number;
+  /** The customer turn the mission began on. */
+  missionTurn?: number;
+  /**
+   * The pack they are putting together, by handle - the one a bare "34"
+   * answers. Set when a pack is shown or its choices are; let go when they
+   * ask for something else, choose another pack, or start a New chat. Its
+   * choices stay in packChoices; its last build in packsShown.
+   */
+  pack?: string;
 }
 
 export type ShoppingConstraints = Pick<ShopperProfile, 'colours' | 'avoidColours' | 'budget' | 'fit' | 'layering' | 'features' | 'weather' | 'liked' | 'rejected' | 'justThis'>;
@@ -71,8 +88,38 @@ export type FocusChange = 'explicit' | 'inherited' | 'none';
  */
 const FOLLOW_UP =
   /\b(different|other|others|another|more|cheaper|cheapest|less expensive|similar|like (?:this|that|these|those|it)|same|it|its|this|that|these|those|them|one|ones|sizes?|colou?rs?|colou?rways?|waterproof|water[- ]resistant|breathable|warm|stretch|in stock|price|how much|instead|else|lighter|warmer|add)\b/i;
+/**
+ * "I want something warm but sleeveless", "do you have anything for the
+ * rain": a new request in its own words, not a follow-up - unless it also
+ * carries on ("I want another one", "something cheaper"). "Warm" alone once
+ * made it a follow-up to the jackets before.
+ */
+const NEW_REQUEST = /\b(?:i (?:want|need|would like|'d like|am after|'m after|am looking for|'m looking for)|looking for|do you (?:have|sell|do)|have you got)\s+(?:something|anything|a|an|some)\b/i;
+const CARRIES_ON = /\b(another|different|other|others|cheaper|cheapest|similar|same|more like|instead|else)\b/i;
+function newRequest(text: string): boolean {
+  return NEW_REQUEST.test(text) && !CARRIES_ON.test(text);
+}
+
 /** "Different colours", "other colours": a change of colour, so any colour held so far is let go. */
 const NEW_COLOURS = /\b(different|other|another|more|new)\s+colou?r(s|ways?)?\b|\bcolou?rs?\s+(else|instead)\b/i;
+
+/**
+ * A garment named as context rather than asked for: "to wear over a hoodie",
+ * "something under my jacket", "what goes with these trousers". The layering
+ * reader still hears it (shopper/profile.ts); the focus does not take it as
+ * the kind they want. "Over a hoodie" once made hoodies the thing being
+ * shopped for.
+ */
+const GARMENT_WORD = String.raw`(?:hoodies?|jumpers?|sweaters?|sweatshirts?|jackets?|coats?|gilets?|vests?|polos?|shirts?|tees?|t-shirts?|mid-?layers?|base ?layers?|trousers|shorts|skorts?|joggers?|waterproofs?|layers?)`;
+const CONTEXT_GARMENT = new RegExp(
+  String.raw`\b(?:over|under|underneath|beneath|on top of|to go with|goes with|go with|to match|that matches|matching)\s+(?:a|an|my|the|your|his|her|their|this|that|these|those)?\s*(?:[a-z'-]+\s+){0,2}?` + GARMENT_WORD + String.raw`\b`,
+  'gi',
+);
+
+/** The kinds of garment their words ask for - sizes and contextual garments ("over a hoodie") left out. */
+export function requestedKinds(text: string): Category[] {
+  return categoriesAsked(withoutSize(text, sizeInRequest(text)).replace(CONTEXT_GARMENT, ' '));
+}
 
 /** "My usual colours", "the colours I normally wear". */
 const USUAL_COLOURS = /\b(?:my|the)\s+(?:usual|normal|regular|standard|favourite|favorite)\s+colou?rs?\b|\bcolou?rs?\s+i\s+(?:usually|normally|always)\s+wear\b/i;
@@ -116,7 +163,8 @@ export function inFocus(product: Product, focus: ShoppingFocus | undefined): boo
 export function isFollowUp(said: string): boolean {
   const text = said.trim();
   if (!text) return false;
-  if (categoriesAsked(withoutSize(text, sizeInRequest(text))).length || parseRange(text).range || productNamed(text)) return false;
+  if (requestedKinds(text).length || parseRange(text).range || productNamed(text)) return false;
+  if (newRequest(text)) return false;
   return FOLLOW_UP.test(text) || text.split(/\s+/).length <= 3;
 }
 
@@ -127,7 +175,7 @@ export function isFollowUp(said: string): boolean {
 export function readFocus(said: string, prior: ShoppingFocus | undefined, turn: number): { focus: ShoppingFocus | undefined; change: FocusChange } {
   const text = said.trim();
   if (!text) return { focus: prior, change: 'none' };
-  const kinds = categoriesAsked(withoutSize(text, sizeInRequest(text)));
+  const kinds = requestedKinds(text);
   const range = parseRange(text).range ?? undefined;
   const named = productNamed(text);
   const colours = NEW_COLOURS.test(text) ? [] : parseColours(text).colours.map((colour) => colour.word);
@@ -180,7 +228,7 @@ export function readFocus(said: string, prior: ShoppingFocus | undefined, turn: 
   if (range) return { change: 'explicit', focus: { kinds: [], range, ...(colours.length ? { colours } : {}), request: text, turn, source: 'explicit' } };
 
   // A follow-up keeps the focus, with any colour they add - and lets go of the colour on "different colours".
-  if (prior && FOLLOW_UP.test(text)) {
+  if (prior && FOLLOW_UP.test(text) && !newRequest(text)) {
     const { colours: _held, ...rest } = prior;
     const nextColours = NEW_COLOURS.test(text) ? undefined : colours.length ? colours : prior.colours;
     return { change: 'inherited', focus: { ...rest, ...(nextColours?.length ? { colours: nextColours } : {}), source: prior.source === 'card-action' ? 'card-action' : 'inherited' } };
@@ -201,7 +249,59 @@ export function focusFromCard(product: Product, prior: ShoppingFocus | undefined
     turn,
     source: 'card-action',
     ...(prior?.constraints ? { constraints: prior.constraints } : {}),
+    // A tap is not a new mission: the mission, and the pack being built, carry on.
+    ...(prior?.mission ? { mission: prior.mission, missionTurn: prior.missionTurn ?? prior.turn } : {}),
+    ...(prior?.pack ? { pack: prior.pack } : {}),
   };
+}
+
+/**
+ * A card they point at in words - "the second one", "the navy one", "that
+ * one" - is what they are talking about now. Pointed at, not merely on
+ * screen: a card being visible never moves the focus.
+ */
+function pointedAt(session: CaddieSession, said: string): Product | null {
+  // A pack's card lists the pack itself first; "the first one" there is a piece question for the pack reader.
+  if (session.lastShown?.kind === 'pack') return null;
+  const found = resolveProduct(session, said);
+  if (!found) return null;
+  if (/^(number \d|last on screen)/.test(found.how)) return found.product;
+  if (found.how.startsWith('on screen, from what they described') && /\b(one|this|that|it)\b/i.test(said)) return found.product;
+  return null;
+}
+
+function focusFromReference(product: Product, prior: ShoppingFocus | undefined, said: string, turn: number): ShoppingFocus {
+  const colours = parseColours(said).colours.map((colour) => colour.word);
+  return {
+    kinds: kindsOf(product).slice(0, 1),
+    ...(prior?.pending ? { pending: prior.pending } : {}),
+    range: rangeOf(product),
+    productId: product.id,
+    design: designOf(product.title),
+    ...(colours.length ? { colours } : {}),
+    request: said,
+    turn,
+    source: 'explicit',
+  };
+}
+
+/** Words that keep a pack in hand while naming a garment: "change the jacket", "a different polo for the pack". */
+const PACK_WORDS = /\b(pack|bundle|deal|change|swap|replace|instead|in it|for it)\b/i;
+
+/**
+ * The pack they are building, set by the tool that shows it: a new pack is a
+ * new mission, the same pack again is not.
+ */
+export async function setActivePack(sessionId: string, handle: string): Promise<void> {
+  const session = await sessions.getOrCreate(sessionId);
+  const prior = session.activeShoppingContext;
+  if (prior?.pack === handle) return;
+  const turn = customerTurn(session);
+  const focus: ShoppingFocus = prior
+    ? { ...prior, pack: handle, mission: (prior.mission ?? 1) + 1, missionTurn: turn }
+    : { kinds: [], request: '', turn, source: 'explicit', pack: handle, mission: 1, missionTurn: turn };
+  log.info('focus.pack', { sessionId, pack: handle, prior: prior?.pack ?? null, mission: focus.mission });
+  await sessions.patch(sessionId, { activeShoppingContext: focus });
 }
 
 /** The product in focus, when there is one and it still exists. */
@@ -235,9 +335,17 @@ export function focusQuery(focus: ShoppingFocus): string {
 export async function noteShoppingFocus(sessionId: string, said: string): Promise<ShoppingFocus | undefined> {
   const session = await sessions.getOrCreate(sessionId);
   const prior = session.activeShoppingContext;
-  const read = readFocus(said, prior, customerTurn(session));
-  let { focus } = read;
-  const { change } = read;
+  const turn = customerTurn(session);
+  const read = readFocus(said, prior, turn);
+  let { focus, change } = read;
+  // "The second one", "the navy one": the card they point at is what they are talking about now.
+  if (change !== 'explicit') {
+    const pointed = pointedAt(session, said);
+    if (pointed && pointed.id !== prior?.productId) {
+      focus = focusFromReference(pointed, prior, said, turn);
+      change = 'explicit';
+    }
+  }
   /*
    * The session's constraints carry through a follow-up - "another one",
    * "cheaper", "different colours" - and through a new request for the same
@@ -247,13 +355,36 @@ export async function noteShoppingFocus(sessionId: string, said: string): Promis
    * turned down (their actions, not a request). Their durable facts are
    * untouched - they apply to every mission (shopper/facts.ts).
    */
-  if (focus && prior?.constraints && focus !== prior) {
-    const fresh = newMission(prior, focus, change);
-    const { liked, rejected } = prior.constraints;
-    const constraints: ShoppingConstraints = fresh ? { ...(liked ? { liked } : {}), ...(rejected ? { rejected } : {}), ...constraintsIn(said) } : prior.constraints;
-    if (fresh) log.info('focus.new_mission', { sessionId, prior: describeFocus(prior), resolved: describeFocus(focus), dropped: Object.keys(prior.constraints).filter((key) => !(key in constraints)) });
-    focus = { ...focus, ...(Object.keys(constraints).length ? { constraints } : {}) };
-    if (!Object.keys(constraints).length) delete focus.constraints;
+  if (focus && focus !== prior) {
+    /*
+     * The mission, and the pack in hand - one definition for both. A new
+     * mission is a kind of garment they were not on, or leaving the pack they
+     * were building for a garment or product without the pack in their words.
+     * It is numbered afresh, which ends a basket add left waiting in the last
+     * one (the gateway checks it) and scopes the sizes said in it; and its
+     * constraints start again from this message (Phase 3A), keeping only the
+     * products they chose or turned down. A follow-up, the same kind again,
+     * or a change to a piece of the pack ("change the jacket") carries on.
+     */
+    const leavesPack = !!prior?.pack && change === 'explicit' && (requestedKinds(said).length > 0 || !!productNamed(said)) && !PACK_WORDS.test(said);
+    const fresh = !!prior && (newMission(prior, focus, change) || leavesPack);
+    const mission = !prior ? 1 : fresh ? (prior.mission ?? 1) + 1 : (prior.mission ?? 1);
+    const missionTurn = !prior || fresh ? turn : (prior.missionTurn ?? prior.turn);
+    let constraints = prior?.constraints;
+    if (fresh && prior?.constraints) {
+      const { liked, rejected } = prior.constraints;
+      constraints = { ...(liked ? { liked } : {}), ...(rejected ? { rejected } : {}), ...constraintsIn(said) };
+    }
+    if (fresh) log.info('focus.new_mission', { sessionId, prior: describeFocus(prior), resolved: describeFocus(focus), mission, dropped: Object.keys(prior?.constraints ?? {}).filter((key) => !(key in (constraints ?? {}))) });
+    if (leavesPack) log.info('focus.pack_left', { sessionId, pack: prior!.pack, utterance: said.slice(0, 120) });
+    const { pack: _pack, constraints: _constraints, ...rest } = focus;
+    focus = {
+      ...rest,
+      ...(constraints && Object.keys(constraints).length ? { constraints } : {}),
+      mission,
+      missionTurn,
+      ...(prior?.pack && !leavesPack ? { pack: prior.pack } : {}),
+    };
   }
   /*
    * "Go back to my usual colours": the colours they told us they wear, in
@@ -273,6 +404,8 @@ export async function noteShoppingFocus(sessionId: string, said: string): Promis
     prior: describeFocus(prior),
     resolved: describeFocus(focus),
     source: change,
+    ...(focus?.mission ? { mission: focus.mission } : {}),
+    ...(focus?.pack ? { pack: focus.pack } : {}),
     ...(focus?.pending?.length ? { pending: focus.pending } : {}),
   });
   if (focus && JSON.stringify(focus) !== JSON.stringify(prior)) await sessions.patch(sessionId, { activeShoppingContext: focus });

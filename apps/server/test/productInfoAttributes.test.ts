@@ -52,7 +52,8 @@ async function looking(on: Product[], focus?: Product) {
   await sessions.getOrCreate(id);
   await sessions.patch(id, {
     lastShown: { kind: 'products', items: on.map((p) => ({ id: p.id, title: p.title })) },
-    ...(focus ? { focusProductId: focus.id } : {}),
+    // Talking about it: the product in hand (session/shoppingSession.ts).
+    ...(focus ? { activeShoppingContext: { kinds: [], productId: focus.id, request: '', turn: 1, source: 'explicit' as const } } : {}),
   });
   return id;
 }

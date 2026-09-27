@@ -91,8 +91,8 @@ export class RedisSessionStore implements SessionStore {
     const preferences = { ...session.preferences, ...defined(patch.preferences ?? {}) };
 
     Object.assign(session, defined(patch), { sizeProfile, preferences });
-    // A new screen: "it" no longer means the product talked about on the last one.
-    if (patch.lastShown && patch.focusProductId === undefined) delete session.focusProductId;
+    // A new screen: a card tapped on the last one no longer speaks for them (shoppingSession.ts).
+    if (patch.lastShown) session.shownAt = Date.now();
     await this.save(session);
     return session;
   }

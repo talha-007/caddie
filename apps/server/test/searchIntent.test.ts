@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { trustedShopperFacts } from '../src/shopper/facts.js';
+import { noteShoppingFocus } from '../src/session/focus.js';
 import type { Product } from '@caddie/shared';
 import { setDealsForTests } from '../src/catalog/bundles.js';
 import { setCatalogueForTests } from '../src/catalog/sync.js';
@@ -62,13 +64,18 @@ async function customer(...said: string[]) {
   return id;
 }
 
+/** As converse() runs a turn: the focus read from their words first, then the tool. */
 async function resolve(args: SearchArgs, utterance: string, id?: string) {
-  const session = await sessions.getOrCreate(id ?? (await customer()));
+  const sessionId = id ?? (await customer());
+  await noteShoppingFocus(sessionId, utterance);
+  const session = await sessions.getOrCreate(sessionId);
   return resolveSearchIntent(args, { session, utterance }, readIntent(utterance));
 }
 
 async function search(args: object, utterance: string, id?: string) {
-  const session = await sessions.getOrCreate(id ?? (await customer()));
+  const sessionId = id ?? (await customer());
+  await noteShoppingFocus(sessionId, utterance);
+  const session = await sessions.getOrCreate(sessionId);
   const result = await runTool('search_products', args, { session, utterance });
   const titles = result.attachment?.kind === 'products' ? result.attachment.products.map((p) => p.title) : [];
   return { result, titles };
@@ -213,7 +220,7 @@ describe('range', () => {
     const id = await customer();
     await search({ query: 'polo', range: 'mens' }, 'Show me a polo', id);
     const session = await sessions.getOrCreate(id);
-    expect(session.preferences.audience).toBeUndefined();
+    expect(trustedShopperFacts(session).range).toBeUndefined();
   });
 });
 

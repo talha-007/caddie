@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { trustedShopperFacts } from '../src/shopper/facts.js';
+import { focusFromCard } from '../src/session/focus.js';
 import type { Product } from '@caddie/shared';
 import { setDealsForTests } from '../src/catalog/bundles.js';
 import { setCatalogueForTests } from '../src/catalog/sync.js';
@@ -56,7 +58,7 @@ describe('a size for this purchase never becomes their usual size', () => {
     const id = await customer("I'm usually XL");
     const result = await sizeTool(id, { usualSize: 'L' }, 'Add it in L.');
     expect(await usual(id)).toBe('XL');
-    expect((await sessions.getOrCreate(id)).sizeProfile.usualSize).toBe('XL');
+    expect(trustedShopperFacts(await sessions.getOrCreate(id)).usualSize).toBe('XL');
     expect(result.facts).toMatch(/L is the size they want for this purchase, not their usual size - nothing about their size was stored/);
     expect(result.facts).toMatch(/call add_to_cart with L/);
   });
@@ -70,7 +72,8 @@ describe('a size for this purchase never becomes their usual size', () => {
 
   it('a size tapped on a card is not their usual size either', async () => {
     const id = await customer("I'm usually XL");
-    await sessions.patch(id, { cardChoices: { [JACKET.id]: { options: { Size: 'M' }, at: Date.now() } }, cardFocus: JACKET.id });
+    // Tapped M on the jacket's card: that card is in hand (routes/session.ts does the same).
+    await sessions.patch(id, { cardChoices: { [JACKET.id]: { options: { Size: 'M' }, at: Date.now() + 1 } }, activeShoppingContext: focusFromCard(JACKET, (await sessions.getOrCreate(id)).activeShoppingContext, 1) });
     const session = await sessions.getOrCreate(id);
     const result = await runTool('add_to_cart', { productId: JACKET.id }, { session, utterance: 'Add it.' });
     expect(result.actions?.[0]).toMatchObject({ lines: [{ variantId: '502' }] });

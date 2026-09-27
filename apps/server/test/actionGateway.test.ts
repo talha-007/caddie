@@ -102,7 +102,7 @@ describe('product adds, from chat', () => {
   it('a card tapped, then "add it": that card, in the size tapped', async () => {
     await onScreen([ELITE_NAVY, CLIMA]);
     const session = await sessions.getOrCreate(id);
-    await sessions.patch(id, { cardChoices: { [CLIMA.id]: { options: { Size: 'S' }, at: Date.now() + 5000 } }, cardFocus: CLIMA.id, focusProductId: CLIMA.id, activeShoppingContext: focusFromCard(CLIMA, session.activeShoppingContext, 1) });
+    await sessions.patch(id, { cardChoices: { [CLIMA.id]: { options: { Size: 'S' }, at: Date.now() + 5000 } }, activeShoppingContext: focusFromCard(CLIMA, session.activeShoppingContext, 1) });
     const result = await tool('add_to_cart', { productId: ELITE_NAVY.id }, 'Add it.');
     expect(adds(result.actions)).toEqual([{ variantId: variantOf(CLIMA, 'S'), quantity: 1 }]);
   });

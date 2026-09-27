@@ -3,9 +3,10 @@ import { env } from '../env.js';
 import { UpstreamError } from '../lib/errors.js';
 import { fetchWithTimeout, Semaphore } from '../lib/http.js';
 import { log } from '../lib/logger.js';
-import { sessions, tappedSinceLastSaid, type CaddieSession } from '../session/store.js';
-import { acceptedRecommendation, describeShopper } from '../shopper/facts.js';
-import { noteCustomerWords } from '../shopper/remember.js';
+import { sessions, type CaddieSession } from '../session/store.js';
+import { tappedSinceLastSaid } from '../session/shoppingSession.js';
+import { describeShopper } from '../shopper/facts.js';
+import { readCustomerTurn } from './turn.js';
 import { runTool, toolDefinitionsForVapi } from '../tools/index.js';
 import { costOfTokens } from '../usage/pricing.js';
 import { record } from '../usage/store.js';
@@ -13,9 +14,9 @@ import { SYSTEM_PROMPT } from './prompt.js';
 import { verifyReply, withoutClaims } from './verify.js';
 import { namesADeal } from '../recommend/deals.js';
 import { productById } from '../catalog/sync.js';
-import { packPieces, readPackChoices } from '../tools/packState.js';
 import { asksToAdd } from '../tools/cartAuthorization.js';
-import { describeFocus, noteShoppingFocus } from '../session/focus.js';
+import { describeFocus } from '../session/focus.js';
+import { allDeals } from '../catalog/bundles.js';
 
 /**
  * The Caddie's brain for text chat.
@@ -177,7 +178,7 @@ export function pageContext(session: CaddieSession): ChatMessage | null {
   return { role: 'system', content: `The customer is on the ${page.pageType} page.` };
 }
 
-function screenContext(session: CaddieSession): ChatMessage | null {
+export function screenContext(session: CaddieSession): ChatMessage | null {
   const shown = session.lastShown;
   if (!shown) return null;
 
@@ -200,11 +201,13 @@ function screenContext(session: CaddieSession): ChatMessage | null {
  */
 function focusContext(session: CaddieSession): ChatMessage | null {
   const focus = session.activeShoppingContext;
-  if (!focus || (!focus.kinds.length && !focus.productId)) return null;
+  if (!focus || (!focus.kinds.length && !focus.productId && !focus.pack)) return null;
   const said = focus.request ? ` (their words: "${focus.request.slice(0, 120)}")` : '';
+  const pack = focus.pack ? ` The pack they are putting together: ${allDeals().find((deal) => deal.handle === focus.pack)?.title ?? focus.pack}.` : '';
+  const what = focus.kinds.length || focus.productId ? `What the customer is shopping for now: ${describeFocus(focus)}${said}. ` : '';
   return {
     role: 'system',
-    content: `What the customer is shopping for now: ${describeFocus(focus)}${said}. A short follow-up - different colours, another one, show me more, cheaper, what sizes, is it waterproof - is about this, not about older cards still on screen.`,
+    content: `${what}${pack}${what ? ' A short follow-up - different colours, another one, show me more, cheaper, what sizes, is it waterproof - is about this, not about older cards still on screen.' : ''}`.trim(),
   };
 }
 
@@ -336,34 +339,11 @@ export interface TurnMeta {
 
 export async function converse(sessionId: string, userText: string, meta?: TurnMeta): Promise<Reply> {
   /*
-   * What this message tells us about them - budget, colours, fit, weather -
-   * is kept before the model runs, so every tool this turn already uses it.
-   * Code reads it, not the model: it was the model's job before, and "I'm
-   * usually XL, relaxed fit, max £50" was forgotten by the next request.
-   * What is about them goes to the profile; what is about this search stays
-   * with the shopping session (shopper/remember.ts).
+   * What this message says - about them, what they are shopping for, the
+   * pack in hand - read by code before the model runs, so every tool this
+   * turn already uses it (ai/turn.ts).
    */
-  await noteCustomerWords(sessionId, userText);
-  /*
-   * "Waist 34, leg 36" said about the pack on screen is a choice for that
-   * pack - read by code, checked against what its pieces come in, before the
-   * model runs. See tools/packState.ts.
-   */
-  {
-    const before = await sessions.getOrCreate(sessionId);
-    const handle = before.lastShown?.kind === 'pack' ? before.lastShown.bundle : before.packInFocus;
-    if (handle) {
-      const pieces = packPieces(before, handle);
-      const lastReply = [...before.messages].reverse().find((message) => message.role === 'assistant')?.text ?? '';
-      const current = before.packChoices?.[handle] ?? {};
-      // "Use that size", straight after we recommended one: their acceptance, so it counts as theirs for this pack.
-      const accepted = acceptedRecommendation(before, userText);
-      const next = readPackChoices(userText, lastReply, pieces, current, accepted ? { [accepted.scale]: accepted.size } : undefined);
-      if (JSON.stringify(next) !== JSON.stringify(current)) await sessions.patch(sessionId, { packChoices: { ...(before.packChoices ?? {}), [handle]: next } });
-    }
-  }
-  // What they are shopping for now, from their words - before any tool can pick something else. See session/focus.ts.
-  await noteShoppingFocus(sessionId, userText);
+  await readCustomerTurn(sessionId, userText);
   const session = await sessions.getOrCreate(sessionId);
   const turnStartedAt = Date.now();
 

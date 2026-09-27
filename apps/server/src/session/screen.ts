@@ -83,7 +83,9 @@ export function resolveProduct(session: CaddieSession, text: string): Resolved |
 
   // "It", "that one": what was just talked about, then the page - what they are looking at.
   if (/\b(this|it|that|this one|that one)\b/.test(said)) {
-    const focus = session.focusProductId ? productById(session.focusProductId) : null;
+    // The product in hand - named, tapped or pointed at (session/shoppingSession.ts). Never one the model merely looked up.
+    const held = session.activeShoppingContext?.productId;
+    const focus = held ? productById(held) : null;
     if (focus) return { product: focus, how: 'the one just talked about' };
     if (page) return { product: page, how: 'the page they are on' };
     if (screen.length === 1) return { product: screen[0]!, how: 'the only one on screen' };

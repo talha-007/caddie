@@ -1,4 +1,6 @@
 import express from 'express';
+import { noteShoppingFocus } from '../src/session/focus.js';
+import { tappedSinceLastSaid } from '../src/session/shoppingSession.js';
 import { ownerHeaders } from './support/ownership.js';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -94,7 +96,8 @@ describe('the card tells the server what the customer picked', () => {
     expect((await tap(id, TEX, { Size: 'M' })).status).toBe(200);
     const session = await sessions.getOrCreate(id);
     expect(session.cardChoices?.[TEX.id]?.options).toEqual({ Size: 'M' });
-    expect(session.focusProductId).toBe(TEX.id);
+    expect(session.activeShoppingContext?.productId).toBe(TEX.id);
+    expect(tappedSinceLastSaid(session)).toBe(TEX.id);
   });
 
   it('only options the product really has; an unknown product is refused', async () => {
@@ -142,8 +145,9 @@ describe('"add it" after tapping M', () => {
         // The Caddie's answer names it: that is what "add it" means next.
         { id: 'a1', role: 'assistant', text: 'The Warrior Jacket in black is fully waterproof.', createdAt: new Date(Date.now() + 1500).toISOString() },
       ],
-      focusProductId: WARRIOR.id,
     });
+    // Their words moved the focus, as converse() reads them.
+    await noteShoppingFocus(id, 'Tell me about the Warrior jacket');
     const asked = await add(id, { productId: WARRIOR.id }, 'Add it.');
     expect(asked.variantIds).toEqual([]);
     expect(asked.result.speech).toMatch(/size/i);
@@ -177,11 +181,13 @@ describe('focus', () => {
     const id = await shopper();
     await tap(id, TEX, { Size: 'M' });
     await tap(id, WARRIOR, { Size: 'L' });
-    expect((await sessions.getOrCreate(id)).focusProductId).toBe(WARRIOR.id);
+    expect((await sessions.getOrCreate(id)).activeShoppingContext?.productId).toBe(WARRIOR.id);
+    await noteShoppingFocus(id, 'show me rain jackets');
     const session = await sessions.getOrCreate(id);
     await runTool('search_products', { query: 'rain jacket' }, { session, utterance: 'show me rain jackets' });
     const after = await sessions.getOrCreate(id);
-    expect(after.focusProductId).toBeUndefined();
+    expect(after.activeShoppingContext?.productId).toBeUndefined();
+    expect(tappedSinceLastSaid(after)).toBeUndefined();
     expect(after.cardChoices?.[TEX.id]?.options).toEqual({ Size: 'M' });
   });
 });
@@ -216,7 +222,8 @@ describe('"it" is the card they tapped, not the product the model just recommend
   it('even after the model looked another product up', async () => {
     const id = await shopper();
     await tap(id, TEX, { Size: 'M' });
-    await sessions.patch(id, { focusProductId: WARRIOR.id });
+    // The model looks the Warrior up: a lookup moves nothing (Phase 3B).
+    await runTool('get_product_details', { productId: WARRIOR.id }, { session: await sessions.getOrCreate(id), utterance: 'add it to my basket please' });
     const { variantIds } = await add(id, { productId: WARRIOR.id, options: { Size: 'M' } }, 'add it to my basket please');
     expect(variantIds).toEqual(['102']);
   });
@@ -234,7 +241,7 @@ describe('"it" is the card they tapped, not the product the model just recommend
     await tap(id, TEX, { Size: 'M' });
     const session = await sessions.getOrCreate(id);
     await runTool('search_products', { query: 'rain jacket' }, { session, utterance: 'show me rain jackets' });
-    expect((await sessions.getOrCreate(id)).cardFocus).toBeUndefined();
+    expect(tappedSinceLastSaid(await sessions.getOrCreate(id))).toBeUndefined();
   });
 
   it.each([

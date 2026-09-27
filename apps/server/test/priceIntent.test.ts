@@ -150,7 +150,7 @@ describe('cheaper', () => {
     // Following up a gilet search, but no product was ever led with or looked at.
     const id = `price-${Math.random()}`;
     await sessions.getOrCreate(id);
-    await sessions.patch(id, { lastSearch: { categories: ['gilet'] } });
+    await sessions.patch(id, { activeShoppingContext: { kinds: ['gilet'], request: 'show me gilets', turn: 1, source: 'explicit' } });
     const { result } = await ask({ query: 'gilet' }, 'Something cheaper.', id);
     expect(result.facts).toMatch(/no product is in focus to compare with/);
     expect(result.facts).not.toMatch(/Price comparison/);

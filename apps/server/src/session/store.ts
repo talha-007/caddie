@@ -16,6 +16,8 @@ export interface PendingAction {
   awaiting: 'size' | 'colour' | 'option';
   /** Their message count when it was asked - only their next message can finish it. */
   turn: number;
+  /** The shopping mission it was asked in (session/shoppingSession.ts) - a new mission ends it. */
+  mission?: number;
 }
 import { RedisSessionStore } from './redisStore.js';
 
@@ -98,22 +100,10 @@ export interface CaddieSession {
    */
   recentShown?: string[];
   /**
-   * What the last search was for, as resolved from the customer (see
-   * tools/searchIntent.ts): a follow-up - "another one", "cheaper" - carries
-   * its kind, range and colour; a new request does not.
-   */
-  lastSearch?: { categories: string[]; range?: 'men' | 'women' | 'kids'; colour?: string };
-  /**
    * Options the customer picked on a product card themselves, by product id
    * (see CardChoice). Theirs for that product only - never their usual size.
    */
   cardChoices?: Record<string, { options: Record<string, string>; variantId?: string; at: number }>;
-  /**
-   * The card the customer last touched - the product "add it" means. Kept
-   * apart from focusProductId, which the model moves whenever it looks a
-   * product up; only a new screen of results or another tap moves this.
-   */
-  cardFocus?: string;
   /**
    * A basket action the customer asked for that is waiting on one thing
    * ("add the Elite Polo" - "what size?"). Their answer next turn finishes
@@ -142,16 +132,17 @@ export interface CaddieSession {
    * Short follow-ups inherit it; what is on screen never moves it.
    */
   activeShoppingContext?: ShoppingFocus;
-  /** The product the last search led with, and its colour, so the next lead can vary. */
-  lastLead?: { id: string; colour: string };
-  /** The product last talked about, so "how much is it in 2XL?" follows "what colours does the first one come in?". */
-  focusProductId?: string;
   /**
-   * The pack being put together, by handle - kept while its choices for one
-   * piece are on screen instead of the pack itself, so "put the second one
-   * in" still knows which pack.
+   * The product the last search led with, and its colour - history, so the
+   * next lead can vary and "cheaper" has something to compare with when
+   * nothing is in hand. Never what they are shopping for.
    */
-  packInFocus?: string;
+  lastLead?: { id: string; colour: string };
+  /**
+   * When lastShown last changed - a card tapped before it was on an older
+   * screen, and no longer what "add it" means (shoppingSession.ts).
+   */
+  shownAt?: number;
   /**
    * The tool results of the last couple of turns, for checking replies only
    * (verify.ts) - never sent to the model. "How much is the pack?" is
@@ -178,17 +169,9 @@ export interface CaddieSession {
    * field, so a stated "no longer" can remove something.
    */
   shopper?: ShopperProfile;
-  /**
-   * `currency` is live. `colour` and `budgetAmount` are no longer written, and
-   * `audience` only mirrors the shopper profile's range - nothing reads them
-   * as the customer's (Phase 3A; removed in 3B).
-   */
+  /** The currency they shop in. (Phase 3A's colour, budget and range mirrors are gone: see shopper/facts.ts.) */
   preferences: {
-    colour?: string;
-    budgetAmount?: number;
     currency?: string;
-    /** Which range they are browsing, inferred from product tags. */
-    audience?: 'men' | 'women';
   };
   messages: CaddieMessage[];
 }
@@ -293,10 +276,8 @@ export class MemorySessionStore implements SessionStore {
     const preferences = { ...session.preferences, ...defined(patch.preferences ?? {}) };
 
     Object.assign(session, defined(patch), { sizeProfile, preferences });
-    // A new screen: "it" no longer means the product talked about on the last one.
-    if (patch.lastShown && patch.focusProductId === undefined) delete session.focusProductId;
-    // Nor the card they touched on it.
-    if (patch.lastShown && patch.cardFocus === undefined) delete session.cardFocus;
+    // A new screen: a card tapped on the last one no longer speaks for them (shoppingSession.ts).
+    if (patch.lastShown) session.shownAt = Date.now();
     // A finished (or abandoned) action clears what it was waiting on.
     if ('pendingAction' in patch && patch.pendingAction === undefined) delete session.pendingAction;
     await this.save(session);
@@ -352,10 +333,8 @@ class ResilientSessionStore implements SessionStore {
     const sizeProfile = { ...session.sizeProfile, ...defined(patch.sizeProfile ?? {}) };
     const preferences = { ...session.preferences, ...defined(patch.preferences ?? {}) };
     Object.assign(session, defined(patch), { sizeProfile, preferences });
-    // A new screen: "it" no longer means the product talked about on the last one.
-    if (patch.lastShown && patch.focusProductId === undefined) delete session.focusProductId;
-    // Nor the card they touched on it.
-    if (patch.lastShown && patch.cardFocus === undefined) delete session.cardFocus;
+    // A new screen: a card tapped on the last one no longer speaks for them (shoppingSession.ts).
+    if (patch.lastShown) session.shownAt = Date.now();
     // A finished (or abandoned) action clears what it was waiting on.
     if ('pendingAction' in patch && patch.pendingAction === undefined) delete session.pendingAction;
     await this.save(session);
@@ -371,19 +350,3 @@ class ResilientSessionStore implements SessionStore {
 
 /** Resilient when Redis is configured; memory alone when it is not. */
 export const sessions: SessionStore = redisEnabled() ? new ResilientSessionStore() : new MemorySessionStore();
-
-/**
- * The card the customer touched, while it is still what they are talking
- * about: tapped since they last spoke, or every question since has been about
- * that same product ("is it waterproof?" - then "add it"). Once the talk moves
- * to another product ("tell me about the Warrior jacket"), "it" is that one
- * and the tap no longer speaks for them.
- */
-export function tappedSinceLastSaid(session: CaddieSession): string | undefined {
-  const id = session.cardFocus;
-  const choice = id ? session.cardChoices?.[id] : undefined;
-  if (!id || !choice) return undefined;
-  const said = session.messages.filter((message) => message.role === 'user').map((message) => Date.parse(message.createdAt) || 0);
-  if (choice.at > Math.max(0, ...said)) return id;
-  return session.focusProductId === id ? id : undefined;
-}

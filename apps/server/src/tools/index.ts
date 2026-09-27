@@ -29,7 +29,7 @@ import { hasSignals, rankFacts, rankProducts, weatherHotOnly } from '../recommen
 import { describeProfile, readIntent, type Budget } from '../shopper/profile.js';
 import { acceptedRecommendation, currentRange, describeShopper, logFact, shopperView, trustedShopperFacts, type SizeRecommendationRecord } from '../shopper/facts.js';
 import { rankRequestFor, rememberMeasurements, rememberShopper, shopperSizes } from '../shopper/remember.js';
-import { customerTurn, noteShoppingConstraints } from '../session/focus.js';
+import { customerTurn, noteShoppingConstraints, requestedKinds, setActivePack } from '../session/focus.js';
 import { bestPicks, kindsNamed } from '../recommend/bestPicks.js';
 import { answerAbout, attributesAsked, describeStock, sayAttributes, verifiedFacts } from '../recommend/productFacts.js';
 import { resolveProduct } from '../session/screen.js';
@@ -41,7 +41,7 @@ import { log } from '../lib/logger.js';
 import { checkoutTotal, storefrontCartEnabled } from '../shopify/storefrontCart.js';
 import { colourwayName, garmentName, otherColourways } from '../catalog/colourways.js';
 import { allProducts, productById } from '../catalog/sync.js';
-import { asksForDeals, chooseDeal, dealRecommendation, fillDeal, findDeal, toBundleDeal } from '../recommend/deals.js';
+import { asksForDeals, chooseDeal, dealRecommendation, fillDeal, findDeal, namesADeal, toBundleDeal } from '../recommend/deals.js';
 import { DEFAULT_SLOTS, fitsSlot, namedSlots, recommendOutfit, slotsFor } from '../recommend/outfit.js';
 import { recommendPack } from '../recommend/pack.js';
 import { findNamedPack, findUnstockedBundle, recommendNamedPack } from '../recommend/packs.js';
@@ -50,7 +50,8 @@ import { categoryForProduct, recommendSize } from '../recommend/size.js';
 import { normaliseSize, optionValueMatches, sameSize } from '../recommend/sizeWords.js';
 import { addToCart, getCart, getProductDetails, isBrandProduct, searchProducts, setLineQuantity } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
-import { sessions, tappedSinceLastSaid, type CaddieSession } from '../session/store.js';
+import { sessions, type CaddieSession } from '../session/store.js';
+import { agreesWithTarget, currentPack, currentProduct, livePending, tappedSinceLastSaid, trustedProductTarget, type TrustedTarget } from '../session/shoppingSession.js';
 import { defineTool, type CaddieTool, type ToolContext, type ToolResult } from './types.js';
 
 /**
@@ -364,7 +365,7 @@ type ActionTarget =
 function presented(ctx: ToolContext, designs: NamedDesign[]): NamedDesign[] {
   const onScreen = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
   const focus = ctx.session.activeShoppingContext;
-  const waiting = new Set(ctx.session.pendingAction?.productIds ?? []);
+  const waiting = new Set(livePending(ctx.session)?.productIds ?? []);
   return designs.filter(
     (design) =>
       design.products.some((product) => onScreen.has(product.id) || waiting.has(product.id) || product.id === focus?.productId) ||
@@ -407,7 +408,7 @@ export function actionTarget(ctx: ToolContext): ActionTarget {
   if (tapped) return { kind: 'bound', products: [tapped], label: tapped.title, source: 'card-action' };
 
   const auth = cartAuthorization(ctx);
-  const pending = ctx.session.pendingAction;
+  const pending = livePending(ctx.session);
   if (auth.authorized && auth.source === 'continuation' && pending) {
     const waiting = pending.productIds.map((id) => productById(id)).filter((product): product is Product => !!product);
     if (waiting.length) return { kind: 'bound', products: waiting, label: waiting.length === 1 ? waiting[0]!.title : designOf(waiting[0]!.title), source: 'pending' };
@@ -708,7 +709,13 @@ const searchTool = defineTool({
      * back as three white trousers from the whole store, two of which the
      * pack does not take - and the customer then asked for one of those.
      */
-    const packShown = packOnScreen(ctx);
+    /*
+     * Only a pack still in hand. After "actually, show me polos" the pack's
+     * card can still be on screen, but they have left it: this is a search
+     * of the store, and the pack is not taken up again (Phase 3B).
+     */
+    const onScreenPack = packOnScreen(ctx);
+    const packShown = onScreenPack && onScreenPack.handle === currentPack(ctx.session) ? onScreenPack : undefined;
     if (packShown && asksToChangePackPiece(packShown, ctx.utterance ?? '')) {
       const swapped = await dealAnswer({ query: ctx.session.lastShown?.query ?? packShown.title }, ctx, colourAsked(undefined, ctx.utterance), currency);
       if (swapped) return swapped;
@@ -1218,7 +1225,6 @@ const searchTool = defineTool({
         query,
         ...(filterColour ? { colour: filterColour } : {}),
       },
-      lastSearch: { categories, ...(askedRange ? { range: askedRange } : {}), ...(intent.colour ? { colour: intent.colour.value } : {}) },
       recentShown: [...new Set([...(wantsAnother ? (ctx.session.recentShown ?? []) : []), ...products.map((p) => p.id)])].slice(-40),
       ...(lead ? { lastLead: { id: lead.id, colour: colourwayName(lead.title).toLowerCase() } } : {}),
     });
@@ -1459,8 +1465,7 @@ const detailsTool = defineTool({
      * Caddie may make beyond name, price and stock.
      */
     const attributes = attributesOf(product);
-    // Now the one being talked about: "is it in XL?" next means this product.
-    await sessions.patch(ctx.session.id, { focusProductId: product.id });
+    // A lookup is not the customer's focus: loading a card, or the model checking a product, moves nothing (Phase 3B).
     const verified = [
       attributes.features.length ? `Its description states: ${attributes.features.map((f) => FEATURE_LABEL[f]).join(', ')}.` : 'Its description states no technical features - do not claim any.',
       attributes.fit ? `Cut: ${attributes.fit}.` : shopperView(ctx.session).fit ? 'Cut: not stated in its description - never describe its fit.' : '',
@@ -1592,7 +1597,22 @@ const sizeTool = defineTool({
   },
   async run(args, ctx): Promise<ToolResult> {
     const { productId, layering, ...proposed } = args;
-    const product = productId ? productById(productId) : null;
+    /*
+     * The garment being sized: the one the customer means - named, pointed
+     * at, in hand, or the page for "this" - or the form's own product. The
+     * model's product counts only when it is that design: a lookup of the
+     * Clima Jacket must not size a customer who is looking at a polo.
+     */
+    const offered = productId ? productById(productId) : null;
+    const sizingTarget: TrustedTarget = ctx.sizeForm || ctx.direct ? { status: 'none' } : trustedProductTarget(ctx.session, ctx.utterance ?? '');
+    if (sizingTarget.status === 'ambiguous') {
+      return { speech: `Which do you mean - ${sizingTarget.designs.map((design) => titleCaseWords(design)).join(' or ')}?`, facts: `What they named fits more than one product: ${sizingTarget.designs.join('; ')}. Ask which before sizing.` };
+    }
+    const product =
+      ctx.sizeForm || ctx.direct ? offered : sizingTarget.status === 'product' ? (agreesWithTarget(sizingTarget, offered) ? offered : sizingTarget.products[0]!) : null;
+    if (offered && product?.id !== offered.id && !agreesWithTarget(sizingTarget, offered) && !ctx.sizeForm && !ctx.direct) {
+      log.warn('size.model_product_ignored', { sessionId: ctx.session.id, proposed: offered.title, sized: product?.title ?? null });
+    }
     const productRange = product ? rangeOf(product) : undefined;
     const facts = trustedShopperFacts(ctx.session);
     const view = shopperView(ctx.session, ctx.utterance);
@@ -1683,7 +1703,7 @@ const sizeTool = defineTool({
       audienceOf(allProducts().filter(isBrandProduct));
     // The product decides the chart: trousers are sized by the waist, whatever was asked.
     const category =
-      (product && audience ? categoryForProduct(audience, `${product.productType ?? ''} ${product.title}`) : undefined) ?? args.category;
+      (product && audience ? categoryForProduct(audience, `${product.productType ?? ''} ${product.title}`) : undefined) ?? sizingCategory(args.category, audience, ctx);
 
     /*
      * Fit and layering move the size, so they need the customer's evidence
@@ -1775,6 +1795,26 @@ const sizeTool = defineTool({
 });
 
 /**
+ * The chart to size on when no product is: the form's, or the kind the
+ * customer asked for (their words, or what they are shopping for). The
+ * model's category counts only when it is that kind; with nothing to go on,
+ * none - the general chart, never a garment the model picked.
+ */
+function sizingCategory(proposed: string | undefined, audience: 'men' | 'women' | undefined, ctx: ToolContext): string | undefined {
+  if (ctx.sizeForm || ctx.direct) return proposed;
+  const kinds = [...new Set([...requestedKinds(ctx.utterance ?? ''), ...(ctx.session.activeShoppingContext?.kinds ?? [])])];
+  if (!kinds.length) {
+    if (proposed) log.warn('size.model_category_ignored', { sessionId: ctx.session.id, proposed });
+    return undefined;
+  }
+  const fromKinds = audience ? kinds.map((kind) => categoryForProduct(audience, kind)).filter((found): found is string => !!found) : [];
+  if (proposed && audience && fromKinds.includes(categoryForProduct(audience, proposed) ?? proposed)) return proposed;
+  if (proposed && !fromKinds.length && categoriesAsked(proposed).some((kind) => kinds.includes(kind))) return proposed;
+  if (proposed) log.warn('size.model_category_ignored', { sessionId: ctx.session.id, proposed, asked: kinds });
+  return fromKinds[0];
+}
+
+/**
  * Whether a size is one they called their usual size: said as such in any of
  * their messages ("I'm usually XL", "my normal size is L" - read by the same
  * reader that keeps their profile), or already their usual size.
@@ -1827,6 +1867,32 @@ function groundedBudget(amount: number | undefined, ctx: ToolContext): number | 
   return undefined;
 }
 
+/**
+ * The size a pack or outfit is built in - which pieces are in stock depends
+ * on it. The model's size counts only when it is one the customer gave for
+ * this mission, or their usual size, a size recommendation they accepted, or
+ * the pack's own confirmed choice; otherwise their usual size, or none, and
+ * the pieces are chosen size-neutrally. A model's "M" once decided which
+ * pieces a customer who had said nothing about size was shown.
+ */
+export function trustedSize(proposed: string | undefined, ctx: ToolContext): string | undefined {
+  const usual = trustedShopperFacts(ctx.session).usualSize;
+  if (!proposed?.trim()) return usual;
+  const size = normaliseSize(proposed) ?? proposed.trim().toUpperCase();
+  const pack = currentPack(ctx.session);
+  const chosen = pack ? ctx.session.packChoices?.[pack] : undefined;
+  if ([chosen?.top, chosen?.waist].some((value) => !!value && value.toUpperCase() === size.toUpperCase())) return size;
+  if (sizesNeverGiven([size], ctx).length === 0) return size;
+  logFact(ctx.session.id, 'size', 'model-hint', 'turn', false, size, 'not given by the customer for this mission');
+  return usual;
+}
+
+/** Whether the model's name for a pack is this pack. */
+function chooseDealMatches(proposed: string, deal: DealRecipe): boolean {
+  const found = chooseDeal(proposed, deal.range);
+  return !!found && (('deal' in found && found.deal.handle === deal.handle) || ('ask' in found && found.ask.includes(deal)));
+}
+
 /* ---------------- recommend_pack ---------------- */
 
 const packSchema = z.object({
@@ -1856,7 +1922,7 @@ async function dealAnswer(
   currency: string,
 ): Promise<ToolResult | null> {
   if (allDeals().length === 0) return null;
-  const size = args.size ?? trustedShopperFacts(ctx.session).usualSize;
+  const size = trustedSize(args.size, ctx);
   const shown = ctx.session.lastShown;
   const onScreen =
     shown?.kind === 'pack' && shown.bundle ? allDeals().find((deal) => deal.handle === shown.bundle) : undefined;
@@ -1909,7 +1975,8 @@ async function dealAnswer(
    * no mixed pack was showing.
    */
   // Or the pack in focus while its choices for one piece are on screen.
-  const inFocus = ctx.session.packInFocus && remembered[ctx.session.packInFocus] ? allDeals().find((deal) => deal.handle === ctx.session.packInFocus) : undefined;
+  const inHand = currentPack(ctx.session);
+  const inFocus = inHand && remembered[inHand] ? allDeals().find((deal) => deal.handle === inHand) : undefined;
   const target = namedDeal && remembered[namedDeal.handle] ? namedDeal : (onScreen ?? inFocus);
   const fromScreen = !!target && target === onScreen && shown?.kind === 'pack';
   const targetItems = target ? ((fromScreen ? shown!.items : remembered[target.handle]?.items) ?? []) : [];
@@ -2211,7 +2278,7 @@ function packOnScreen(ctx: ToolContext): DealRecipe | undefined {
 /** The pack whose choices for one piece are on screen - shown by packStepChoices. */
 function packChoicesInFocus(ctx: ToolContext): DealRecipe | undefined {
   const shown = ctx.session.lastShown;
-  const handle = ctx.session.packInFocus;
+  const handle = currentPack(ctx.session);
   if (!handle || shown?.kind !== 'products' || shown.query !== `pack choices: ${handle}`) return undefined;
   return allDeals().find((deal) => deal.handle === handle);
 }
@@ -2286,8 +2353,9 @@ async function packStepChoices(deal: DealRecipe, index: number, ctx: ToolContext
   const shown = matching.sort((a, b) => (colour ? matchesColourText(b, colour) - matchesColourText(a, colour) : 0)).slice(0, 8);
   await sessions.patch(ctx.session.id, {
     lastShown: { kind: 'products', items: shown.map((p) => ({ id: p.id, title: p.title })), query: `pack choices: ${deal.handle}` },
-    packInFocus: deal.handle,
   });
+  // Still that pack's piece being chosen: the pack stays in hand.
+  await setActivePack(ctx.session.id, deal.handle);
   return {
     speech: `${refusal}Here are the ${piece} choices in the ${packName}${colour ? ` in ${colour}` : ''} - any of these can go in the pack. Which would you like?`,
     facts:
@@ -2488,7 +2556,6 @@ async function showDeal(
       ...(fill.colour ? { colour: fill.colour } : {}),
     },
     // Remembered by pack, so going back to it - or changing it from another pack - finds this one.
-    packInFocus: deal.handle,
     packsShown: {
       ...((await sessions.getOrCreate(ctx.session.id)).packsShown ?? {}),
       [deal.handle]: {
@@ -2498,6 +2565,8 @@ async function showDeal(
       },
     },
   });
+  // The pack they are building now: a bare "34" is its waist (session/focus.ts).
+  await setActivePack(ctx.session.id, deal.handle);
   const lines = deal.steps
     .map((step, i) => `- ${step.title}: ${pieces[i] ? `${pieces[i]!.title} [${pieces[i]!.id}]` : 'none picked'}`)
     .join('\n');
@@ -2608,7 +2677,7 @@ const packTool = defineTool({
     if (named) {
       const real = await recommendNamedPack(named, {
         colour,
-        size: args.size ?? trustedShopperFacts(ctx.session).usualSize,
+        size: trustedSize(args.size, ctx),
       });
 
       if (real?.pack) {
@@ -2642,7 +2711,7 @@ ${listFacts(real.items)}`,
     const recommendation = await recommendPack({
       query: args.query,
       colour,
-      size: args.size ?? trustedShopperFacts(ctx.session).usualSize,
+      size: trustedSize(args.size, ctx),
       itemCount: args.itemCount,
       ...(budgetAmount !== undefined ? { budget: { amount: budgetAmount, currency } } : {}),
     }, knownRange(ctx));
@@ -2763,7 +2832,7 @@ const outfitTool = defineTool({
     const input = {
       seed: args.seed,
       colour,
-      size: args.size ?? trustedShopperFacts(ctx.session).usualSize,
+      size: trustedSize(args.size, ctx),
       ...(budgetAmount !== undefined ? { budget: { amount: budgetAmount, currency } } : {}),
     };
 
@@ -3076,7 +3145,7 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
     source,
     customer: ui ? 'ui' : describeIdentity(resolveCustomerProductIdentity(ctx.utterance ?? '')),
     focus: ctx.session.activeShoppingContext?.design ?? ctx.session.activeShoppingContext?.productId ?? null,
-    pending: ctx.session.pendingAction?.productIds ?? null,
+    pending: livePending(ctx.session)?.productIds ?? null,
     proposed: proposed?.title ?? productId,
     target: target.kind === 'bound' ? `${target.source}: ${target.label}` : target.kind,
   };
@@ -3143,7 +3212,7 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
       };
       log.info('cart.card_choice_used', { sessionId: ctx.session.id, productId: chosenProduct!.id, options: card.options });
     }
-    const waiting = source === 'pending-action-continuation' ? ctx.session.pendingAction?.options : undefined;
+    const waiting = source === 'pending-action-continuation' ? livePending(ctx.session)?.options : undefined;
     if (waiting) options = { ...waiting, ...(options ?? {}) };
     if (offered?.type === 'add-product' && offered.size && chosenProduct) {
       const sizeOption = chosenProduct.options.find((option) => /size|waist/i.test(option.name) && option.values.length > 1)?.name;
@@ -3428,17 +3497,26 @@ const otherColoursTool = defineTool({
     required: [],
   },
   async run(args, ctx): Promise<ToolResult> {
-    let named = args.productId ? await getProductDetails(args.productId) : null;
-    // "What other colours does the Elite Polo come in?" - the design they named, whatever the model passed.
-    const namedByThem = ctx.direct ? ({ status: 'none' } as CustomerIdentity) : resolveCustomerProductIdentity(ctx.utterance ?? '');
-    if (namedByThem.status === 'ambiguous') {
-      const names = namedByThem.designs.map((design) => titleCaseWords(design.design));
-      return { speech: `Which do you mean - ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}?`, facts: `What they named fits more than one product: ${namedByThem.designs.map((design) => design.design).join('; ')}. Ask which.` };
+    const proposed = args.productId ? await getProductDetails(args.productId) : null;
+    /*
+     * Whose colours: the product the customer means - named, pointed at, in
+     * hand, or the page for "this" (session/shoppingSession.ts). The model's
+     * product is a proposal: kept when it is that design (it may carry the
+     * exact colourway), set aside when it is not, and never the answer on its
+     * own. The widget's own call names its card and is taken as it is.
+     */
+    const said = ctx.utterance ?? '';
+    const target: TrustedTarget = ctx.direct ? { status: 'none' } : trustedProductTarget(ctx.session, said);
+    if (target.status === 'ambiguous') {
+      const names = target.designs.map((design) => titleCaseWords(design));
+      return { speech: `Which do you mean - ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}?`, facts: `What they named fits more than one product: ${target.designs.join('; ')}. Ask which.` };
     }
-    if (namedByThem.status === 'exact' || namedByThem.status === 'family') {
-      const own = identityProducts(namedByThem);
-      if (!named || !own.some((product) => product.id === named!.id)) named = namedByThem.status === 'exact' ? namedByThem.product : own[0]!;
+    let named: Product | null = ctx.direct ? proposed : null;
+    if (target.status === 'product') named = agreesWithTarget(target, proposed) ? proposed : target.products[0]!;
+    if (!ctx.direct && proposed && named?.id !== proposed.id && !agreesWithTarget(target, proposed)) {
+      log.warn('focus.model_pick_off_focus', { sessionId: ctx.session.id, tool: 'other_colours', proposed: proposed.title, target: named?.title ?? null });
     }
+    // The page counts for "this" - through the target above - or, as before, when they ask with nothing else in view.
     const page = ctx.session.page?.productId ? productById(ctx.session.page.productId) : null;
     let screen = (ctx.session.lastShown?.items ?? []).map((item) => (item.id ? productById(item.id) : null)).filter((p): p is Product => !!p);
     /*
@@ -3623,7 +3701,7 @@ const addPackTool = defineTool({
     const outcome = await executeCommerceAction(ctx, { type: 'add-pack', ...(args.pack ? { pack: args.pack } : {}) });
     // Refused for want of a request: where the pack stands, so the model cannot claim sizes as chosen.
     if (!outcome.ok && outcome.reason === 'not-authorized') {
-      const handle = ctx.session.lastShown?.kind === 'pack' ? ctx.session.lastShown.bundle : ctx.session.packInFocus;
+      const handle = currentPack(ctx.session) ?? (ctx.session.lastShown?.kind === 'pack' ? ctx.session.lastShown.bundle : undefined);
       const standing = handle ? packStatusFacts(packStatus(ctx.session, handle)) : '';
       return fromOutcome(outcome, `And never say a size was selected that the status below does not confirm.${standing ? `\n${standing}` : ''}`);
     }
@@ -3675,11 +3753,22 @@ async function planAddPack(ctx: ToolContext, action: CommerceAction, source: Act
   } else {
     const shown = ctx.session.lastShown;
     const onScreen = shown?.kind === 'pack' && shown.bundle ? allDeals().find((entry) => entry.handle === shown.bundle) : undefined;
-    // An Ambassador Pack named without its conditions is the one on screen, never a guess at one.
-    const weather = readIntent(ctx.utterance ?? '').weather ?? shopperView(ctx.session).weather;
-    const choice = action.pack ? chooseDeal(`${action.pack} ${ctx.utterance ?? ''}`, dealRange(ctx), weather) : null;
-    const named = choice && 'deal' in choice ? choice.deal : null;
-    deal = named && named.handle !== onScreen?.handle ? named : onScreen;
+    /*
+     * Which pack is being bought: the one the customer names now, the one the
+     * offer they are saying yes to named, or the pack in hand. Never the
+     * model's pack name on its own, and never a pack merely still on screen
+     * after they left it - a yes to something else once bought the pack
+     * still showing (Phase 3B).
+     */
+    const said = ctx.utterance ?? '';
+    const weather = readIntent(said).weather ?? shopperView(ctx.session).weather;
+    const byHandle = (handle: string | undefined) => (handle ? allDeals().find((entry) => entry.handle === handle) : undefined);
+    const inHand = byHandle(currentPack(ctx.session));
+    const choice = namesADeal(said) ? chooseDeal(said, dealRange(ctx), weather) : null;
+    const offered = source === 'customer-confirmation' ? offeredAction(ctx) : null;
+    const named = choice && 'deal' in choice ? choice.deal : choice && 'ask' in choice && inHand && choice.ask.includes(inHand) ? inHand : null;
+    deal = named ?? (offered ? byHandle(offered.type === 'add-pack' ? offered.handle : undefined) : inHand);
+    if (action.pack && deal && !chooseDealMatches(action.pack, deal)) log.warn('gateway.model_pack_ignored', { sessionId: ctx.session.id, proposed: action.pack, bound: deal.handle });
     if (!deal && choice && 'ask' in choice) {
       return {
         ok: false,
@@ -3688,7 +3777,7 @@ async function planAddPack(ctx: ToolContext, action: CommerceAction, source: Act
         facts: 'Ask which, then call recommend_pack with the condition to build it before adding.',
       };
     }
-    if (!deal) return { ok: false, reason: 'no-target', speech: 'Which pack would you like - the Ambassador Pack, the Prestige Pack or another?', facts: 'No pack is on screen or named.' };
+    if (!deal) return { ok: false, reason: 'no-target', speech: 'Which pack would you like to add?', facts: 'No pack is in hand, named by the customer, or named in what they said yes to - nothing was added. A pack still on screen is not one they chose; ask which.' };
     /*
      * The pack as they last saw it, even after a search has taken the screen.
      * One they have never seen is shown, not added: adding a pack in the same
@@ -3899,7 +3988,7 @@ const productInfoTool = defineTool({
       } else if (!held && picked && !inFocus(picked, focus)) {
         log.warn('focus.model_pick_off_focus', { sessionId: ctx.session.id, tool: 'product_info', proposed: picked.title, focus: describeFocus(focus) });
         const onScreen = (ctx.session.lastShown?.items ?? []).map((item) => productById(item.id)).filter((found): found is Product => !!found && inFocus(found, focus));
-        const talked = ctx.session.focusProductId ? productById(ctx.session.focusProductId) : null;
+        const talked = currentProduct(ctx.session);
         const instead = talked && inFocus(talked, focus) ? talked : onScreen.length === 1 ? onScreen[0] : null;
         resolved = instead ? { product: instead, how: 'the one they are shopping for' } : null;
       }
@@ -3924,7 +4013,6 @@ const productInfoTool = defineTool({
       if (family.length && answers[0]!.length && answers.every((answer) => JSON.stringify(answer) === JSON.stringify(answers[0]))) {
         const design =
           byName?.kind === 'exact-family' ? titleCaseWords(byName.familyName) : byName?.kind === 'exact-product' ? titleCaseWords(family[0]!.title) : titleCaseWords(garmentName(family[0]!.title));
-        await sessions.patch(ctx.session.id, { focusProductId: family[0]!.id });
         return {
           speech: sayAttributes(design, answers[0]!),
           facts: `About: the ${design} design - every colourway shares this description (${family.map((member) => `${member.title} [${member.id}]`).join(', ')}).\n${verifiedFacts(family[0]!)}\nAsked about: ${answers[0]!
@@ -3934,7 +4022,6 @@ const productInfoTool = defineTool({
       }
       if (member) {
         const answer = answerAbout(member, question);
-        await sessions.patch(ctx.session.id, { focusProductId: member.id });
         return {
           speech: answer.speech,
           facts: `About: ${member.title} [${member.id}] (the ${named.status === 'family' ? named.design : 'design'} they named).\n${answer.facts}\nAnswer only from these facts. Sizes, stock and prices are exact; do not add any.`,
@@ -3949,7 +4036,6 @@ const productInfoTool = defineTool({
       };
     }
     const answer = answerAbout(product, question);
-    await sessions.patch(ctx.session.id, { focusProductId: product.id });
     return {
       speech: answer.speech,
       facts: `About: ${product.title} [${product.id}] (${resolved?.how ?? 'by name'}).\n${answer.facts}\nAnswer only from these facts. Sizes, stock and prices are exact; do not add any.`,

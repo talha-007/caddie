@@ -11,8 +11,10 @@ import { priceFor } from '../recommend/pricing.js';
 import { normaliseSize } from '../recommend/sizeWords.js';
 import { phoneticEnglish } from '../ai/phoneticEnglish.js';
 import { readIntent } from '../shopper/profile.js';
-import { describeFocus, focusQuery, inFocus, isFollowUp, type ShoppingFocus } from '../session/focus.js';
+import { describeFocus, designOf, focusQuery, inFocus, isFollowUp, requestedKinds, type ShoppingFocus } from '../session/focus.js';
 import { acceptedRecommendation, currentRange, shopperView, trustedShopperFacts } from '../shopper/facts.js';
+import { identityProducts, resolveCustomerProductIdentity } from '../catalog/productIdentity.js';
+import { currentMission, missionStart } from '../session/shoppingSession.js';
 import type { ToolContext } from './types.js';
 
 /**
@@ -181,7 +183,8 @@ function readPrice(said: string, ctx: ToolContext, size: string | undefined): Pr
   if (!CHEAPER.test(said) || CHEAPER_THAN_AMOUNT.test(said)) return undefined;
   // Cheaper than the one in focus - a jacket still on screen is not the comparison when they are on polos.
   const focus = ctx.session.activeShoppingContext;
-  const product = [focus?.productId, ctx.session.focusProductId, ctx.session.lastLead?.id]
+  // The product in hand; failing that, the one the last search led with - history, compared with only when nothing is in hand.
+  const product = [focus?.productId, ctx.session.lastLead?.id]
     .map((id) => (id ? productById(id) : null))
     .find((found): found is NonNullable<typeof found> => !!found && inFocus(found, focus));
   if (!product) return { mode: 'below' };
@@ -205,7 +208,12 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
   const turn: Turn = phonetic ? readIntent(said) : spoken;
   // This shopping session's constraints over what they told us about themselves - one order, shopper/facts.ts.
   const profile = shopperView(ctx.session);
-  const previous = ctx.session.lastSearch;
+  /*
+   * What a follow-up follows is the focus (session/focus.ts), already moved
+   * by this message - not the last search run. "Jackets", then "polos",
+   * then "another one" is polos, whatever the last search was for.
+   */
+  const current = ctx.session.activeShoppingContext;
   const followUp = FOLLOW_UP.test(said) || said.split(/\s+/).length <= 3;
   /*
    * A follow-up to what they asked for last - "different colours", "another
@@ -248,8 +256,9 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
    * nobody asked for.
    */
   const proposedCategories = (args.category ? categoriesAsked(args.category) : []).length ? categoriesAsked(args.category!) : categoriesAsked(searched);
-  const saidCategories = categoriesAsked(withoutSize(said, saidSize));
-  const previousCategories = (previous?.categories ?? []) as Category[];
+  // Asked for - "over a hoodie" is context, not a hoodie (session/focus.ts).
+  const saidCategories = requestedKinds(said);
+  const previousCategories = (current?.kinds ?? []) as Category[];
   let categories: IntentValue<Category[]> | undefined;
   if (saidCategories.length) {
     // What they named - the model's pick only when it is one of those ("polos and jackets": the polo search).
@@ -296,7 +305,7 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
   } else if (inherit && focus!.range) {
     range = { value: focus!.range, source: 'conversation', strength: 'hard' };
     if (proposedRange && proposedRange !== focus!.range) reject('range', proposedRange, `a follow-up to ${describeFocus(focus)}`);
-  } else if (proposedRange && (proposedRange === knownRange || (followUp && proposedRange === previous?.range))) {
+  } else if (proposedRange && (proposedRange === knownRange || (followUp && proposedRange === current?.range))) {
     range = { value: proposedRange, source: proposedRange === knownRange ? 'profile' : 'conversation', strength: 'hard' };
   } else if (proposedRange && !verifiable) {
     // Never a gender from the model alone. A range word in its query still counts for relevance.
@@ -317,9 +326,8 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
   const saidColours = parseColours(said).colours.map((colour) => colour.word);
   const rememberedColours = profile?.colours?.words ?? [];
   // Followed up, the colours held are the focus's - none after "different colours".
-  // A new kind named ("show me other jackets" after red polos) is a new mission: the last search's colour is not followed.
-  const newKind = saidCategories.length > 0 && !saidCategories.some((kind) => previousCategories.includes(kind));
-  const previousColours = inherit ? (focus!.colours ?? []) : previous?.colour && !newKind ? parseColours(previous.colour).colours.map((colour) => colour.word) : [];
+  // The colours the focus holds - none after a new kind is named ("show me other jackets" after red polos), or after "different colours".
+  const previousColours = inherit || followUp ? (current?.colours ?? []) : [];
   const within = (pool: string[]) => colourWords.length > 0 && colourWords.every((word) => pool.includes(word));
   let colourText: string | undefined;
   let colourSource: IntentSource | undefined;
@@ -600,14 +608,34 @@ export function rememberedWhenEchoed(
 }
 
 /**
+ * The customer's messages that can speak for a size of this purchase. A size
+ * is said for something: "Add the Elite Polo in M" is the polo's size, and
+ * once counted for the Clima Jacket added next (Phase 3B). So an earlier
+ * message counts only when it names this product's design, or names no
+ * product and was said in this mission - "a jacket in L", then "add the
+ * second one". A message naming another design never does. This turn always
+ * counts: it is the request being answered.
+ */
+function sizeEvidence(ctx: ToolContext, productId?: string): string[] {
+  const product = productId ? productById(productId) : null;
+  const design = product ? designOf(product.title).toUpperCase() : undefined;
+  const start = missionStart(ctx.session);
+  const earlier = ctx.session.messages.filter((message) => message.role === 'user').map((message) => message.text);
+  const kept = earlier.filter((text, index) => {
+    const named = identityProducts(resolveCustomerProductIdentity(text)).map((own) => designOf(own.title).toUpperCase());
+    if (named.length) return design ? named.includes(design) : index + 1 >= start;
+    return index + 1 >= start;
+  });
+  return [...kept, ctx.utterance ?? ''];
+}
+
+/**
  * Sizes among these that the customer never gave: not in anything they said
  * this conversation, nor in their profile. Used by the basket too - a size
  * the model chose is never one to buy in.
  */
 export function sizesNeverGiven(values: Array<string | undefined>, ctx: ToolContext, productId?: string): string[] {
-  const said = [...ctx.session.messages.filter((message) => message.role === 'user').map((message) => message.text), ctx.utterance ?? '']
-    .join(' ')
-    .toLowerCase();
+  const said = sizeEvidence(ctx, productId).join(' ').toLowerCase();
   // "I'm" is not an M, nor "it's" an S: apostrophes join, never split.
   const tokens = said.replace(/['’]/g, '').replace(/[^a-z0-9\s/-]/g, ' ').split(/[\s/]+/).filter(Boolean);
   const known = new Set<string>(tokens.filter((token) => /\d/.test(token)));
@@ -619,7 +647,9 @@ export function sizesNeverGiven(values: Array<string | undefined>, ctx: ToolCont
   });
   // Their own usual size and waist - never one we recommended, unless they have just accepted it.
   const facts = trustedShopperFacts(ctx.session);
-  const accepted = acceptedRecommendation(ctx.session, ctx.utterance);
+  // Accepted this turn, or earlier in this mission ("use that size", then "build me an outfit").
+  const rec = ctx.session.sizeRecommendation;
+  const accepted = acceptedRecommendation(ctx.session, ctx.utterance) ?? (rec?.acceptedMission !== undefined && rec.acceptedMission === currentMission(ctx.session) ? rec : undefined);
   for (const size of [facts.usualSize, facts.waist, accepted?.size]) if (size) known.add((normaliseSize(String(size)) ?? String(size)).toLowerCase());
   // What they picked on this product's card themselves - for this product only.
   const card = productId ? ctx.session.cardChoices?.[productById(productId)?.id ?? productId] : undefined;

@@ -2,8 +2,9 @@ import { parseColours } from '../catalog/colour.js';
 import { sizeInRequest } from '../catalog/constraints.js';
 import { identityProducts, resolveCustomerProductIdentity, type CustomerIdentity } from '../catalog/productIdentity.js';
 import { singular } from '../catalog/identity.js';
-import { namesADeal } from '../recommend/deals.js';
+import { chooseDeal, namesADeal } from '../recommend/deals.js';
 import { normaliseSize } from '../recommend/sizeWords.js';
+import { currentPack, livePending } from '../session/shoppingSession.js';
 import type { ToolContext } from './types.js';
 
 /**
@@ -105,8 +106,14 @@ export function offeredAction(ctx: ToolContext): OfferedAction | null {
   }
   if (!add) return null;
   const identity = resolveCustomerProductIdentity(add, 'offer');
-  const handle = ctx.session.lastShown?.kind === 'pack' ? ctx.session.lastShown.bundle : ctx.session.packInFocus;
-  if (/\bpack\b/i.test(add) || namesADeal(add) || (ctx.session.lastShown?.kind === 'pack' && identity.status === 'none')) {
+  /*
+   * The pack a yes buys is the one the offer named, else the pack in hand -
+   * never one merely still on screen after they left it (Phase 3B).
+   */
+  const inHand = currentPack(ctx.session);
+  const namedInOffer = namesADeal(add) ? chooseDeal(add) : null;
+  const handle = namedInOffer && 'deal' in namedInOffer ? namedInOffer.deal.handle : inHand;
+  if (/\bpack\b/i.test(add) || namesADeal(add) || (!!inHand && identity.status === 'none')) {
     return { type: 'add-pack', ...(handle ? { handle } : {}) };
   }
   const size = sizeInRequest(add);
@@ -139,7 +146,8 @@ export function cartAuthorization(ctx: ToolContext, opts: { replaces?: string } 
    * names another product: it does not finish the jacket's add, and it is not
    * an add of the polo either until they ask for one.
    */
-  const pending = ctx.session.pendingAction;
+  // Only one from this mission: after "show me jackets", "M" is not the polo's size (session/shoppingSession.ts).
+  const pending = livePending(ctx.session);
   if (
     pending?.type === 'add-product' &&
     pending.turn + 1 === customerTurns(ctx) &&

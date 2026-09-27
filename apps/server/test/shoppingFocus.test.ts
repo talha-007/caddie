@@ -149,7 +149,9 @@ describe('the most recent explicit request wins', () => {
 
   it('a polo, then "something cheaper": a cheaper polo, compared with the polo', async () => {
     await say("Show me men's polos");
-    await sessions.patch(id, { focusProductId: CLIMA_NAVY.id, lastLead: { id: ELITE_WHITE.id, colour: 'white' } });
+    // The model had last looked up the Clima Jacket - which moves nothing; the polo search led with the Elite.
+    await tool('get_product_details', { productId: CLIMA_NAVY.id }, "Show me men's polos");
+    await sessions.patch(id, { lastLead: { id: ELITE_WHITE.id, colour: 'white' } });
     await say('Something cheaper');
     const cheaper = shown(await tool('search_products', { query: 'cheaper jacket', category: 'jacket' }, 'Something cheaper'));
     expect(kinds(cheaper)).toEqual(['polo']);
@@ -164,7 +166,6 @@ describe('a product in focus', () => {
     await say('What about the Clima Jacket?');
     expect(await focus()).toMatchObject({ kinds: ['jacket'], design: 'CLIMA JACKET 3.0' });
     await onScreen([ELITE_WHITE, ELITE_BLACK]);
-    await sessions.patch(id, { focusProductId: ELITE_WHITE.id });
     await say('Is it waterproof?');
     const answer = await tool('product_info', { which: 'Elite Polo', question: 'is it waterproof?' }, 'Is it waterproof?');
     expect(answer.facts).toMatch(/About: CLIMA JACKET 3\.0/);

@@ -88,8 +88,6 @@ async function tap(p: Product, options: Record<string, string>) {
   const session = await sessions.getOrCreate(id);
   await sessions.patch(id, {
     cardChoices: { ...(session.cardChoices ?? {}), [p.id]: { options, at: Date.now() + 5000 } },
-    focusProductId: p.id,
-    cardFocus: p.id,
     activeShoppingContext: focusFromCard(p, session.activeShoppingContext, 1),
   });
 }
@@ -216,9 +214,9 @@ describe('"add it": the product they tapped, were offered, or were waiting on', 
   it('a product the model only looked up does not become "it"', async () => {
     await said('Show me the Elite Polo');
     await onScreen([ELITE_NAVY]);
-    // The model looks the Clima Jacket up in passing - that moves focusProductId.
+    // The model looks the Clima Jacket up in passing - that moves nothing (Phase 3B).
     await runTool('get_product_details', { productId: CLIMA_NAVY.id }, { session: await sessions.getOrCreate(id), utterance: 'Show me the Elite Polo' });
-    expect((await sessions.getOrCreate(id)).focusProductId).toBe(CLIMA_NAVY.id);
+    expect((await sessions.getOrCreate(id)).activeShoppingContext?.productId).not.toBe(CLIMA_NAVY.id);
     await said('Add it in M');
     expect((await add({ productId: CLIMA_NAVY.id, options: { Size: 'M' } }, 'Add it in M')).added).toEqual([`${ELITE_NAVY.title} / M x1`]);
   });

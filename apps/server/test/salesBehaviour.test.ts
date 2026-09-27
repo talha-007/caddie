@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { noteShoppingFocus } from '../src/session/focus.js';
 import type { CaddieAttachment, Product } from '@caddie/shared';
 import { setDealsForTests } from '../src/catalog/bundles.js';
 import { attributesOf } from '../src/catalog/attributes.js';
@@ -68,6 +69,8 @@ async function customer(...said: string[]) {
 }
 
 async function turn(id: string, args: Record<string, unknown>, utterance: string) {
+  // As converse() does: the focus from their words before any tool runs.
+  await noteShoppingFocus(id, utterance);
   const session = await sessions.getOrCreate(id);
   const result = await runTool('search_products', args, { session, utterance });
   const cards = result.attachment?.kind === 'products' ? result.attachment.products : [];

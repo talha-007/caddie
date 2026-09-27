@@ -1,6 +1,7 @@
 import type { Cart, CartAction } from '@caddie/shared';
 import { log } from '../lib/logger.js';
 import { sessions, type PendingAction } from '../session/store.js';
+import { currentMission } from '../session/shoppingSession.js';
 import { cartAuthorization, lineChangeAuthorization, offeredAction, turnNow } from './cartAuthorization.js';
 import type { ToolContext } from './types.js';
 
@@ -183,7 +184,8 @@ export async function executeCommerceAction(ctx: ToolContext, action: CommerceAc
     if (!plan.ok) {
       log.info('gateway.refused', { sessionId: ctx.session.id, action: action.type, source, reason: plan.reason });
       // What it waits for next turn - or nothing: a refused action never leaves an old one waiting.
-      await sessions.patch(ctx.session.id, { pendingAction: plan.pending ? { ...plan.pending, turn: turnNow(here) } : undefined });
+      // Stamped with its mission: a new mission ends it (session/shoppingSession.ts livePending).
+      await sessions.patch(ctx.session.id, { pendingAction: plan.pending ? { ...plan.pending, turn: turnNow(here), mission: currentMission(here.session) } : undefined });
       return {
         ok: false,
         action: action.type,

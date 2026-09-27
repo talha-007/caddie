@@ -338,7 +338,7 @@ describe('what only the model proposed never becomes a fact', () => {
   });
 
   it('an unlabelled profile value - one no trusted source wrote - is not read as theirs', async () => {
-    await sessions.patch(id, { shopper: { usualSize: 'M', budget: { amount: 20, kind: 'max', per: 'item' } }, sizeProfile: { usualSize: 'M', audience: 'women' }, preferences: { audience: 'women', colour: 'black', budgetAmount: 20 } });
+    await sessions.patch(id, { shopper: { usualSize: 'M', budget: { amount: 20, kind: 'max', per: 'item' } }, sizeProfile: { usualSize: 'M', audience: 'women' } });
     const after = await session();
     expect(trustedShopperFacts(after)).toEqual({ measurements: {}, sources: {} });
     expect(currentRange(after)).toBeUndefined();
@@ -451,7 +451,6 @@ describe('one-off constraints follow a follow-up, not a new mission', () => {
   for (const next of ['show me jackets', 'what about jackets?', 'show me some other jackets']) {
     it(`"show me red polos" -> "${next}": a new mission - jackets, not red jackets`, async () => {
       await say('show me red polos');
-      await sessions.patch(id, { lastSearch: { categories: ['polo'], colour: 'red' } });
       await say(next);
       const after = await session();
       expect(after.activeShoppingContext?.kinds).toEqual(['jacket']);

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { focusFromCard } from '../src/session/focus.js';
 import type { Product } from '@caddie/shared';
 import { setDealsForTests } from '../src/catalog/bundles.js';
 import { setCatalogueForTests } from '../src/catalog/sync.js';
@@ -140,7 +141,7 @@ describe('"add it", then the size it was waiting for', () => {
 describe('a size tapped on a card is not an add', () => {
   async function tapped() {
     const id = await conversation(['Show me rain jackets', 'Here are the rain jackets.']);
-    await sessions.patch(id, { cardChoices: { [JACKET.id]: { options: { Size: 'M' }, at: Date.now() } }, cardFocus: JACKET.id, focusProductId: JACKET.id });
+    await sessions.patch(id, { cardChoices: { [JACKET.id]: { options: { Size: 'M' }, at: Date.now() + 1 } }, activeShoppingContext: focusFromCard(JACKET, undefined, 1) });
     return id;
   }
 
@@ -174,7 +175,7 @@ describe('how many', () => {
 describe('tap, a question about it, then "add it"', () => {
   it('the tapped size still stands - the question was about the same product', async () => {
     const id = await conversation(['Show me rain jackets', 'Here are the rain jackets.']);
-    await sessions.patch(id, { cardChoices: { [JACKET.id]: { options: { Size: 'M' }, at: Date.now() - 5000 } }, cardFocus: JACKET.id, focusProductId: JACKET.id });
+    await sessions.patch(id, { cardChoices: { [JACKET.id]: { options: { Size: 'M' }, at: Date.now() - 5000 } }, activeShoppingContext: focusFromCard(JACKET, undefined, 1) });
     await recordTurn(id, 'Is it waterproof?', 'Yes - the Warrior Jacket is described as waterproof.');
     expect((await modelAdds(id, 'Add it.', { productId: JACKET.id })).lines).toEqual([{ variantId: '702', quantity: 1 }]);
   });

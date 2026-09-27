@@ -92,8 +92,6 @@ sessionRouter.post('/:id/choice', owner, writeLimit, async (req, res, next) => {
     const activeShoppingContext = focusFromCard(product, session.activeShoppingContext, customerTurn(session, false));
     await sessions.patch(sessionId, {
       cardChoices: { ...(session.cardChoices ?? {}), [product.id]: { options, ...(variantId ? { variantId } : {}), at: Date.now() } },
-      focusProductId: product.id,
-      cardFocus: product.id,
       activeShoppingContext,
     });
     log.info('session.card_choice', { sessionId, productId: product.id, options });
@@ -156,20 +154,19 @@ sessionRouter.post('/:id/restart', owner, writeLimit, async (req, res, next) => 
   }
 });
 
-/** The durable facts a New chat keeps, and the compatibility mirrors that match them. */
+/**
+ * What a New chat keeps: the durable facts and measurements they gave, and
+ * the currency. Everything else about the shopping - the focus and its
+ * mission, the pack in hand, a waiting basket add, what is on screen, the
+ * search history, card taps, our size advice - starts again (Phase 3B).
+ */
 function carriedAcrossNewChat(existing: CaddieSession): Pick<CaddieSession, 'sizeProfile' | 'preferences' | 'shopper'> {
   const { measurements, sources, ...facts } = trustedShopperFacts(existing);
   const provenance = Object.fromEntries(Object.keys(sources).map((field) => [field, existing.shopper?.provenance?.[field]]).filter(([, record]) => !!record));
   const shopper: ShopperProfile | undefined = Object.keys(provenance).length ? { ...facts, provenance } : undefined;
-  const audience = facts.range === 'men' || facts.range === 'women' ? facts.range : undefined;
   return {
-    sizeProfile: {
-      ...measurements,
-      ...(facts.usualSize ? { usualSize: facts.usualSize } : {}),
-      ...(facts.fit ? { fitPreference: facts.fit } : {}),
-      ...(audience ? { audience } : {}),
-    },
-    preferences: audience ? { audience } : {},
+    sizeProfile: { ...measurements },
+    preferences: existing.preferences.currency ? { currency: existing.preferences.currency } : {},
     ...(shopper ? { shopper } : {}),
   };
 }

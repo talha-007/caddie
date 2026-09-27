@@ -13,12 +13,11 @@ describe('MemorySessionStore', () => {
 
   it('does not unset a preference with an undefined patch', async () => {
     const store = new MemorySessionStore();
-    await store.patch('s2', { preferences: { colour: 'navy', budgetAmount: 150 } });
-    await store.patch('s2', { preferences: { colour: undefined, budgetAmount: 120 } });
+    await store.patch('s2', { preferences: { currency: 'GBP' } });
+    await store.patch('s2', { preferences: { currency: undefined } });
 
     const session = await store.get('s2');
-    expect(session?.preferences.colour).toBe('navy');
-    expect(session?.preferences.budgetAmount).toBe(120);
+    expect(session?.preferences.currency).toBe('GBP');
   });
 
   it('keeps one object per session so a later save cannot undo a patch', async () => {

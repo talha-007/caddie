@@ -155,6 +155,8 @@ export interface SizeRecommendationRecord {
   /** The customer turn it was given in. */
   turn: number;
   at: number;
+  /** The mission in which they accepted it ("use that size") - theirs for that mission's purchases, and no other. */
+  acceptedMission?: number;
 }
 
 /**

@@ -19,9 +19,8 @@ import { DURABLE_FIELDS, durablePart, mergeProfile, readIntent, type DurableFiel
  * turn can each learn something, and over Redis each holds its own copy - the
  * second write would otherwise undo the first.
  *
- * The older fields some code once read (sizeProfile.usualSize, .audience,
- * .fitPreference, preferences.audience) are kept equal to what is accepted
- * here, and to nothing else. Nothing that decides reads them.
+ * The older copies some code once read (sizeProfile.usualSize, .audience,
+ * .fitPreference, preferences.audience) are no longer written (Phase 3B).
  */
 export async function rememberShopper(sessionId: string, update: Partial<ShopperProfile>, source: FactSource): Promise<ShopperProfile> {
   const fresh = await sessions.getOrCreate(sessionId);
@@ -47,16 +46,7 @@ export async function rememberShopper(sessionId: string, update: Partial<Shopper
     ...(fresh.shopper?.provenance ?? {}),
     ...Object.fromEntries((Object.keys(accepted) as DurableField[]).map((field) => [field, { source, at }])),
   };
-  const patch: Partial<CaddieSession> = { shopper };
-
-  const mirror: CaddieSession['sizeProfile'] = {};
-  if (accepted.usualSize) mirror.usualSize = accepted.usualSize;
-  if (accepted.fit) mirror.fitPreference = accepted.fit;
-  if (accepted.range === 'men' || accepted.range === 'women') mirror.audience = accepted.range;
-  if (Object.keys(mirror).length) patch.sizeProfile = mirror;
-  if (accepted.range === 'men' || accepted.range === 'women') patch.preferences = { audience: accepted.range };
-
-  const saved = await sessions.patch(sessionId, patch);
+  const saved = await sessions.patch(sessionId, { shopper });
   return saved.shopper ?? shopper;
 }
 
