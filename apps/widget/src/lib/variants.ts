@@ -125,39 +125,59 @@ function matchSize(values: string[], wanted: Array<string | null | undefined>): 
   return undefined;
 }
 
+/**
+ * What a card opens on. Only what is the customer's own - so the card and
+ * the Caddie agree on what has been chosen:
+ *
+ *   - a variant agreed in conversation, whole;
+ *   - an option with one value (nothing to choose);
+ *   - the colour of the page they are on, or the one in the product's name;
+ *   - their own size and waist, as the server holds them (quick start, or
+ *     said in chat) - the server counts those as theirs too.
+ *
+ * Never a size we recommended (shown as a suggestion instead, see
+ * suggestedSize), and never the page variant's size: the theme hands us the
+ * page's first variant whether or not they picked it. A card once opened on
+ * "S" from a recommendation, the customer said "add it", and the Caddie - which
+ * rightly does not count a default as a choice - asked for the size again.
+ */
 export function initialSelection(
   product: Product,
-  hints: { size?: string | null; waist?: string | null; variantId?: string | null } = {},
+  hints: { size?: string | null; waist?: string | null; variantId?: string | null; pickedVariantId?: string | null } = {},
 ): Selection {
   const selection: Selection = {};
   const options = productOptions(product);
 
+  // A variant agreed in conversation ("add it in M") is theirs: every option of it.
+  const picked = hints.pickedVariantId ? product.variants.find((v) => sameId(v.id, hints.pickedVariantId as string)) : null;
+  if (picked) return { ...picked.options };
   const pageVariant = hints.variantId ? product.variants.find((v) => sameId(v.id, hints.variantId as string)) : null;
-  if (pageVariant) Object.assign(selection, pageVariant.options);
-
   const title = product.title.toLowerCase();
   for (const option of options) {
     if (option.values.length === 1) selection[option.name] = option.values[0] as string;
-    // "Tour Tech Trousers - Navy" was recommended in navy: show it that way (they still tap Add).
-    if (option.kind === 'colour' && !pageVariant && !selection[option.name]) {
-      const named = option.values.find((value) => new RegExp(`\\b${escapeRegExp(value.toLowerCase())}\\b`).test(title));
+    if (option.kind === 'colour' && !selection[option.name]) {
+      const onPage = pageVariant?.options[option.name];
+      // "Tour Tech Trousers - Navy" was recommended in navy: show it that way (they still tap Add).
+      const named = onPage ?? option.values.find((value) => new RegExp(`\\b${escapeRegExp(value.toLowerCase())}\\b`).test(title));
       if (named) selection[option.name] = named;
     }
-    // Their size, already chosen - they can still tap another.
-    if (option.kind === 'size' && !pageVariant) {
+    // Their own size, as the server holds it - they can still tap another.
+    if (option.kind === 'size' && !selection[option.name]) {
       const match = matchSize(option.values, sizeHintsFor(option.name, hints));
       if (match) selection[option.name] = match;
     }
   }
-
-  // The page variant's size is what they were looking at, but their own size wins.
-  if (pageVariant && (hints.size || hints.waist)) {
-    const sizeOption = options.find((option) => option.kind === 'size');
-    const match = sizeOption ? matchSize(sizeOption.values, sizeHintsFor(sizeOption.name, hints)) : undefined;
-    if (sizeOption && match) selection[sizeOption.name] = match;
-  }
-
   return selection;
+}
+
+/**
+ * The size we recommended, when this product comes in it - shown beside the
+ * picker as a suggestion, never chosen for them. Tapping it is their choice.
+ */
+export function suggestedSize(product: Product, recommended: string | null | undefined): string | undefined {
+  if (!recommended) return undefined;
+  const sizeOption = productOptions(product).find((option) => option.kind === 'size' && !/leg|length|inseam/i.test(option.name));
+  return sizeOption ? matchSize(sizeOption.values, [recommended]) : undefined;
 }
 
 /*

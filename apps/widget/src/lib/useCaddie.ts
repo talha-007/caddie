@@ -361,8 +361,13 @@ export function useCaddie(page: PageContext): CaddieState {
         heldCart.current = null;
       }
       if (attachment?.kind === 'size') setSize(attachment.recommendation);
-      // However they told us - quick start, chat or a size answer - the pickers open on it.
-      if (base?.shopper) setSizes(base.shopper);
+      /*
+       * However they told us - quick start, chat or a size answer - the pickers
+       * open on it. Taken from every server reply, absent included: the server
+       * is what the Caddie counts, and sizes kept here after its session had
+       * lapsed opened cards on a size the Caddie no longer knew.
+       */
+      if (base) setSizes(base.shopper ?? null);
       if (attachment?.kind === 'products') remember(attachment.products);
 
       const now = Date.now();

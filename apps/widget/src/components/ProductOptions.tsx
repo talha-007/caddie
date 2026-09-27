@@ -6,6 +6,7 @@ import {
   matchVariant,
   nothingToChoose,
   productOptions,
+  suggestedSize,
   sameId,
   swatchColour,
   type Selection,
@@ -28,6 +29,8 @@ export interface ProductChoice {
   resolving: boolean;
   /** Every option chosen, but that combination is not in stock. */
   soldOut: boolean;
+  /** The size we recommended, when no size is chosen yet - shown as a hint, never as a choice. */
+  suggested?: string;
   choose: (name: string, value: string) => void;
   load: () => Promise<void>;
 }
@@ -38,11 +41,18 @@ export function useProductChoice(product: Product): ProductChoice {
   const onThisPage = Boolean(shop.page.productId && sameId(shop.page.productId, product.id));
   // Chosen in conversation first, then the variant on the page they are looking at.
   const pickedId = shop.picked[product.id] ?? null;
-  // A size worked out for them wins; otherwise the size and waist they gave us.
+  /*
+   * Their own size and waist - as the server holds them, so the Caddie counts
+   * what the card shows. A size we recommended is a suggestion beside the
+   * picker (suggestedSize), never the card's selection.
+   */
   const hints = {
-    size: shop.size?.size ?? shop.sizes?.size ?? null,
+    size: shop.sizes?.size ?? null,
     waist: shop.sizes?.waist ?? null,
-    variantId: pickedId ?? (onThisPage ? (shop.page.variantId ?? null) : null),
+    // Agreed in conversation - theirs, every option of it.
+    pickedVariantId: pickedId,
+    // The page's variant - the theme's default as often as their pick: its colour only.
+    variantId: onThisPage ? (shop.page.variantId ?? null) : null,
   };
 
   const [selection, setSelection] = useState<Selection>(() => (full ? initialSelection(full, hints) : {}));
@@ -120,9 +130,13 @@ export function useProductChoice(product: Product): ProductChoice {
   const settled = local ?? (resolved?.key === key ? resolved.variant : null);
   const variant = full && (complete || nothingToChoose(full)) ? settled : null;
 
+  const sizeOption = full ? productOptions(full).find((option) => option.kind === 'size') : undefined;
+  const suggested = full && sizeOption && !selection[sizeOption.name] ? suggestedSize(full, shop.size?.size) : undefined;
+
   return {
     full,
     selection,
+    ...(suggested ? { suggested } : {}),
     variant: variant?.available ? variant : null,
     loading,
     resolving,
@@ -151,6 +165,11 @@ export function ProductOptions({ product, choice, compact }: ProductOptionsProps
   const full = choice.full;
   const options = productOptions(full);
   if (options.length === 0) return null;
+  /*
+   * Trousers have a waist and a leg: each choice says which it is ("Waist 34",
+   * "Leg 32"), or two pickers reading "34" and "32" cannot be told apart.
+   */
+  const named = options.filter((option) => option.kind !== 'colour').length > 1;
 
   return (
     <div className={`caddie-options${compact ? ' caddie-options--compact' : ''}`}>
@@ -190,22 +209,37 @@ export function ProductOptions({ product, choice, compact }: ProductOptionsProps
               onChange={(event) => choice.choose(option.name, event.target.value)}
             >
               <option value="" disabled>
-                {option.name}
+                {shortName(option)}
               </option>
               {option.values.map((value) => {
                 const available = isValueAvailable(full, choice.selection, option.name, value);
                 return (
                   <option key={value} value={value} disabled={!available}>
-                    {available ? value : `${value} – sold out`}
+                    {named ? `${shortName(option)} ${value}` : value}
+                    {available ? '' : ' – sold out'}
                   </option>
                 );
               })}
             </select>
+            {option.kind === 'size' && choice.suggested ? (
+              <button type="button" className="caddie-suggested" onClick={() => choice.choose(option.name, choice.suggested!)}>
+                Suggested: {choice.suggested}
+              </button>
+            ) : null}
           </label>
         ),
       )}
     </div>
   );
+}
+
+/** What a picker is, in a word that fits a narrow tile: "Size", "Waist", "Leg". */
+function shortName(option: { name: string; kind: string }): string {
+  if (/waist/i.test(option.name)) return 'Waist';
+  if (/leg|length|inseam/i.test(option.name)) return 'Leg';
+  if (option.kind === 'size') return 'Size';
+  const name = option.name.trim().toLowerCase();
+  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 /** "Navy" - the colour the customer picked, shown under the title. */
