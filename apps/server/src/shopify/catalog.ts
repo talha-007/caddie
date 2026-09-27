@@ -10,7 +10,7 @@ import * as storefrontCart from './storefrontCart.js';
 import { addMoney, readMoney, storeCurrency, toMinorUnits } from './money.js';
 import { log } from '../lib/logger.js';
 import { buyerContext, callUcpTool } from './ucpClient.js';
-import { optionValueMatches } from '../recommend/sizeWords.js';
+import { variantsMatching } from '../catalog/commerce.js';
 
 /**
  * Normalisers between the UCP payloads and our own types.
@@ -218,28 +218,12 @@ export async function getProductDetails(
     if (!selected || Object.keys(selected).length === 0) return mirrored;
 
     /*
-     * Narrow to the chosen combination, the way Shopify does. add_to_cart
-     * reads variants[0], so this has to leave exactly the variant the
-     * customer picked - or none, when that combination does not exist.
+     * Narrowed to the variants the choices allow, by the one matching rule
+     * (catalog/commerce.ts variantsMatching) - the same the basket, the card
+     * and packs resolve by. Partial choices leave several; add_to_cart and
+     * product details decide with resolveVariant, never by taking the first.
      */
-    const variants = mirrored.variants.filter((variant) => {
-      /*
-       * The option name comes from the model, so its capitalisation is not
-       * ours to rely on: { size: "L" } never matched { Size: "L" }, narrowed
-       * to nothing, and the customer was told we could not find the
-       * combination for a garment sitting in stock.
-       */
-      const byName = new Map(
-        Object.entries(variant.options).map(([name, value]) => [name.toLowerCase(), value]),
-      );
-      return Object.entries(selected).every(
-        ([name, value]) => {
-          const held = byName.get(name.toLowerCase());
-          // "medium" is M, and half of "M/L" - see optionValueMatches.
-          return held !== undefined && optionValueMatches(held, value);
-        },
-      );
-    });
+    const variants = variantsMatching(mirrored, selected);
     return { ...mirrored, variants };
   }
 

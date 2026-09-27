@@ -1,9 +1,11 @@
+import { featureState, formatMoney, sizeScale } from '../catalog/commerce.js';
+import { priceRange } from './pricing.js';
 import type { Product, ProductVariant } from '@caddie/shared';
 import { colourwayName, otherColourways } from '../catalog/colourways.js';
 import { matchesColourText, parseColours } from '../catalog/colour.js';
 import { normaliseSize, optionValueMatches } from './sizeWords.js';
 import { FEATURE_LABEL, attributesOf, featuresAsked, featuresStatedIn, fitStatedIn, hasFeature, type Feature, type ProductFit } from '../catalog/attributes.js';
-import { shapesOf, shapesSaid, strongerOf, strongerSaid } from '../ai/verify.js';
+import { shapesOf, shapesSaid, strongerOf, strongerSaid } from '../catalog/attributes.js';
 
 /**
  * Everything a customer can ask about one product - which sizes, which
@@ -17,12 +19,9 @@ import { shapesOf, shapesSaid, strongerOf, strongerSaid } from '../ai/verify.js'
  * products), a starting price as the price. Here they are facts.
  */
 
-const SIZE_OPTION = /size|waist/i;
 const COLOUR_OPTION = /colou?r/i;
-const LEG_OPTION = /leg|length/i;
 
-const SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
-const money = (amount: number, currency: string) => `${SYMBOL[currency] ?? `${currency} `}${amount.toFixed(2)}`;
+const money = formatMoney;
 
 export interface SizeLine {
   size: string;
@@ -51,16 +50,22 @@ function sizeOf(variant: ProductVariant, option?: string): string | undefined {
 
 export function stockPicture(product: Product): StockPicture {
   const names = product.options.map((option) => option.name);
-  const sizeOption = names.find((name) => SIZE_OPTION.test(name));
+  /*
+   * The size choice is the product's own size scale (catalog/commerce.ts): a
+   * sock whose only size is ONE SIZE has none, so it reads "one size" here,
+   * on its card and at the basket alike. The leg is a further choice.
+   */
+  const sizeOption = sizeScale(product).dimensions.find((dimension) => dimension.scale !== 'leg')?.option;
   const colourOption = names.find((name) => COLOUR_OPTION.test(name));
   const otherOptions = product.options
     .filter((option) => option.name !== sizeOption && option.name !== colourOption && option.values.length > 1)
     .map((option) => ({ name: option.name, values: option.values }));
 
   const variants = product.variants;
-  const prices = variants.map((variant) => variant.price.amount);
-  const currency = variants[0]?.price.currency ?? product.price.currency;
-  const differ = new Set(prices).size > 1;
+  // The prices they could pay: variants that can be bought (recommend/pricing.ts priceRange).
+  const span = priceRange(product);
+  const currency = span.currency;
+  const differ = span.min !== span.max;
 
   const colours = colourOption ? (product.options.find((option) => option.name === colourOption)?.values ?? []) : [undefined];
   const sizeValues = sizeOption ? (product.options.find((option) => option.name === sizeOption)?.values ?? []) : [];
@@ -80,8 +85,8 @@ export function stockPicture(product: Product): StockPicture {
     ...(sizeOption ? { sizeOption } : {}),
     groups,
     otherOptions,
-    priceMin: prices.length ? Math.min(...prices) : product.price.amount,
-    priceMax: prices.length ? Math.max(...prices) : product.price.amount,
+    priceMin: span.min,
+    priceMax: span.max,
     currency,
     otherColourways: otherColourways(product),
   };
@@ -147,7 +152,7 @@ export interface Answer {
 
 /** Everything its own data states: features, cut, shape, and the stronger-than-warm words. */
 export function verifiedFacts(product: Product): string {
-  const { features, fit } = attributesOf(product);
+  const { features, fit, denied } = attributesOf(product);
   const labels = features.map((feature) => FEATURE_LABEL[feature]);
   // Waterproof covers water-resistant: say so, so neither reads as missing.
   if (features.includes('waterproof')) labels.splice(labels.indexOf(FEATURE_LABEL.waterproof) + 1, 0, 'water-resistant (it is waterproof)');
@@ -155,6 +160,7 @@ export function verifiedFacts(product: Product): string {
   const stronger = strongerOf(product);
   return [
     `Verified from its own description: ${labels.length ? labels.join(', ') : 'no features stated'}.`,
+    denied.length ? `Its description says it is NOT: ${denied.map((feature) => FEATURE_LABEL[feature]).join(', ')}.` : '',
     `Cut: ${fit ?? 'not stated'}.`,
     shapes.length ? `Shape: ${shapes.join(', ')}.` : '',
     stronger.length ? `Also stated, in these words: ${stronger.join(', ')} - not any other (insulated, fleece, quilted...) that is not listed.` : '',
@@ -167,8 +173,12 @@ export function verifiedFacts(product: Product): string {
 /** One asked-about attribute, answered in one of three ways. */
 interface AttributeAnswer {
   asked: string;
-  /** yes - its data states it; other - it states something else in its place; unstated - nothing either way. */
-  state: 'yes' | 'other' | 'unstated';
+  /**
+   * yes - its data states it; no - its data says it is not ("not
+   * waterproof"); other - it states something else in its place; unstated -
+   * nothing either way (catalog/commerce.ts featureState).
+   */
+  state: 'yes' | 'no' | 'other' | 'unstated';
   /** What it states instead, for `other`. */
   instead?: string;
   /**
@@ -204,9 +214,10 @@ export function attributesAsked(product: Product, question: string): AttributeAn
   for (const feature of ['hooded', 'quarter-zip', 'full-zip'] as Feature[]) features.delete(feature);
   for (const feature of features) {
     const label = FEATURE_LABEL[feature];
-    if (hasFeature(product, feature)) answers.push({ asked: label, state: 'yes' });
+    const state = featureState(product, feature);
+    if (state === 'yes') answers.push({ asked: label, state: 'yes' });
     else if (feature === 'waterproof' && hasFeature(product, 'water-resistant')) answers.push({ asked: label, state: 'other', instead: 'water-resistant' });
-    else answers.push({ asked: label, state: 'unstated' });
+    else answers.push({ asked: label, state: state === 'no' ? 'no' : 'unstated' });
   }
 
   const fitAsked = fitStatedIn(question) ?? (/\b(relaxed|loose|roomy)\b/i.test(question) ? 'relaxed' : /\bslim\b/i.test(question) ? 'slim' : undefined);
@@ -230,6 +241,7 @@ export function sayAttributes(name: string, answers: AttributeAnswer[]): string 
       // Warm, or thermal, is not evidence either way for insulated: what it does state, and that the rest is not stated.
       if (answer.state === 'other' && answer.unsaid) return `${subject}'s description says ${answer.instead}, but doesn't state that it's ${answer.asked}`;
       if (answer.state === 'other') return `${subject}'s description says ${answer.instead}, not ${answer.asked}`;
+      if (answer.state === 'no') return `${index === 0 ? 'No - ' : ''}${subject}'s description says it isn't ${answer.asked}`;
       return `${subject}'s product data doesn't state that it's ${answer.asked}`;
     })
     .map((sentence) => sentence.charAt(0).toUpperCase() + sentence.slice(1))

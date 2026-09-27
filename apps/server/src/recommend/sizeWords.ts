@@ -1,3 +1,5 @@
+import type { Product } from '@caddie/shared';
+import { sizeStatus } from '../catalog/constraints.js';
 /**
  * Turns whatever a size gets called into the code the catalogue uses.
  *
@@ -83,16 +85,6 @@ export function optionValueMatches(value: string, wanted: string): boolean {
   return parts.length > 1 && parts.some((part) => sameSize(part, wanted));
 }
 
-/**
- * Which scale a size is measured on.
- *
- * Druids sizes tops by letter and bottoms by waist, so "M" and "32" are not
- * two values of one scale - they are two scales. A customer who says M has
- * told us nothing about which trousers fit them.
- */
-function scaleOf(code: string): 'letter' | 'waist' {
-  return /^\d+$/.test(code) ? 'waist' : 'letter';
-}
 
 /**
  * Whether a product is stocked in this size.
@@ -111,21 +103,13 @@ export function stockedInSize(
   size?: string,
 ): boolean {
   if (!size) return true;
-  // A search result may carry no variants, so we cannot rule it out yet.
-  if (variants.length === 0) return true;
-
-  const wanted = normaliseSize(size);
-  if (!wanted) return true;
-
-  const offered = variants
-    .flatMap((variant) => Object.values(variant.options))
-    .map((value) => normaliseSize(value))
-    .filter((value): value is string => value !== null);
-
-  // Sized on another scale, so the customer's size says nothing about it.
-  if (!offered.some((value) => scaleOf(value) === scaleOf(wanted))) return true;
-
-  return variants.some(
-    (variant) => variant.available && Object.values(variant.options).some((value) => sameSize(value, wanted)),
-  );
+  // A word we cannot read as a size rules nothing out.
+  if (!normaliseSize(size)) return true;
+  /*
+   * The one size-and-stock reader (catalog/constraints.ts sizeStatus, through
+   * catalog/commerce.ts): in stock, or sized on another scale. It knows a
+   * belt's "M/L" is an M, which this copy did not.
+   */
+  const status = sizeStatus({ variants } as unknown as Product, size);
+  return status === 'in-stock' || status === 'other-scale';
 }

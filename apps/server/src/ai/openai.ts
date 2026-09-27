@@ -4,19 +4,21 @@ import { UpstreamError } from '../lib/errors.js';
 import { fetchWithTimeout, Semaphore } from '../lib/http.js';
 import { log } from '../lib/logger.js';
 import { sessions, type CaddieSession } from '../session/store.js';
-import { tappedSinceLastSaid } from '../session/shoppingSession.js';
+import { currentPack, currentScreen, tappedSinceLastSaid } from '../session/shoppingSession.js';
+import { packStatus } from '../tools/packState.js';
 import { describeShopper } from '../shopper/facts.js';
 import { readCustomerTurn } from './turn.js';
 import { runTool, toolDefinitionsForVapi } from '../tools/index.js';
 import { costOfTokens } from '../usage/pricing.js';
 import { record } from '../usage/store.js';
 import { SYSTEM_PROMPT } from './prompt.js';
-import { verifyReply, withoutClaims } from './verify.js';
+import { verifyReply, withoutClaims, type VerifyContext } from './verify.js';
 import { namesADeal } from '../recommend/deals.js';
 import { productById } from '../catalog/sync.js';
 import { asksToAdd } from '../tools/cartAuthorization.js';
 import { describeFocus } from '../session/focus.js';
 import { allDeals } from '../catalog/bundles.js';
+import { resolveVariant, sizeScale } from '../catalog/commerce.js';
 
 /**
  * The Caddie's brain for text chat.
@@ -168,7 +170,7 @@ export function pageContext(session: CaddieSession): ChatMessage | null {
     const title = page.productTitle ? ` - ${page.productTitle}` : '';
     // Socks and belts come in one size: asked to add them, the Caddie asked which size.
     const product = productById(page.productId);
-    const oneSize = product && !product.options.some((option) => option.values.length > 1) ? ' It comes in one size only - never ask which size.' : '';
+    const oneSize = product && sizeScale(product).oneSize ? ' It comes in one size only - never ask which size.' : '';
     return {
       role: 'system',
       content: `The customer is on the product page for [${page.productId}]${title}. "This", "it" and "this one" mean that product.${oneSize}`,
@@ -257,6 +259,25 @@ function basketContext(session: CaddieSession): ChatMessage | null {
  * What the customer has told us they want, so it is never asked twice. After
  * the stable prompt, like the rest of the per-turn context, so the cache holds.
  */
+/**
+ * What the reply checker may know beyond this turn's card: what is on screen,
+ * and which products' sizes are settled - tapped on their card, resolved in
+ * the pack in hand (tools/packState.ts), or just put in the basket. Read
+ * fresh: a tool this turn may have changed them.
+ */
+async function verifyContext(sessionId: string): Promise<VerifyContext> {
+  const now = await sessions.getOrCreate(sessionId);
+  const settled = new Set<string>();
+  for (const [id, choice] of Object.entries(now.cardChoices ?? {})) {
+    const product = productById(id);
+    if (product && resolveVariant(product, choice.options).status === 'exact') settled.add(product.id);
+  }
+  const pack = currentPack(now);
+  if (pack) for (const plan of packStatus(now, pack).pieces) if (!plan.missing.length) settled.add(plan.product.id);
+  if (now.lastAdded) settled.add(now.lastAdded.productId);
+  return { screen: currentScreen(now)?.products ?? [], sizeSettled: settled };
+}
+
 export function shopperContext(session: CaddieSession): ChatMessage | null {
   const text = describeShopper(session, session.preferences.currency);
   return text ? { role: 'system', content: text } : null;
@@ -539,7 +560,7 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
       finalText = refused[refused.length - 1]!.speech;
     }
     if (calls.length === 0 && finalText) {
-      const violations = verifyReply(finalText, evidence.join('\n'), attachment, userText);
+      const violations = verifyReply(finalText, evidence.join('\n'), attachment, userText, await verifyContext(sessionId));
       if (violations.length && !rewrote) {
         rewrote = true;
         log.warn('reply.unverified', { sessionId, claims: violations.map((v) => `${v.kind}:${v.claim}`) });

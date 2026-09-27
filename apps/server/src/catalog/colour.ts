@@ -254,3 +254,8 @@ export function coloursOffered(products: Product[]): string[] {
   }
   return [...seen.values()];
 }
+
+/** Every colour word a product's colourways carry - title and Colour option (catalog/commerce.ts). */
+export function colourWordsOf(product: Product, inStockOnly = true): string[] {
+  return [...new Set(colourways(product, inStockOnly).flat())];
+}

@@ -1,7 +1,12 @@
 import type { CaddieAttachment, Product } from '@caddie/shared';
-import { FEATURE_LABEL, attributesOf, featuresAsked, featuresStatedIn, fitStatedIn, hasFeature } from '../catalog/attributes.js';
+import { FEATURE_LABEL, SHAPES, SHAPE_FEATURES, STRONGER, attributesOf, featuresAsked, featuresStatedIn, fitStatedIn, hasFeature, normalise, sayShape, shapeText, shapesSaid } from '../catalog/attributes.js';
+// Shapes and stronger words are read from the product by catalog/attributes.ts; re-exported for older importers.
+export { shapesOf, shapesSaid, strongerOf, strongerSaid } from '../catalog/attributes.js';
 import { colourMatch, isColourWord, parseColours } from '../catalog/colour.js';
 import { garmentName } from '../catalog/colourways.js';
+import { sizeScale, supportsSize } from '../catalog/commerce.js';
+import { categoriesAsked, isCategory } from '../catalog/constraints.js';
+import { normaliseSize } from '../recommend/sizeWords.js';
 import { distinctiveWords } from '../catalog/lookup.js';
 import { allProducts, catalogueVersion } from '../catalog/sync.js';
 
@@ -19,7 +24,7 @@ import { allProducts, catalogueVersion } from '../catalog/sync.js';
 
 export interface Violation {
   /** `wording`: ranking talk or overclaiming, reworded. `offer`: offering to show what is already on screen, dropped. */
-  kind: 'price' | 'product' | 'count' | 'colour' | 'attribute' | 'wording' | 'offer' | 'comparison' | 'length' | 'status' | 'pricing';
+  kind: 'price' | 'product' | 'count' | 'colour' | 'attribute' | 'wording' | 'offer' | 'comparison' | 'length' | 'status' | 'pricing' | 'stock' | 'size';
   claim: string;
 }
 
@@ -29,10 +34,6 @@ const NUMBER_WORDS: Record<string, number> = {
 };
 /** A count of garments a card could hold: "six polos", "4 jackets". */
 const COUNT = /\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:[a-z-]+\s+){0,2}?(polos|jackets|gilets|midlayers|hoodies|trousers|shorts|joggers|caps|belts|socks)\b/gi;
-const KIND_OF: Record<string, RegExp> = {
-  polos: /polo/i, jackets: /jacket/i, gilets: /gilet/i, midlayers: /midlayer/i, hoodies: /hoodie/i,
-  trousers: /trouser/i, shorts: /short/i, joggers: /jogger/i, caps: /cap\b/i, belts: /belt/i, socks: /sock/i,
-};
 
 function amounts(text: string): number[] {
   return [...text.matchAll(PRICE)].map((match) => Number(match[1]!.replace(',', '.')));
@@ -61,7 +62,18 @@ function cardProducts(attachment?: CaddieAttachment): Product[] {
   return [];
 }
 
-export function verifyReply(reply: string, evidence: string, attachment?: CaddieAttachment, customerSaid?: string): Violation[] {
+/**
+ * What the checker may know of the session, beyond this turn's card: the
+ * products on screen, and those whose size is already settled - tapped on
+ * their card, resolved in the pack in hand, just added. Only used to judge
+ * size questions.
+ */
+export interface VerifyContext {
+  screen?: Product[];
+  sizeSettled?: Set<string>;
+}
+
+export function verifyReply(reply: string, evidence: string, attachment?: CaddieAttachment, customerSaid?: string, context: VerifyContext = {}): Violation[] {
   const violations: Violation[] = [];
   const known = amounts(evidence);
   const close = (a: number, b: number) => Math.abs(a - b) < 0.011;
@@ -92,14 +104,17 @@ export function verifyReply(reply: string, evidence: string, attachment?: Caddie
       const between = match[0].slice(match[1]!.length, -match[2]!.length);
       if (/\b(for|the|in|of|with|on)\b/i.test(between) || /\b(leg|waist|size|length|inseam)\s*$/i.test(reply.slice(0, match.index))) continue;
       const n = NUMBER_WORDS[match[1]!.toLowerCase()] ?? Number(match[1]);
-      const kind = KIND_OF[match[2]!.toLowerCase()];
-      const onCard = kind ? products.filter((product) => kind.test(product.title)).length : products.length;
+      // The reply's garment word read as search reads it, and the card's pieces by their catalogue kind (catalog/commerce.ts).
+      const kinds = categoriesAsked(match[2]!);
+      const onCard = kinds.length ? products.filter((product) => isCategory(product, kinds)).length : products.length;
       if (onCard && n > onCard) violations.push({ kind: 'count', claim: match[0] });
     }
     violations.push(...wrongColours(reply, products, told));
   }
   // What each product is said to be - features, fit - held to its own data, never to what was asked.
   violations.push(...unsupportedAttributes(reply, productsInEvidence(products, evidence), products[0]));
+  violations.push(...stockClaims(reply, productsInEvidence(products, evidence), products));
+  violations.push(...sizeRequests(reply, [...new Map([...productsInEvidence(products, evidence), ...(context.screen ?? [])].map((product) => [product.id, product])).values()], context.sizeSettled));
   violations.push(...salesWording(reply, products));
   violations.push(...priceComparisons(reply, evidence));
   violations.push(...packReadiness(reply, evidence));
@@ -259,102 +274,13 @@ function plainWording(reply: string): string {
     .replace(/\s+([.,!?])/g, '$1');
 }
 
-/**
- * Words that say more than "warm": each needs to appear in the product's own
- * text. "Warmly insulated" was said of a gilet whose data states warm and
- * windproof - warm is not insulated, and a salesperson who says so is wrong.
- */
-const STRONGER: Array<[string, RegExp]> = [
-  ['insulated', /\binsulat(ed|ion|ing)\b/],
-  ['thermal', /\bthermal\b/],
-  ['padded', /\bpadd(ed|ing)\b/],
-  ['fleece', /\bfleece(d| lined)?\b/],
-  ['quilted', /\bquilt(ed|ing)\b/],
-  ['packable', /\bpack(able|s away| away)\b/],
-];
-
 const NEGATED = /\b(not|no|isn'?t|doesn'?t|don'?t|without|nor|never|not stated|rather than|can'?t|cannot|couldn'?t|whether)\b/;
-
-/*
- * What a garment is shaped like. "The Pure Midlayer in black is warm and
- * sleeveless" - a midlayer with sleeves, offered to someone who asked for
- * something sleeveless. The customer's word is not the product's: each shape
- * needs the product's own title, type or description, read after the same
- * normalising as the reply ("quarter-zip", "1/4 zip" and "quarter zip" are
- * one thing). Nothing is inferred: a zip is not a full zip, a layer is not
- * sleeveless, a collar is not a v-neck, and a polo is not short-sleeved until
- * its data says so.
- */
-interface Shape {
-  label: string;
-  /** How a reply says it, in normalised text. */
-  said: RegExp;
-  /** What in the product's own normalised text supports it. `named` is title and type only. */
-  shown: (text: { all: string; named: string }) => boolean;
-}
-
-const SHAPES: Shape[] = [
-  {
-    label: 'sleeveless',
-    said: /\bsleeveless\b/,
-    // A gilet, vest or body warmer by its own name; "sleeveless" anywhere it describes itself.
-    shown: ({ all, named }) => /\bsleeveless\b/.test(all) || /\b(gilets?|vests?|body ?warmers?)\b/.test(named),
-  },
-  { label: 'long sleeve', said: /\blong sleeve(s|d)?\b/, shown: ({ all }) => /\blong sleeve(s|d)?\b/.test(all) },
-  { label: 'short sleeve', said: /\bshort sleeve(s|d)?\b/, shown: ({ all }) => /\bshort sleeve(s|d)?\b/.test(all) },
-  {
-    label: 'hooded',
-    said: /\bhooded\b|\b(has|have|with|comes with|features?|featuring|and) (a |an )?(\w+ )?hood\b/,
-    shown: ({ all }) => /\bhood(s|ed|ie|ies)?\b/.test(all),
-  },
-  { label: 'quarter zip', said: /\bquarter zip(s|ped)?\b|\b1 4 zip\b/, shown: ({ all }) => /\bquarter zip(s|ped)?\b|\b1 4 zip\b/.test(all) },
-  { label: 'half zip', said: /\bhalf zip(s|ped)?\b|\b1 2 zip\b/, shown: ({ all }) => /\bhalf zip(s|ped)?\b|\b1 2 zip\b/.test(all) },
-  { label: 'full zip', said: /\bfull zip(s|ped)?\b|\bfull length zip(per)?\b/, shown: ({ all }) => /\bfull (length )?zip(s|ped|per)?\b/.test(all) },
-  { label: 'zip neck', said: /\bzip neck(ed)?\b/, shown: ({ all }) => /\bzip neck(ed)?\b/.test(all) },
-  { label: 'crew neck', said: /\bcrew neck(ed)?\b/, shown: ({ all }) => /\bcrew( neck(ed)?)?\b/.test(all) },
-  { label: 'v-neck', said: /\bv neck(ed)?\b/, shown: ({ all }) => /\bv neck(ed)?\b/.test(all) },
-];
-
-/** "No sleeves" and "without sleeves" are sleeveless, said another way - and not a negation. */
-const sayShape = (text: string) => text.replace(/\b(no|without) sleeves\b/g, 'sleeveless');
-
-/** The shapes a piece of reply text claims, by label. */
-export function shapesSaid(text: string): string[] {
-  const said = sayShape(normalise(text));
-  return SHAPES.filter((shape) => shape.said.test(said)).map((shape) => shape.label);
-}
-
-/** Features whose wording is judged as a shape instead, so a hoodie's title counts. */
-const SHAPE_FEATURES = new Set<string>(['hooded', 'quarter-zip', 'full-zip']);
-
-/** The shapes a product's own data supports - the rule replies are checked against. */
-export function shapesOf(product: Product): string[] {
-  return SHAPES.filter((shape) => shape.shown(shapeText(product))).map((shape) => shape.label);
-}
-
-/** "Insulated", "thermal", "padded"... - the words that say more than warm, as a question or reply uses them. */
-export function strongerSaid(text: string): string[] {
-  const said = normalise(text);
-  return STRONGER.filter(([, pattern]) => pattern.test(said)).map(([word]) => word);
-}
-
-/** Which of those a product's own text states. */
-export function strongerOf(product: Product): string[] {
-  const own = `${product.title} ${product.productType ?? ''} ${product.description ?? ''}`.toLowerCase();
-  return STRONGER.filter(([, pattern]) => pattern.test(own)).map(([word]) => word);
-}
-
-function shapeText(product: Product): { all: string; named: string } {
-  const named = normalise(`${product.title} ${product.productType ?? ''}`);
-  return { all: normalise(`${named} ${product.description ?? ''}`), named };
-}
 /** A clause about what the customer wants, not about the product: "you prefer a relaxed fit". */
 const THEIR_WANT = /\b(you|you'?ve|you'?d)\s+(prefer|like|want|wanted|asked|said|mentioned|need)\b/;
 const RANGE_WORDS = /\b(mens|men s|ladies|womens|kids)\b/g;
 /** Talk of other products, not the one in hand. */
 const OTHERS = /\b(options?|alternatives?|others|other|instead|another|something else|some)\b/;
 
-const normalise = (text: string) => ` ${text.toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, ' ').trim()} `;
 
 /** The products on the card, and any whose full title the tools named this turn. */
 function productsInEvidence(card: Product[], evidence: string): Product[] {
@@ -463,6 +389,85 @@ function wrongColours(reply: string, products: Product[], told: string): Violati
         found.push({ kind: 'colour', claim: [word, ...between, words[end]].join(' ') });
       }
     });
+  }
+  return found;
+}
+
+/* ---------------- Stock and sizes ---------------- */
+
+const SIZE_WORD = String.raw`(?:xxs|xs|xxxl|xxl|[2-5]xl|xl|x-?large|extra large|small|medium|large|s|m|l|\d{2})`;
+const SIZE_LIST = String.raw`(${SIZE_WORD}(?:\s*(?:,|and|or|&)\s*${SIZE_WORD})*)`;
+const CLAIMS: Array<{ says: 'in-stock' | 'sold-out'; pattern: RegExp }> = [
+  { says: 'sold-out', pattern: new RegExp(String.raw`\b(?:sizes?\s+)?${SIZE_LIST}\s+(?:is|are|'s)\s+(?:currently\s+|now\s+)?(?:sold out|out of stock|not (?:in stock|available))\b`, 'gi') },
+  { says: 'sold-out', pattern: new RegExp(String.raw`\b(?:sold out|out of stock)\s+in\s+(?:sizes?\s+)?${SIZE_LIST}\b`, 'gi') },
+  { says: 'in-stock', pattern: new RegExp(String.raw`\b(?:sizes?\s+)?${SIZE_LIST}\s+(?:is|are|'s)\s+(?:currently\s+|now\s+|still\s+)?(?:in stock|available)\b`, 'gi') },
+  { says: 'in-stock', pattern: new RegExp(String.raw`\b(?:in stock|available)\s+in\s+(?:sizes?\s+)?${SIZE_LIST}\b`, 'gi') },
+];
+
+/**
+ * "XL is in stock", "sold out in M", "available in S, M and L" - held to
+ * the product's own variants, through the same reader product details and
+ * search use (catalog/commerce.ts supportsSize). A claim is checked only when
+ * it is about one design: the one its sentence names, or the only one on the
+ * card. Several products and no name - it cannot be told which, and nothing
+ * is said to be wrong.
+ */
+export function stockClaims(reply: string, products: Product[], card: Product[]): Violation[] {
+  if (!products.length) return [];
+  const keys = products.map((product) => ({ product, key: designKey(product) })).filter((entry) => entry.key.trim().length > 2);
+  const cardDesigns = new Set(card.map((product) => designKey(product)));
+  const found: Violation[] = [];
+  for (const sentence of reply.split(/(?<=[.!?])\s+/)) {
+    if (/\?\s*$/.test(sentence.trim())) continue;
+    const text = normalise(sentence);
+    const named = keys.filter((entry) => text.includes(entry.key)).map((entry) => entry.product);
+    const subject = named.length ? named : cardDesigns.size === 1 ? card : [];
+    if (!subject.length || new Set(subject.map((product) => designKey(product))).size > 1) continue;
+    for (const { says, pattern } of CLAIMS) {
+      for (const match of sentence.matchAll(new RegExp(pattern.source, pattern.flags))) {
+        const sizes = match[1]!.split(/\s*(?:,|and|or|&)\s*/i).map((word) => word.trim()).filter(Boolean);
+        for (const size of sizes) {
+          const wanted = normaliseSize(size) ?? size.toUpperCase();
+          // A lone s, m or l is a size only when the sentence talks of sizes or stock around it - "it's" is not S.
+          const statuses = subject.map((product) => supportsSize(product, wanted));
+          if (statuses.every((status) => status === 'other-scale')) continue;
+          const right = says === 'in-stock' ? statuses.some((status) => status === 'in-stock') : statuses.every((status) => status !== 'in-stock');
+          if (!right) found.push({ kind: 'stock', claim: match[0] });
+        }
+      }
+    }
+  }
+  return [...new Map(found.map((violation) => [violation.claim, violation])).values()];
+}
+
+/* ---------------- Size questions ---------------- */
+
+/** A sentence that asks for, or says it needs, a size. */
+const ASKS_SIZE = /\b(what|which)\s+(?:[a-z]+\s+){0,2}sizes?\b|\b(?:need|needs|needed|choose|pick|select|confirm|tell me|let me know|still need|require|requires)\b[^.?!]{0,50}\bsizes?\b|\bsizes?\b[^.?!]{0,30}\b(?:needed|required|to choose|to pick)\b/i;
+
+/**
+ * "What size would you like?" about socks, "I still need the belt size" -
+ * a size asked for when the product has no size to choose, or its size is
+ * already settled. Judged by commerce truth (catalog/commerce.ts sizeScale),
+ * never by a word list of one-size things: a sentence is about the products
+ * it names, the kinds it names ("the belt and socks"), or else everything
+ * in view; it is wrong only when none of those still needs a size. A size
+ * question about a polo with no size chosen stays a good question.
+ */
+export function sizeRequests(reply: string, pool: Product[], settled: Set<string> = new Set()): Violation[] {
+  if (!pool.length) return [];
+  const keys = pool.map((product) => ({ product, key: designKey(product) })).filter((entry) => entry.key.trim().length > 2);
+  const found: Violation[] = [];
+  for (const sentence of reply.split(/(?<=[.!?])\s+/)) {
+    if (!ASKS_SIZE.test(sentence) || /\bone[- ]size\b/i.test(sentence)) continue;
+    const text = normalise(sentence);
+    const named = keys.filter((entry) => text.includes(entry.key)).map((entry) => entry.product);
+    const kinds = categoriesAsked(sentence);
+    const ofKind = kinds.length ? pool.filter((product) => isCategory(product, kinds)) : [];
+    const subject = named.length ? named : ofKind.length ? ofKind : kinds.length ? [] : pool;
+    if (!subject.length) continue;
+    const stillOpen = subject.filter((product) => !sizeScale(product).oneSize && !settled.has(product.id));
+    if (!stillOpen.length) found.push({ kind: 'size', claim: sentence.trim() });
   }
   return found;
 }

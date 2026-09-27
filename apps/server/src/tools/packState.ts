@@ -3,6 +3,7 @@ import { sizeInRequest } from '../catalog/constraints.js';
 import { productById } from '../catalog/sync.js';
 import { normaliseSize, optionValueMatches } from '../recommend/sizeWords.js';
 import type { CaddieSession } from '../session/store.js';
+import { optionScale, resolveVariant } from '../catalog/commerce.js';
 import { trustedShopperFacts } from '../shopper/facts.js';
 import { readIntent } from '../shopper/profile.js';
 
@@ -64,11 +65,16 @@ const WAIST = /\bwaist(?:\s*size)?\s*(?:is\s*|of\s*|:\s*)?(\d{2})\b|\b(\d{2})\s*
 const LEG = /\b(?:inside\s+)?leg(?:\s*length)?\s*(?:is\s*|of\s*|:\s*)?(\d{2})\b|\b(\d{2})\s*(?:"|in|inch(?:es)?)?\s*(?:inside\s+)?leg\b/i;
 const PAIR = /\b(\d{2})\s*(?:\/|x|by)\s*(\d{2})\b/i;
 
+/**
+ * Which of the pack's questions an option answers - read from the product's
+ * own size scale (catalog/commerce.ts), so the pack, the basket and product
+ * details agree on what a 34 or an M is. Ladies' 10-18 are sizes, not waists.
+ */
 function kindOf(option: { name: string; values: string[] }): Kind {
-  if (/leg|length|inseam/i.test(option.name)) return 'leg';
-  if (/waist/i.test(option.name)) return 'waist';
-  if (/size/i.test(option.name)) return option.values.every((value) => /^\d{2}$/.test(value.trim())) ? 'waist' : 'top';
-  return 'other';
+  const scale = optionScale(option);
+  if (scale === 'leg') return 'leg';
+  if (scale === 'waist') return 'waist';
+  return scale ? 'top' : 'other';
 }
 
 /** The pieces of the pack on screen, or remembered by handle. */
@@ -132,7 +138,12 @@ export function readPackChoices(
   }
 
   // A letter size for the tops: "S", "a medium", "in L", "size S", "I'm a large".
-  const top = [sizeInRequest(said), readIntent(said).usualSize].find((value) => !!value && !/^\d/.test(value));
+  /*
+   * The top size read with the waist and leg taken out: "top size M, waist
+   * 34, leg 32" gave the reader the 34 first, and the M was never confirmed.
+   */
+  const lettered = said.replace(WAIST, ' ').replace(LEG, ' ').replace(PAIR, ' ');
+  const top = [sizeInRequest(lettered), readIntent(lettered).usualSize].find((value) => !!value && !/^\d/.test(value));
   if (top && !/^\d/.test(top)) set('top', top);
   else {
     const alone = normaliseSize(text.replace(/\b(please|thanks|in|size|a|an|the|for the tops?|tops?)\b/g, ' ').replace(/[^a-z0-9\s]/g, ' ').trim());
@@ -174,7 +185,9 @@ export function packStatus(session: CaddieSession, handle: string, pieces: Produ
     }
     const plan: PiecePlan = { step: session.lastShown?.items[index]?.slot ?? product.title, product, chosen, missing };
     if (!missing.length) {
-      const variant = product.variants.find((own) => Object.entries(chosen).every(([name, value]) => own.options[name] === value)) ?? (product.options.every((own) => own.values.length <= 1) ? product.variants[0] : undefined);
+      // The one variant these choices name - the basket's own resolver, never a first variant.
+      const resolution = resolveVariant(product, chosen);
+      const variant = resolution.status === 'exact' ? resolution.variant : undefined;
       if (!variant) plan.missing.push({ kind: 'other', option: 'combination', values: [] });
       else {
         plan.variant = variant;

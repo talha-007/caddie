@@ -168,8 +168,9 @@ export function withoutSize(text: string, size: string | undefined): string {
 
 export type SizeStatus = 'in-stock' | 'sold-out' | 'not-made' | 'other-scale';
 
+/** 2XL is a letter size that starts with a digit: only a number (34, 12, 7/8) is on the number scale. */
 function scaleOf(code: string): 'letter' | 'number' {
-  return /^\d/.test(code) ? 'number' : 'letter';
+  return /^\d+(\s*\/\s*\d+)?$/.test(code) ? 'number' : 'letter';
 }
 
 /**

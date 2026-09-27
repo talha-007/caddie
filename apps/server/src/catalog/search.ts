@@ -1,6 +1,7 @@
 import type { Product } from '@caddie/shared';
 import { inRange, parseRange, rangeOf, type Range } from './audience.js';
 import { priceFor } from '../recommend/pricing.js';
+import { isBuyable } from './commerce.js';
 import { isCategory, sizeStatus, type Category } from './constraints.js';
 import { colourMatch, parseColours } from './colour.js';
 import { SPELLING_VARIANTS, identityOf } from './identity.js';
@@ -308,11 +309,16 @@ export function searchLocalScored(opts: LocalSearchOptions): SearchHit[] {
     // The kind of garment and the size are facts about the product, not words to score.
     if (opts.categories?.length && !isCategory(product, opts.categories)) continue;
     if (opts.size && sizeStatus(product, opts.size) !== 'in-stock') continue;
-    // In their size, the price is that size's price: a polo from £38 can be £44 in XL.
-    const price = opts.size ? priceFor(product, opts.size).amount : product.price.amount;
+    /*
+     * In their size, the price is that size's price: a polo from £38 can be
+     * £44 in XL. With no size, the lowest price they could pay - of the
+     * variants that can be bought, never Shopify's minimum across sold-out
+     * ones (recommend/pricing.ts, the policy every price quote uses).
+     */
+    const price = priceFor(product, opts.size).amount;
     if (opts.maxPrice !== undefined && price > opts.maxPrice) continue;
     if (opts.minPrice !== undefined && price < opts.minPrice) continue;
-    if (opts.available !== false && !product.variants.some((variant) => variant.available)) continue;
+    if (opts.available !== false && !isBuyable(product)) continue;
 
     // Never a child's polo for an adult, never the other range once we know theirs.
     if (!inRange(product, asked, opts.known)) continue;

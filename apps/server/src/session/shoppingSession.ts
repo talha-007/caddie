@@ -1,5 +1,6 @@
 import type { Product } from '@caddie/shared';
 import { identityProducts, resolveCustomerProductIdentity } from '../catalog/productIdentity.js';
+import { sameDesign } from '../catalog/commerce.js';
 import { productById } from '../catalog/sync.js';
 import { resolveProduct } from './screen.js';
 import { focusProduct, type ShoppingFocus } from './focus.js';
@@ -129,6 +130,5 @@ export function trustedProductTarget(session: CaddieSession, said: string): Trus
 /** Whether the model's product is one the trusted target covers - the same design. */
 export function agreesWithTarget(target: TrustedTarget, proposed: Product | null): boolean {
   if (!proposed || target.status !== 'product') return false;
-  const design = (title: string) => title.split(/\s+-\s+/)[0]!.trim().toUpperCase();
-  return target.products.some((product) => product.id === proposed.id || design(product.title) === design(proposed.title));
+  return target.products.some((product) => sameDesign(product, proposed));
 }

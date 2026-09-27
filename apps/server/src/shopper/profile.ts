@@ -1,3 +1,4 @@
+import { formatMoney } from '../catalog/commerce.js';
 import { parseRange, type Range } from '../catalog/audience.js';
 import { featuresAsked, type Feature, type Weather } from '../catalog/attributes.js';
 import { parseColours } from '../catalog/colour.js';
@@ -335,10 +336,8 @@ export function mergeProfile(current: ShopperProfile | undefined, update: Partia
   return next;
 }
 
-const SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
-
 export function describeBudget(budget: Budget, currency = 'GBP'): string {
-  const amount = `${SYMBOL[currency] ?? ''}${budget.amount}`;
+  const amount = formatMoney(budget.amount, currency, { short: true });
   const per = budget.per === 'item' ? ' per item' : ' in total';
   if (budget.kind === 'max') return `no more than ${amount}${per} (a hard limit)`;
   if (budget.kind === 'around') return `around ${amount}${per}`;

@@ -2,6 +2,7 @@ import type { Money, OutfitInput, OutfitPiece, OutfitRecommendation, Product } f
 import { parseRange, rangeOf, type Range } from '../catalog/audience.js';
 import type { Weather } from '../catalog/attributes.js';
 import { matchesColourText } from '../catalog/colour.js';
+import { productGroups, type KindGroup } from '../catalog/commerce.js';
 import { searchProducts } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
 import { isPack } from './packs.js';
@@ -58,10 +59,29 @@ export const DEFAULT_SLOTS: OutfitSlot[] = [
   },
 ];
 
-/** True when the product's name or tags say it belongs in this slot. */
+/** Which kind groups (catalog/commerce.ts) fill each slot. */
+const SLOT_GROUPS: Record<string, KindGroup[]> = {
+  top: ['top'],
+  bottom: ['bottom'],
+  layer: ['layer'],
+  accessory: ['headwear', 'belt', 'socks'],
+};
+
+/**
+ * Whether a product belongs in this slot: by its catalogue kind - the one
+ * search, sizing and best picks read - and, when the customer named a kind
+ * for the slot ("trousers", not shorts), by that word in its title too. Tags
+ * are not read: they carry campaign labels. Only a product whose type and
+ * title name no kind we know falls back to the slot's words.
+ */
 export function fitsSlot(product: Product, slot: OutfitSlot): boolean {
-  const haystack = [product.title, ...product.tags].join(' ').toLowerCase();
-  return slot.keywords.some((keyword) => haystack.includes(keyword));
+  const groups = productGroups(product);
+  const title = product.title.toLowerCase();
+  const byWord = slot.keywords.some((keyword) => title.includes(keyword));
+  if (!groups.length) return byWord || [product.title, ...product.tags].join(' ').toLowerCase().split(/\s+/).some((word) => slot.keywords.some((keyword) => word.startsWith(keyword)));
+  if (!groups.some((group) => SLOT_GROUPS[slot.slot]?.includes(group))) return false;
+  const narrowed = DEFAULT_SLOTS.find((own) => own.slot === slot.slot)?.keywords.length !== slot.keywords.length;
+  return !narrowed || byWord;
 }
 
 /** What goes with anything, for a slot that has nothing in the colour asked for. */

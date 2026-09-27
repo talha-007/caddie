@@ -1,3 +1,4 @@
+import { chartCategoryOf, firstBuyableVariant, formatMoney, nothingToChoose, resolveVariant, sizeOptionName as sizeOptionOf, sizeScale } from '../catalog/commerce.js';
 import type { Cart, CartAction, OutfitPiece, Product } from '@caddie/shared';
 import { z } from 'zod';
 import { FEATURE_LABEL, WEATHER_NEEDS, attributesOf, featuresAsked, hasFeature, type Feature, type Weather } from '../catalog/attributes.js';
@@ -63,12 +64,8 @@ import { defineTool, type CaddieTool, type ToolContext, type ToolResult } from '
  * from memory.
  */
 
-const SYMBOLS: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
-
-const money = (amount: number, currency: string) => {
-  const symbol = SYMBOLS[currency];
-  return symbol ? `${symbol}${amount.toFixed(2)}` : `${currency} ${amount.toFixed(2)}`;
-};
+// One money format for everything a customer reads (catalog/commerce.ts).
+const money = formatMoney;
 
 /**
  * Which range a set of products belongs to.
@@ -306,7 +303,9 @@ function listFacts(products: Product[], evidence?: (product: Product) => string)
           : `${money(span.min, span.currency)} to ${money(span.max, span.currency)} depending on size`;
 
       const checked = evidence?.(product);
-      return `- ${product.title}${label} - ${shown} [${product.id}]${checked ? ` | checked: ${checked}` : ''}${verifiedLine(product)}`;
+      // No size to choose is a fact about the product (catalog/commerce.ts): said, so no one asks for one.
+      const oneSize = sizeScale(product).oneSize ? ' | one size - never ask a size' : '';
+      return `- ${product.title}${label} - ${shown} [${product.id}]${oneSize}${checked ? ` | checked: ${checked}` : ''}${verifiedLine(product)}`;
     })
     .join('\n');
 }
@@ -1334,7 +1333,7 @@ const searchTool = defineTool({
      * yet: ask for it. Neither while they are choosing between names.
      */
     const buyingSize = size ?? request.size;
-    const leadSized = !!lead && (lead.options.find((option) => /size/i.test(option.name))?.values.length ?? 0) > 1;
+    const leadSized = !!lead && !sizeScale(lead).oneSize;
     const nextStep =
       !lead || onlyPartial || !leadSized || (categories.length === 0 && !identified && !topKinds.length)
         ? ''
@@ -1486,9 +1485,14 @@ const detailsTool = defineTool({
      * counts is whether WE passed a selection - or whether there was anything
      * to choose in the first place.
      */
-    const nothingToChoose = product.options.every((option) => option.values.length <= 1);
     const hasSelection = Boolean(args.options && Object.keys(args.options).length > 0);
-    const chosen = hasSelection || nothingToChoose ? product.variants[0] : null;
+    /*
+     * The variant chosen, only when the choices name exactly one - through
+     * the same resolver the basket uses (catalog/commerce.ts). A size with the
+     * colour still open is not a variant, and its first one is not an answer.
+     */
+    const resolution = resolveVariant(productById(product.id) ?? product, hasSelection ? args.options : {});
+    const chosen = resolution.status === 'exact' ? resolution.variant : null;
 
     if (chosen) {
       // The variant's own price, not the product's cheapest - they differ on
@@ -1703,7 +1707,7 @@ const sizeTool = defineTool({
       audienceOf(allProducts().filter(isBrandProduct));
     // The product decides the chart: trousers are sized by the waist, whatever was asked.
     const category =
-      (product && audience ? categoryForProduct(audience, `${product.productType ?? ''} ${product.title}`) : undefined) ?? sizingCategory(args.category, audience, ctx);
+      (product && audience ? chartCategoryOf(product, audience) : undefined) ?? sizingCategory(args.category, audience, ctx);
 
     /*
      * Fit and layering move the size, so they need the customer's evidence
@@ -2463,8 +2467,10 @@ async function whyNotBuyable(deal: DealRecipe, pieces: Array<Product | null>): P
   const empty = deal.steps.filter((_, index) => !pieces[index]).map((step) => step.title.toLowerCase());
   if (empty.length) return `no ${empty.join(' or ')} can be picked for it`;
   if (deal.format === 'plus') {
-    const variants = pieces.map((piece) => piece!.variants.find((variant) => variant.available)?.id ?? piece!.variants[0]?.id ?? '');
-    if ((await packPriceHolds(deal, variants)) === 'wrong') return 'the checkout does not apply its pack price yet';
+    // Checked with variants that can be bought - a sold-out one is no evidence of what checkout charges (catalog/commerce.ts).
+    const buyable = pieces.map((piece) => firstBuyableVariant(piece!)?.id);
+    if (buyable.some((variantId) => !variantId)) return 'one of its pieces is sold out';
+    if ((await packPriceHolds(deal, buyable as string[])) === 'wrong') return 'the checkout does not apply its pack price yet';
   }
   return undefined;
 }
@@ -2531,9 +2537,9 @@ async function showDeal(
   let cheaperNote = '';
   // What the pieces cost on their own - in the sizes they chose where they have, so the card, the reply and the basket agree.
   const chosenVariant = (piece: Product) => status?.pieces.find((plan) => plan.product.id === piece.id)?.variant?.id;
-  const own = pieces.every(Boolean)
-    ? piecesTotal(pieces.map((piece) => chosenVariant(piece!) ?? piece!.variants.find((variant) => variant.available)?.id ?? piece!.variants[0]?.id ?? ''))
-    : 0;
+  // Priced at variants that can be bought: a sold-out one's price is not what they would pay.
+  const pricedAt = pieces.map((piece) => (piece ? (chosenVariant(piece) ?? firstBuyableVariant(piece)?.id) : undefined));
+  const own = pricedAt.every(Boolean) ? piecesTotal(pricedAt as string[]) : 0;
   if (!blocked && deal.format === 'plus' && pieces.every(Boolean)) {
     const packPrice = deal.prices.GBP ?? 0;
     if (own > 0 && own < packPrice) {
@@ -3107,7 +3113,9 @@ const addToCartTool = defineTool({
 
 /** A gateway outcome as the model reads it: what happened, and - when nothing did - exactly that. */
 function fromOutcome(outcome: ActionOutcome, extraFacts = ''): ToolResult {
-  const facts = [outcome.facts, outcome.cart ? cartFacts(outcome.cart) : '', extraFacts].filter(Boolean).join('\n');
+  // What it charged, from the variant the gateway added - so the reply quotes the basket's own figure (catalog/commerce.ts).
+  const charged = outcome.ok && outcome.charge !== undefined ? `Charged: ${formatMoney(outcome.charge, storeCurrency())}${outcome.quantity && outcome.quantity > 1 ? ` for ${outcome.quantity}` : ''}.` : '';
+  const facts = [outcome.facts, charged, outcome.cart ? cartFacts(outcome.cart) : '', extraFacts].filter(Boolean).join('\n');
   return {
     speech: outcome.speech,
     ...(facts ? { facts } : {}),
@@ -3215,7 +3223,7 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
     const waiting = source === 'pending-action-continuation' ? livePending(ctx.session)?.options : undefined;
     if (waiting) options = { ...waiting, ...(options ?? {}) };
     if (offered?.type === 'add-product' && offered.size && chosenProduct) {
-      const sizeOption = chosenProduct.options.find((option) => /size|waist/i.test(option.name) && option.values.length > 1)?.name;
+      const sizeOption = sizeOptionOf(chosenProduct);
       if (sizeOption) options = { ...(options ?? {}), [sizeOption]: offered.size };
     }
     // A yes to "shall I add it in M?" is the customer choosing M.
@@ -3233,13 +3241,18 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
     }
   }
 
-  const product = await getProductDetails(productId, options);
+  const product = await getProductDetails(productId);
   if (!product) return { ok: false, reason: 'not-found', speech: 'I could not find that product.', facts: `No product ${productId} in the catalogue.` };
 
-  // Every option with a choice must be one they made - measured against what they named, not how many things they named.
-  const named = new Set(Object.keys(options ?? {}).map((key) => key.toLowerCase()));
-  const stillOpen = product.options.filter((option) => option.values.length > 1 && !named.has(option.name.toLowerCase()));
-  if (stillOpen.length > 0) {
+  /*
+   * The one variant their choices name (catalog/commerce.ts) - the same
+   * resolution the card, the pack and product details use. Every option with
+   * a choice must be one they made; choices that name no variant, or several,
+   * are asked about. Never the first variant.
+   */
+  const resolution = resolveVariant(product, options ?? {});
+  if (resolution.status === 'incomplete') {
+    const stillOpen = resolution.missing;
     return {
       ok: false,
       reason: 'missing-option',
@@ -3248,16 +3261,19 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
       pending: { type: 'add-product', productIds: [product.id], ...(options ? { options } : {}), awaiting: optionAwaiting(stillOpen[0]!.name) },
     };
   }
-  // Every option named and still several variants: the choices did not identify one. Never the first of them.
-  if (product.variants.length !== 1) {
+  // Every option named and still no single variant: the choices did not identify one. Never the first of them.
+  if (resolution.status !== 'exact') {
     return {
       ok: false,
       reason: 'missing-option',
       speech: `Which ${product.options.map((option) => option.name.toLowerCase()).join(' and ')} would you like for the ${product.title}?`,
-      facts: `${product.variants.length} variants match for ${product.title}. Do not choose one for them.`,
+      facts:
+        resolution.status === 'ambiguous'
+          ? `${resolution.variants.length} variants match for ${product.title}. Do not choose one for them.`
+          : `${product.title} is not made in ${Object.values(options ?? {}).join(' / ')}. Do not choose another for them.`,
     };
   }
-  const variant = product.variants[0]!;
+  const variant = resolution.variant;
   if (!variant.available) {
     const choice = Object.values(variant.options).filter((value) => value !== 'Default Title').join(', ');
     return {
@@ -3665,7 +3681,7 @@ function optionNamed(product: Product, key: string): string | null {
 
 /** The option on a product that holds its size, whatever the store calls it. */
 function sizeOptionName(product: Product): string | null {
-  return product.options.find((option) => /size|waist/i.test(option.name) && option.values.length > 1)?.name ?? null;
+  return sizeOptionOf(product);
 }
 
 const addPackTool = defineTool({
@@ -4016,7 +4032,7 @@ const productInfoTool = defineTool({
         return {
           speech: sayAttributes(design, answers[0]!),
           facts: `About: the ${design} design - every colourway shares this description (${family.map((member) => `${member.title} [${member.id}]`).join(', ')}).\n${verifiedFacts(family[0]!)}\nAsked about: ${answers[0]!
-            .map((answer) => `${answer.asked} - ${answer.state === 'yes' ? 'yes, its description states it' : answer.state === 'other' ? `its description says ${answer.instead}${answer.unsaid ? ` - ${answer.asked} itself is not stated (never say no)` : ' instead'}` : 'not stated (never say no)'}`)
+            .map((answer) => `${answer.asked} - ${answer.state === 'yes' ? 'yes, its description states it' : answer.state === 'no' ? 'no - its description says it is not' : answer.state === 'other' ? `its description says ${answer.instead}${answer.unsaid ? ` - ${answer.asked} itself is not stated (never say no)` : ' instead'}` : 'not stated (never say no)'}`)
             .join('; ')}. Answer this first; colour does not change it, so do not ask which colour.`,
         };
       }

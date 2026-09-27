@@ -33,7 +33,13 @@ describe('the catalogue mirror', () => {
     setCatalogueForTests([
       product('1', 'VENTO POLO - NAVY/ WHITE', { productType: 'POLOS', tags: ['navy', 'mens'] }),
       product('2', 'TOUR SHORT - NAVY', { productType: 'SHORTS', tags: ['navy', 'mens'], price: { amount: 42, currency: 'GBP' } }),
-      product('3', 'PERFORMANCE SOCKS - WHITE', { productType: 'SOCKS', tags: ['white'], price: { amount: 16, currency: 'GBP' } }),
+      // Its variant carries the £16 too: the product price is Shopify's cheapest variant, and budgets read the variants (Phase 4).
+      product('3', 'PERFORMANCE SOCKS - WHITE', {
+        productType: 'SOCKS',
+        tags: ['white'],
+        price: { amount: 16, currency: 'GBP' },
+        variants: [{ id: 'gid://shopify/ProductVariant/3-1', title: 'S', available: true, price: { amount: 16, currency: 'GBP' }, options: { Size: 'S' }, inventoryItemId: 'gid://shopify/InventoryItem/3' }],
+      }),
     ]);
   });
 
@@ -79,7 +85,13 @@ describe('local search', () => {
     setCatalogueForTests([
       product('1', 'VENTO POLO - NAVY/ WHITE', { productType: 'POLOS', tags: ['navy', 'mens'] }),
       product('2', 'TOUR SHORT - NAVY', { productType: 'SHORTS', tags: ['navy', 'mens'] }),
-      product('3', 'PERFORMANCE SOCKS - WHITE', { productType: 'SOCKS', tags: ['white'], price: { amount: 16, currency: 'GBP' } }),
+      // Priced at £16 on its variant as well - budgets read the variants you can buy (Phase 4).
+      product('3', 'PERFORMANCE SOCKS - WHITE', {
+        productType: 'SOCKS',
+        tags: ['white'],
+        price: { amount: 16, currency: 'GBP' },
+        variants: [{ id: 'gid://shopify/ProductVariant/3-1', title: 'S', available: true, price: { amount: 16, currency: 'GBP' }, options: { Size: 'S' }, inventoryItemId: 'gid://shopify/InventoryItem/3' }],
+      }),
     ]);
   });
 

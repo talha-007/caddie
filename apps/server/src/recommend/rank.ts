@@ -1,3 +1,4 @@
+import { formatMoney } from '../catalog/commerce.js';
 import type { Product } from '@caddie/shared';
 import { FEATURE_LABEL, WEATHER_NEEDS, attributesOf, hasFeature, type Feature, type Weather } from '../catalog/attributes.js';
 import { rangeOf, type Range } from '../catalog/audience.js';
@@ -62,12 +63,8 @@ export interface Ranked {
   score: number;
 }
 
-const SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
-
 function money(amount: number, currency: string): string {
-  const symbol = SYMBOL[currency];
-  const shown = Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
-  return symbol ? `${symbol}${shown}` : `${currency} ${shown}`;
+  return formatMoney(amount, currency, { short: true });
 }
 
 /** Whether a size means anything for this product - a waist is no help on a polo. */

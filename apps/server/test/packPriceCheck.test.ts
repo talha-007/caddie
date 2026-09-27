@@ -182,7 +182,7 @@ describe('the reply check on a pack price', async () => {
 describe('a count that is a size', async () => {
   const { verifyReply } = await import('../src/ai/verify.js');
   it('"leg 34 for the trousers" is not thirty-four pairs', () => {
-    const card = { kind: 'products' as const, products: [{ ...polo('9'), title: "MEN'S CLIMA GOLF TROUSERS - NAVY" }] };
+    const card = { kind: 'products' as const, products: [{ ...polo('9'), title: "MEN'S CLIMA GOLF TROUSERS - NAVY", productType: 'TROUSERS' }] };
     expect(verifyReply('Would you like 34 for the trousers?', '', card).filter((v) => v.kind === 'count')).toEqual([]);
     expect(verifyReply('I can do waist 34 trousers.', '', card).filter((v) => v.kind === 'count')).toEqual([]);
     expect(verifyReply('Here are six trousers.', '', card).filter((v) => v.kind === 'count').length).toBe(1);

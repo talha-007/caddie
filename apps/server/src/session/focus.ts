@@ -5,6 +5,7 @@ import { categoriesAsked, categoriesOf, withoutSize, sizeInRequest, type Categor
 import { resolveCustomerProductIdentity } from '../catalog/productIdentity.js';
 import { productById } from '../catalog/sync.js';
 import { log } from '../lib/logger.js';
+import { designTitle } from '../catalog/commerce.js';
 import { logFact, trustedShopperFacts } from '../shopper/facts.js';
 import { durablePart, mergeProfile, readIntent, standingPart, type FactSource, type ShopperProfile } from '../shopper/profile.js';
 import { resolveProduct } from './screen.js';
@@ -145,7 +146,7 @@ function productNamed(said: string): { product: Product; design: string } | null
 
 /** "CLIMA JACKET 3.0 - NAVY" is the Clima Jacket 3.0 design. */
 export function designOf(title: string): string {
-  return title.split(/\s+-\s+/)[0]!.trim();
+  return designTitle(title);
 }
 
 /** The kinds a product is: a Clima Jacket is a jacket. */

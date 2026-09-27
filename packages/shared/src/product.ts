@@ -15,6 +15,11 @@ export interface ProductVariant {
   title: string;
   available: boolean;
   price: Money;
+  /**
+   * Shopify's "was" price for this variant, when the merchant set one. Carried
+   * as catalogue truth only - nothing claims a saving from it (Phase 4).
+   */
+  compareAtPrice?: Money;
   /** e.g. { Size: 'M', Colour: 'Navy' } */
   options: Record<string, string>;
   /**

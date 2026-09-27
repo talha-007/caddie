@@ -2,6 +2,8 @@ import type { Product } from '@caddie/shared';
 import { rangeOf, type Range } from '../catalog/audience.js';
 import { bestSellerRank } from '../catalog/bestSellers.js';
 import { garmentName } from '../catalog/colourways.js';
+import { primaryKind, supportsSize } from '../catalog/commerce.js';
+import { categoriesAsked, type Category } from '../catalog/constraints.js';
 import { env } from '../env.js';
 import { isPack } from './packs.js';
 import { rankProducts, type RankRequest } from './rank.js';
@@ -33,21 +35,49 @@ const KINDS: Array<[PickKind, RegExp]> = [
 /** The kinds best picks cover when nothing is named, in the order they alternate. */
 const DEFAULT_ORDER: PickKind[] = ['polo', 'bottoms', 'midlayer', 'jacket'];
 
+/** Which pick a catalogue kind falls under - the one kind reader (catalog/commerce.ts). */
+const PICK_OF: Partial<Record<Category, PickKind>> = {
+  polo: 'polo',
+  baselayer: 'polo',
+  trousers: 'bottoms',
+  shorts: 'bottoms',
+  skort: 'bottoms',
+  midlayer: 'midlayer',
+  hoodie: 'midlayer',
+  jacket: 'jacket',
+  gilet: 'jacket',
+  cap: 'headwear',
+  visor: 'headwear',
+  beanie: 'headwear',
+  hat: 'headwear',
+  belt: 'belt',
+  socks: 'socks',
+};
+
+/**
+ * What a product is, for best picks: its catalogue kind (product type
+ * first), the same kind search and sizing read. The words below are only
+ * for a product whose type and title name no kind we know.
+ */
 export function kindOf(product: Product): PickKind | undefined {
+  const kind = primaryKind(product);
+  if (kind) return PICK_OF[kind];
   const text = `${product.productType ?? ''} ${product.title}`.toLowerCase();
   return KINDS.find(([, pattern]) => pattern.test(text))?.[0];
 }
 
-/** "trousers and polos" -> ['bottoms', 'polo']. */
+/** "trousers and polos" -> ['bottoms', 'polo'] - the customer's words, read as search reads them. */
 export function kindsNamed(text: string): PickKind[] {
+  const asked = [...new Set(categoriesAsked(text).map((kind) => PICK_OF[kind]).filter((kind): kind is PickKind => !!kind))];
+  if (asked.length) return asked;
+  // Words the kind reader does not take as a garment ("tee", "t-shirt", "fleece").
   const lower = text.toLowerCase();
   return KINDS.filter(([, pattern]) => pattern.test(lower)).map(([kind]) => kind);
 }
 
+/** Whether a size is on the scale this product is sized on - an M says nothing about trousers (catalog/commerce.ts). */
 function sizedOnScale(product: Product, size: string): boolean {
-  const numeric = /^\d+$/.test(normaliseSize(size) ?? size);
-  const values = product.options.find((option) => /size/i.test(option.name))?.values ?? [];
-  return values.some((value) => /^\d+$/.test(normaliseSize(value) ?? value) === numeric);
+  return supportsSize(product, size) !== 'other-scale';
 }
 
 export interface PickOptions {

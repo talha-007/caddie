@@ -69,6 +69,7 @@ query Catalogue($cursor: String, $query: String) {
           id
           title
           price
+          compareAtPrice
           availableForSale
           selectedOptions { name value }
           inventoryItem { id }
@@ -83,6 +84,8 @@ interface AdminVariant {
   id: string;
   title: string;
   price: string;
+  /** Shopify's "was" price, when the merchant set one. Null when not. */
+  compareAtPrice?: string | null;
   availableForSale: boolean;
   selectedOptions: Array<{ name: string; value: string }>;
   inventoryItem?: { id?: string } | null;
@@ -112,6 +115,7 @@ function toVariant(raw: AdminVariant, currency: string): ProductVariant {
     title: raw.title,
     available: raw.availableForSale,
     price: { amount: Number(raw.price), currency },
+    ...(raw.compareAtPrice && Number(raw.compareAtPrice) > 0 ? { compareAtPrice: { amount: Number(raw.compareAtPrice), currency } } : {}),
     options,
     ...(raw.inventoryItem?.id ? { inventoryItemId: raw.inventoryItem.id } : {}),
   };

@@ -1,6 +1,7 @@
 import type { Product } from '@caddie/shared';
 import { env } from '../env.js';
 import { parseRange } from './audience.js';
+import { designTitle } from './commerce.js';
 import { colourMatch, parseColours } from './colour.js';
 import { SPELLING_VARIANTS, editDistance, garmentWords, identityOf, nameWords, normaliseName, wordSimilarity } from './identity.js';
 import { allProducts, catalogueReady, catalogueVersion } from './sync.js';
@@ -366,7 +367,7 @@ function resolve(name: string, wanted: string[], garments: string[], products: P
 
   if (family.length === 1) return { kind: 'exact-product', name, product: family[0]!, resolution };
   const designs = new Set(family.map((product) => `${identityOf(product).range}|${identityOf(product).design}`));
-  if (designs.size === 1) return { kind: 'exact-family', name, familyName: family[0]!.title.split(' - ')[0]!, products: family, resolution };
+  if (designs.size === 1) return { kind: 'exact-family', name, familyName: designTitle(family[0]!.title), products: family, resolution };
   return { kind: 'possible-match', name, products: family.slice(0, 6), reason: 'more than one product has that name', resolution };
 }
 
