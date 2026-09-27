@@ -74,6 +74,14 @@ export interface ShoppingFocus {
    * choices stay in packChoices; its last build in packsShown.
    */
   pack?: string;
+  /**
+   * A piece of that pack being replaced: which step, the candidates shown for
+   * it (only products the step takes), and the size asked for them ("another
+   * jacket available in small"). Lives only while the pack is in hand; ended
+   * by the swap, by leaving the pack, or by New chat. What a later "add this
+   * instead" or "I like black" is about (tools/index.ts completeReplacement).
+   */
+  replacing?: { step: number; candidates: string[]; size?: string };
 }
 
 export type ShoppingConstraints = Pick<ShopperProfile, 'colours' | 'avoidColours' | 'budget' | 'fit' | 'layering' | 'features' | 'weather' | 'liked' | 'rejected' | 'justThis'>;
@@ -289,6 +297,27 @@ function focusFromReference(product: Product, prior: ShoppingFocus | undefined, 
 /** Words that keep a pack in hand while naming a garment: "change the jacket", "a different polo for the pack". */
 const PACK_WORDS = /\b(pack|bundle|deal|change|swap|replace|instead|in it|for it)\b/i;
 
+/** Asking for something in place of a piece: it is sold out, another one, one that is available. */
+const REPLACING_PIECE = /\b(sold out|out of stock|not available|unavailable|isn'?t available|another|other|different|alternative|instead|replace|swap)\b/i;
+
+/**
+ * About a piece of the pack in hand: "the Warrior jacket is sold out, show me
+ * another jacket in small". It names a product and a kind, so it read as a
+ * new mission, the pack was let go, and the swap became a standalone add
+ * (preview store). A piece of the pack named - or its kind - with words asking
+ * for something in its place keeps the pack in hand. "Show me polos" says
+ * nothing of the kind, and still leaves it.
+ */
+function aboutPackPiece(session: CaddieSession, said: string): boolean {
+  const handle = session.activeShoppingContext?.pack;
+  if (!handle || !REPLACING_PIECE.test(said)) return false;
+  const pieces = (session.packsShown?.[handle]?.items ?? []).map((item) => (item.id ? productById(item.id) : null)).filter((p): p is Product => !!p);
+  const named = productNamed(said)?.product;
+  if (named && pieces.some((piece) => designOf(piece.title) === designOf(named.title))) return true;
+  const kinds = requestedKinds(said);
+  return kinds.length > 0 && kinds.every((kind) => pieces.some((piece) => kindsOf(piece).includes(kind)));
+}
+
 /**
  * The pack they are building, set by the tool that shows it: a new pack is a
  * new mission, the same pack again is not.
@@ -367,7 +396,8 @@ export async function noteShoppingFocus(sessionId: string, said: string): Promis
      * products they chose or turned down. A follow-up, the same kind again,
      * or a change to a piece of the pack ("change the jacket") carries on.
      */
-    const leavesPack = !!prior?.pack && change === 'explicit' && (requestedKinds(said).length > 0 || !!productNamed(said)) && !PACK_WORDS.test(said);
+    const leavesPack =
+      !!prior?.pack && change === 'explicit' && (requestedKinds(said).length > 0 || !!productNamed(said)) && !PACK_WORDS.test(said) && !aboutPackPiece(session, said);
     const fresh = !!prior && (newMission(prior, focus, change) || leavesPack);
     const mission = !prior ? 1 : fresh ? (prior.mission ?? 1) + 1 : (prior.mission ?? 1);
     const missionTurn = !prior || fresh ? turn : (prior.missionTurn ?? prior.turn);
@@ -384,7 +414,7 @@ export async function noteShoppingFocus(sessionId: string, said: string): Promis
       ...(constraints && Object.keys(constraints).length ? { constraints } : {}),
       mission,
       missionTurn,
-      ...(prior?.pack && !leavesPack ? { pack: prior.pack } : {}),
+      ...(prior?.pack && !leavesPack ? { pack: prior.pack, ...(prior.replacing ? { replacing: prior.replacing } : {}) } : {}),
     };
   }
   /*
@@ -457,4 +487,14 @@ export async function noteShoppingConstraints(sessionId: string, update: Shoppin
   await sessions.patch(sessionId, { activeShoppingContext: focus });
   for (const field of fields) logFact(sessionId, field, source, 'shopping-session', true, update[field]);
   return constraints;
+}
+
+/** The piece of the pack in hand being replaced, and what was shown for it - or ended (undefined). */
+export async function setReplacement(sessionId: string, replacing: ShoppingFocus['replacing']): Promise<void> {
+  const session = await sessions.getOrCreate(sessionId);
+  const prior = session.activeShoppingContext;
+  if (!prior?.pack) return;
+  const { replacing: _old, ...rest } = prior;
+  await sessions.patch(sessionId, { activeShoppingContext: replacing ? { ...rest, replacing } : rest });
+  log.info('focus.replacing', { sessionId, pack: prior.pack, ...(replacing ? { step: replacing.step, candidates: replacing.candidates.length, size: replacing.size ?? null } : { ended: true }) });
 }

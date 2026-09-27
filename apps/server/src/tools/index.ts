@@ -1,4 +1,4 @@
-import { chartCategoryOf, firstBuyableVariant, formatMoney, nothingToChoose, resolveVariant, sizeOptionName as sizeOptionOf, sizeScale } from '../catalog/commerce.js';
+import { chartCategoryOf, firstBuyableVariant, formatMoney, nothingToChoose, productColourWords, resolveVariant, sizeOptionName as sizeOptionOf, sizeScale, supportsSize } from '../catalog/commerce.js';
 import type { Cart, CartAction, OutfitPiece, Product } from '@caddie/shared';
 import { z } from 'zod';
 import { FEATURE_LABEL, WEATHER_NEEDS, attributesOf, featuresAsked, hasFeature, type Feature, type Weather } from '../catalog/attributes.js';
@@ -21,7 +21,7 @@ import { conceptKindsInQuery, topKindsFor, type Climate } from '../catalog/conce
 import { colourAsked, intentDiagnostics, rememberedWhenEchoed, resolveSearchIntent, sizesNeverGiven } from './searchIntent.js';
 import { asksToAdd, asksToRemove, cartAuthorization, lineChangeAuthorization, offerSentence, offeredAction, quantityAsked, quantityInWords } from './cartAuthorization.js';
 import { executeCommerceAction, registerPlanner, type ActionOutcome, type ActionPlan, type ActionSource, type CommerceAction } from './actionGateway.js';
-import { packStatus, packStatusFacts, readPackChoices } from './packState.js';
+import { packPieces, packStatus, packStatusFacts, readPackChoices } from './packState.js';
 
 export { sizesNeverGiven };
 import { searchLocalScored } from '../catalog/search.js';
@@ -30,7 +30,7 @@ import { hasSignals, rankFacts, rankProducts, weatherHotOnly } from '../recommen
 import { describeProfile, readIntent, type Budget } from '../shopper/profile.js';
 import { acceptedRecommendation, currentRange, describeShopper, logFact, shopperView, trustedShopperFacts, type SizeRecommendationRecord } from '../shopper/facts.js';
 import { rankRequestFor, rememberMeasurements, rememberShopper, shopperSizes } from '../shopper/remember.js';
-import { customerTurn, noteShoppingConstraints, requestedKinds, setActivePack } from '../session/focus.js';
+import { customerTurn, noteShoppingConstraints, requestedKinds, setActivePack, setReplacement } from '../session/focus.js';
 import { bestPicks, kindsNamed } from '../recommend/bestPicks.js';
 import { answerAbout, attributesAsked, describeStock, sayAttributes, verifiedFacts } from '../recommend/productFacts.js';
 import { resolveProduct } from '../session/screen.js';
@@ -423,7 +423,14 @@ export function actionTarget(ctx: ToolContext): ActionTarget {
    * Elite Polo in navy. What size?" - "M, add it". Their "it" answers what
    * they were just told; a reply naming several is not one to pick from.
    */
-  if (bareReference(said) || (auth.authorized && auth.source !== 'utterance')) {
+  /*
+   * "Yes, add this to the bag. The size is small." is authorised by their own
+   * words but is not a bare reference, so nothing bound "this" - the add found
+   * no target and the Caddie asked to confirm, again and again (preview store).
+   * An authorised add pointing at "this", "that" or "it" is answered the same way.
+   */
+  const pointsBack = bareReference(said) || (auth.authorized && (auth.source !== 'utterance' || /\b(this|that|it)\b/i.test(said)));
+  if (pointsBack) {
     const lastReply = [...ctx.session.messages].reverse().find((message) => message.role === 'assistant')?.text ?? '';
     const recommended = lastReply ? fromIdentity(resolveCustomerProductIdentity(lastReply, 'offer'), ctx, 'offer') : null;
     if (recommended?.kind === 'bound' && recommended.products.length) return { ...recommended, source: 'last-reply' };
@@ -445,7 +452,10 @@ export function actionTarget(ctx: ToolContext): ActionTarget {
    */
   const members = held ? designMembers(held) : [];
   const shown = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
-  if (held && members.some((product) => shown.has(product.id)) && (bareReference(said) || (auth.authorized && auth.source !== 'utterance'))) {
+  if (held && members.some((product) => shown.has(product.id)) && pointsBack) {
+    // The colour they settled on is theirs: the held colourway, not the whole design.
+    const focusColours = ctx.session.activeShoppingContext?.colours ?? [];
+    if (focusColours.length && matchesColourText(held, focusColours.join(' or ')) > 0) return { kind: 'bound', products: [held], label: held.title, source: 'focus' };
     return { kind: 'bound', products: members, label: designOf(held.title), source: 'focus' };
   }
   return { kind: 'unbound' };
@@ -715,7 +725,21 @@ const searchTool = defineTool({
      */
     const onScreenPack = packOnScreen(ctx);
     const packShown = onScreenPack && onScreenPack.handle === currentPack(ctx.session) ? onScreenPack : undefined;
-    if (packShown && asksToChangePackPiece(packShown, ctx.utterance ?? '')) {
+    /*
+     * "Can you show any other jacket available in small" asks to see the
+     * choices, not to have one picked for them: the Warrior went out and a
+     * jacket they had not chosen came in. Asking to see goes to the step's choices below.
+     */
+    /*
+     * "The Warrior is sold out in small - show me another jacket available
+     * in small", with the pack in hand but not on screen: that piece's
+     * choices. Searched store-wide, the Clima and Wind Guard came back, and
+     * the customer's choice then went in on its own (live replay).
+     */
+    const pieceChoices = await showPieceChoices(ctx);
+    if (pieceChoices) return pieceChoices;
+    const asksToSee = SEE_WORDS.test(ctx.utterance ?? '');
+    if (packShown && !asksToSee && asksToChangePackPiece(packShown, ctx.utterance ?? '')) {
       const swapped = await dealAnswer({ query: ctx.session.lastShown?.query ?? packShown.title }, ctx, colourAsked(undefined, ctx.utterance), currency);
       if (swapped) return swapped;
     }
@@ -725,9 +749,12 @@ const searchTool = defineTool({
      * Premium Play Trousers next to the pack, and the customer took them for
      * a pack choice - they are not one.
      */
-    const building = packShown ?? packChoicesInFocus(ctx);
+    const replacing = liveReplacement(ctx);
+    const building = packShown ?? packChoicesInFocus(ctx) ?? replacing?.deal;
     if (building) {
-      const stepIndex = stepNamed(building, `${ctx.utterance ?? ''} ${args.query}`);
+      const named = stepNamed(building, `${ctx.utterance ?? ''} ${args.query}`);
+      // "Show me the black ones" while a piece is being replaced: that piece's choices.
+      const stepIndex = named >= 0 ? named : replacing && building === replacing.deal ? replacing.step : -1;
       const outside = /\b(separately|on its own|on their own|outside the pack|not in the pack|not for the pack|without the pack|full price)\b/i.test(ctx.utterance ?? '');
       if (stepIndex >= 0 && !outside) return packStepChoices(building, stepIndex, ctx, colourAsked(args.colour, ctx.utterance));
     }
@@ -2306,6 +2333,154 @@ async function pickFromPackChoices(ctx: ToolContext): Promise<ToolResult | null>
   return dealAnswer({ query: deal.title, swapWith: hit.product.id }, ctx, undefined, currency);
 }
 
+/** Asking to see what there is, rather than choosing: "can you show any other jacket available in small". */
+const SEE_WORDS = /\b(show|see|options|available|have you got|do you have|what (other|else)|which (other|ones?))\b/i;
+
+/**
+ * "Can you show any other jacket available in small size" about a piece of
+ * the pack in hand: that piece's choices, for them to pick from. The model
+ * reached for recommend_pack with a swap and put in a Clima Jacket nobody
+ * had chosen (live replay). A design they name is a choice, and is left to
+ * the swap.
+ */
+async function showPieceChoices(ctx: ToolContext): Promise<ToolResult | null> {
+  const said = ctx.utterance ?? '';
+  const handle = ctx.direct ? undefined : currentPack(ctx.session);
+  const deal = handle ? allDeals().find((entry) => entry.handle === handle) : undefined;
+  if (!deal || !SEE_WORDS.test(said) || !(CHANGE_WORDS.test(said) || /\b(sold out|out of stock|not available|unavailable)\b/i.test(said))) return null;
+  if (SEPARATELY.test(said)) return null;
+  const index = stepNamed(deal, said);
+  if (index < 0) return null;
+  // A design named that is not the piece going out: they have chosen, not asked to see.
+  const outgoing = packPieces(ctx.session, deal.handle)[index];
+  const named = identityProducts(resolveCustomerProductIdentity(said));
+  if (named.some((product) => !outgoing || designOf(product.title) !== designOf(outgoing.title))) return null;
+  log.info('pack.piece_choices_shown', { sessionId: ctx.session.id, pack: deal.handle, step: deal.steps[index]!.title });
+  return packStepChoices(deal, index, ctx, colourAsked(undefined, said));
+}
+
+/** The piece of the pack in hand being replaced, if a replacement is live. */
+function liveReplacement(ctx: ToolContext): { deal: DealRecipe; step: number; candidates: string[]; size?: string } | null {
+  const focus = ctx.session.activeShoppingContext;
+  const replacing = focus?.replacing;
+  const handle = currentPack(ctx.session);
+  if (!replacing || !handle || focus?.pack !== handle) return null;
+  const deal = allDeals().find((entry) => entry.handle === handle);
+  if (!deal || !deal.steps[replacing.step]) return null;
+  return { deal, step: replacing.step, candidates: replacing.candidates, ...(replacing.size ? { size: replacing.size } : {}) };
+}
+
+/** Putting one thing in place of another. */
+const IN_PLACE_OF = /\b(instead|replace|replacing|swap|in place of|rather than)\b/i;
+
+/**
+ * "Add this Hexa Performance to my bag instead of that red jacket", with the
+ * pack in hand and no choices shown for it: a replacement all the same. A
+ * design one step of the pack takes, named with words putting it in place of
+ * another, opens the replacement of that step - the colour of the piece going
+ * out is not read as the colour wanted ("that red jacket").
+ */
+function impliedReplacement(ctx: ToolContext): { deal: DealRecipe; step: number; candidates: string[]; size?: string } | null {
+  const said = ctx.utterance ?? '';
+  const handle = currentPack(ctx.session);
+  const deal = handle ? allDeals().find((entry) => entry.handle === handle) : undefined;
+  if (!deal || !IN_PLACE_OF.test(said) || SEPARATELY.test(said)) return null;
+  const pieces = packPieces(ctx.session, deal.handle);
+  const matches: Array<{ step: number; candidates: string[] }> = [];
+  deal.steps.forEach((step, index) => {
+    const outgoing = pieces[index];
+    // The outgoing piece's colours taken out of their words, so "that red jacket" does not ask for a red one.
+    const going = outgoing ? productColourWords(outgoing, false) : [];
+    const words = going.reduce((text, colour) => text.replace(new RegExp(`\\b${colour}\\b`, 'gi'), ' '), said);
+    const named = identityProducts(resolveCustomerProductIdentity(words)).filter((product) => step.productIds.has(product.id) && (!outgoing || designOf(product.title) !== designOf(outgoing.title)));
+    if (!named.length) return;
+    const designs = new Set(named.map((product) => designOf(product.title)));
+    const candidates = [...step.productIds].map((id) => productById(id)).filter((product): product is Product => !!product && designs.has(designOf(product.title)));
+    matches.push({ step: index, candidates: candidates.map((product) => product.id) });
+  });
+  if (matches.length !== 1) return null;
+  const size = sizeInRequest(said);
+  log.info('pack.replacement_implied', { sessionId: ctx.session.id, pack: deal.handle, step: deal.steps[matches[0]!.step]!.title, candidates: matches[0]!.candidates.length });
+  return { deal, ...matches[0]!, ...(size ? { size } : {}) };
+}
+
+/** Words that choose, or put in place: "add this instead", "use the black one", "yes", "I like black". */
+const REPLACEMENT_CHOICE = /\b(add|put|pop|use|swap|replace|instead|take|go for|go with|i'?ll have|yes|yeah|yep|that one|this one|like|love|want|prefer|choose|pick|select|in the bag|in the basket|into the (bag|basket)|in the pack|into the pack)\b/i;
+/** Asking for a separate item on its own - not a change to the pack. */
+const SEPARATELY = /\b(separately|on its own|as well|as an extra|extra one|in addition|outside the pack|not in the pack|full price)\b/i;
+
+/**
+ * Finishing the replacement of a pack piece, whichever tool the model called
+ * - add_to_cart, recommend_pack, a product lookup. "Add this Hexa
+ * Performance to my bag instead of that red jacket" became a standalone £40
+ * jacket add, and then a loop of confirmations (preview store). Inside a live
+ * replacement, what the customer chooses goes into the pack:
+ *
+ *   - the product: a card they point at, a design they name, narrowed by a
+ *     colour they say - only products the pack's step takes, and never the
+ *     colour of the piece going out ("instead of that red jacket");
+ *   - in the size the replacement was asked for, in stock, or not at all;
+ *   - one design in several colours: the colour is asked, once.
+ *
+ * Null when the words choose nothing here - the tool then does its own work.
+ */
+async function completeReplacement(ctx: ToolContext): Promise<ToolResult | null> {
+  if (ctx.direct) return null;
+  const live = liveReplacement(ctx) ?? impliedReplacement(ctx);
+  const said = ctx.utterance ?? '';
+  if (!live || !said.trim() || /\?\s*$/.test(said) || SEPARATELY.test(said)) return null;
+  const { deal, step: index } = live;
+  const step = deal.steps[index]!;
+  const inStep = (product: Product | null | undefined): product is Product => !!product && step.productIds.has(product.id);
+  const outgoing = packPieces(ctx.session, deal.handle)[index];
+  // The colour of the piece going out is not the colour they want: "instead of that red jacket".
+  const goingColours = new Set(outgoing ? productColourWords(outgoing, false) : []);
+  const colours = parseColours(said).colours.filter((colour) => !goingColours.has(colour.word));
+  const colourOnly = colours.length > 0 && said.trim().split(/\s+/).length <= 5;
+  if (!REPLACEMENT_CHOICE.test(said) && !colourOnly) return null;
+
+  const pointed = resolveProduct(ctx.session, said);
+  const pointedAt = pointed && /^(number \d|last on screen|on screen, from what they described)/.test(pointed.how) && inStep(pointed.product) ? pointed.product : null;
+  // A design they name, among what the step takes - its colourways, not the outgoing piece.
+  const named = identityProducts(resolveCustomerProductIdentity(said)).filter(inStep).filter((product) => !outgoing || designOf(product.title) !== designOf(outgoing.title));
+  const namedDesigns = new Set(named.map((product) => designOf(product.title)));
+  let pool: Product[] = pointedAt ? [pointedAt] : named.length ? [...step.productIds].map((id) => productById(id)).filter(inStep).filter((product) => namedDesigns.has(designOf(product.title))) : live.candidates.map((id) => productById(id)).filter(inStep);
+  pool = pool.filter((product) => product.variants.some((variant) => variant.available));
+  if (colours.length) pool = pool.filter((product) => colourMatch(product, colours, false) > 0);
+  if (live.size) pool = pool.filter((product) => supportsSize(product, live.size!) === 'in-stock');
+  // "This one", with one candidate on screen.
+  if (pool.length > 1 && /\b(this|that|it)\b/i.test(said)) {
+    const shown = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
+    const onScreen = pool.filter((product) => shown.has(product.id));
+    if (onScreen.length === 1) pool = onScreen;
+  }
+  const currency = ctx.session.preferences.currency ?? storeCurrency();
+  if (pool.length === 1) {
+    const chosen = pool[0]!;
+    log.info('pack.replacement_chosen', { sessionId: ctx.session.id, pack: deal.handle, step: step.title, chosen: chosen.title, size: live.size ?? null });
+    const result = await dealAnswer({ query: deal.title, swapWith: chosen.id }, ctx, undefined, currency);
+    await setReplacement(ctx.session.id, undefined);
+    return result;
+  }
+  const designs = [...new Set(pool.map((product) => designOf(product.title)))];
+  if (pool.length > 1 && designs.length === 1) {
+    // One design, several colours: ask the colour, and keep only that design as the candidates.
+    await setReplacement(ctx.session.id, { step: index, candidates: pool.map((product) => product.id), ...(live.size ? { size: live.size } : {}) });
+    const offered = pool.map((product) => colourwayName(product.title).toLowerCase());
+    return {
+      speech: `Which colour of the ${titleCaseWords(designs[0]!)} would you like in the pack${live.size ? ` in ${live.size}` : ''} - ${offered.slice(0, -1).join(', ')} or ${offered[offered.length - 1]}?`,
+      facts: `Replacing the ${step.title.toLowerCase()} in ${deal.title}${outgoing ? ` (the ${outgoing.title})` : ''}. The ${designs[0]} can go in, in ${offered.join(', ')}${live.size ? `, all in stock in ${live.size}` : ''}. Ask which colour - nothing has changed yet, and nothing goes in the basket on its own.`,
+    };
+  }
+  if (!pool.length && (named.length || colours.length)) {
+    return {
+      speech: `That isn't one of the pack's ${step.title.toLowerCase()} choices${live.size ? ` in ${live.size}` : ''} - shall I show you the ones that are?`,
+      facts: `Nothing named fits the ${step.title} step of ${deal.title}${live.size ? ` in stock in ${live.size}` : ''}. Nothing was changed or added.`,
+    };
+  }
+  return null;
+}
+
 /**
  * "No - the Premium Play Trousers aren't part of the pack", kept at the front
  * of the reply unless the reply already says no about that design.
@@ -2329,7 +2504,15 @@ async function packStepChoices(deal: DealRecipe, index: number, ctx: ToolContext
   // "Belts" in the belt-or-cap step is belts only.
   const kinds = PIECE_KINDS.filter((kind) => kind.said.test(said) && inStock.some((p) => kind.title.test(p.title)));
   const ofKind = kinds.length ? inStock.filter((p) => kinds.some((kind) => kind.title.test(p.title))) : inStock;
-  const matching = colour ? ofKind.filter((p) => matchesColourText(p, colour) > 0) : ofKind;
+  const coloured = colour ? ofKind.filter((p) => matchesColourText(p, colour) > 0) : ofKind;
+  /*
+   * In the size they asked for: "another jacket available in small" showed
+   * jackets whose S was sold out. The size said now, else the one already
+   * held for replacing this piece.
+   */
+  const heldSize = ctx.session.activeShoppingContext?.replacing?.step === index ? ctx.session.activeShoppingContext.replacing.size : undefined;
+  const size = sizeInRequest(said) ?? heldSize;
+  const matching = size ? coloured.filter((p) => supportsSize(p, size) === 'in-stock') : coloured;
   const piece = step.title.toLowerCase().replace(/\s*\/\s*/g, ' or ');
   const packName = titleCaseWords(deal.title);
   /*
@@ -2361,10 +2544,11 @@ async function packStepChoices(deal: DealRecipe, index: number, ctx: ToolContext
   await sessions.patch(ctx.session.id, {
     lastShown: { kind: 'products', items: shown.map((p) => ({ id: p.id, title: p.title })), query: `pack choices: ${deal.handle}` },
   });
-  // Still that pack's piece being chosen: the pack stays in hand.
+  // Still that pack's piece being chosen: the pack stays in hand, and what "this one" or "the black one" is about is kept with it.
   await setActivePack(ctx.session.id, deal.handle);
+  await setReplacement(ctx.session.id, { step: index, candidates: matching.map((p) => p.id), ...(size ? { size } : {}) });
   return {
-    speech: `${refusal}Here are the ${piece} choices in the ${packName}${colour ? ` in ${colour}` : ''} - any of these can go in the pack. Which would you like?`,
+    speech: `${refusal}Here are the ${piece} choices in the ${packName}${colour ? ` in ${colour}` : ''}${size ? ` in stock in ${size}` : ''} - any of these can go in the pack. Which would you like?`,
     facts:
       refusalFact +
       `Every product here is one of the ${step.title} choices in ${deal.title} - nothing from outside the pack:\n${shown.map((p) => `- ${p.title} [${p.id}]`).join('\n')}\n` +
@@ -2638,6 +2822,8 @@ const packTool = defineTool({
   async run(args, ctx): Promise<ToolResult> {
     const picked = await pickFromPackChoices(ctx);
     if (picked) return picked;
+    const toSee = await showPieceChoices(ctx);
+    if (toSee) return toSee;
     /*
      * A pack only when they asked for one: a pack or deal by name, a kit, a
      * few things, a total budget - or a change to the pack in hand. "Is it
@@ -3145,6 +3331,29 @@ const addToCartTool = defineTool({
      * from their words (planUpdateLine), never from this call.
      */
     const said = ctx.utterance ?? '';
+    /*
+     * A piece of the pack is being replaced and nothing above settled which:
+     * "instead", "replace" or "in the pack" is not a standalone add. One
+     * short question, never a separate line at full price.
+     */
+    /*
+     * A piece of the pack in hand, added: the pack, not that piece on its own.
+     * "Yes, add this to the bag, size small" right after the Hexa went into
+     * the pack put a £40 jacket in the basket beside a pack still unbought.
+     */
+    const inHand = ctx.direct ? undefined : currentPack(ctx.session);
+    if (inHand && !SEPARATELY.test(said) && packPieces(ctx.session, inHand).some((piece) => piece.id === productById(args.productId)?.id)) {
+      log.info('cart.piece_is_pack', { sessionId: ctx.session.id, pack: inHand, productId: args.productId });
+      return addPackTool.run({}, ctx);
+    }
+    const replacing = liveReplacement(ctx);
+    if (!ctx.direct && replacing && !SEPARATELY.test(said)) {
+      const piece = replacing.deal.steps[replacing.step]!.title.toLowerCase();
+      return {
+        speech: `Is that to go in the pack in place of the ${piece}, or to buy on its own?`,
+        facts: `A ${piece} replacement in ${replacing.deal.title} is open. Nothing was added. Ask this one question; for the pack, the choice goes in with recommend_pack swapWith.`,
+      };
+    }
     if (!ctx.direct && (ctx.session.basket ?? []).length && !asksToAdd(said) && lineChangeAuthorization(ctx) === 'customer-utterance' && !asksToRemove(said)) {
       log.info('cart.add_as_quantity_change', { sessionId: ctx.session.id, said: said.slice(0, 80) });
       return fromOutcome(await executeCommerceAction(ctx, { type: 'update-line', lineId: '', quantity: args.quantity ?? 1 }));
@@ -4362,6 +4571,9 @@ export function toolDefinitionsForVapi() {
   }));
 }
 
+/** Tools a choice during a pack-piece replacement may arrive through. */
+const REPLACEMENT_TOOLS = new Set(['add_to_cart', 'recommend_pack', 'update_cart_item', 'get_product_details', 'other_colours', 'search_products', 'add_pack_to_cart']);
+
 export async function runTool(name: string, rawArgs: unknown, ctx: ToolContext): Promise<ToolResult> {
   const tool = getTool(name);
   if (!tool) return { speech: `Unknown tool ${name}.` };
@@ -4381,6 +4593,11 @@ export async function runTool(name: string, rawArgs: unknown, ctx: ToolContext):
    * the model, an outfit swap, the widget's buttons, goes through it.
    */
   const data = parsed.data;
+  // A pack piece being replaced: what the customer chose goes into the pack, whichever tool was reached for.
+  if (REPLACEMENT_TOOLS.has(name)) {
+    const replaced = await completeReplacement(ctx);
+    if (replaced) return replaced;
+  }
   const result = await tool.run(data, ctx);
 
   /*

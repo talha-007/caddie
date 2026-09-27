@@ -242,7 +242,14 @@ function nextQuestion(plans: PiecePlan[], choices: PackChoices): string {
   }
   const firstMissing = (kind: Kind) => plans.flatMap((plan) => plan.missing.filter((entry) => entry.kind === kind).map((entry) => ({ plan, entry })))[0];
   const top = firstMissing('top');
-  if (top) return choices.requested?.top ? `The pack doesn't come in ${choices.requested.top} for the tops. Which size would you like: ${list(top.entry.values)}?` : 'What top size do you wear?';
+  if (top && choices.requested?.top) return `The pack doesn't come in ${choices.requested.top} for the tops. Which size would you like: ${list(top.entry.values)}?`;
+  /*
+   * The top size is known and this piece is not made in it: the men's belt
+   * comes in M/L and L/XL only. "What top size do you wear?" to a customer
+   * who had said S twice (live replay) - ask about the piece instead.
+   */
+  if (top && choices.top) return `The ${title(top.plan.product.title)} doesn't come in ${choices.top} - which size would you like: ${list(top.entry.values)}?`;
+  if (top) return 'What top size do you wear?';
   const waist = firstMissing('waist');
   if (waist) return choices.requested?.waist ? `The trousers don't come in a ${choices.requested.waist} waist. Would you like ${list(waist.entry.values)}?` : 'What waist size do you need for the trousers?';
   const leg = firstMissing('leg');
