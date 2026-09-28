@@ -4,7 +4,8 @@ import type { VoiceState } from '../lib/useVoice.js';
 import { HangerIcon, RulerIcon, ShirtIcon, SparkleIcon, TagIcon } from './icons.js';
 import { QuickStart, describeSizes } from './QuickStart.js';
 import { SuggestionChips } from './SuggestionChips.js';
-import { VoiceOrb } from './VoiceOrb.js';
+// The hero orb is parked for now - uncomment with its line in the hero below.
+// import { VoiceOrb } from './VoiceOrb.js';
 
 /**
  * The welcome screen, built around the voice orb: speak first, tap a journey
@@ -29,13 +30,19 @@ interface HomeProps {
   onProfile: (profile: ShopperSizes) => void;
 }
 
-export function Home({ productTitle, voice, busy, onJourney, onAsk, sizes, onProfile }: HomeProps) {
+// `voice` is still taken as a prop - the composer's mic uses it, and the hero orb will again.
+export function Home({ productTitle, busy, onJourney, onAsk, sizes, onProfile }: HomeProps) {
   // Changing who they shop for or their size, after it was given.
   const [editing, setEditing] = useState(false);
   return (
     <div className="caddie-home">
       <div className="caddie-home__hero">
-        <VoiceOrb voice={voice} busy={busy} />
+        {/*
+          * The big "Tap to talk" orb is hidden for now: the composer already has a
+          * mic, and two on one screen read as two different microphones.
+          * Uncomment this line (and the import above) to bring it back.
+          */}
+        {/* <VoiceOrb voice={voice} busy={busy} /> */}
         <h2 className="caddie-home__title">How can I help you today?</h2>
         <ul className="caddie-marks">
           <li>
