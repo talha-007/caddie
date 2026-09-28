@@ -59,8 +59,17 @@ export function Header({ basketCount, onBasket, onBack, onClose, onNewChat, titl
   );
 }
 
+/*
+ * The "You're looking at ..." bar is hidden for now. The page context still
+ * reaches the server - only this line above the conversation is off. Set it
+ * back to true to bring the bar back exactly as it was.
+ */
+const SHOW_CONTEXT_BAR: boolean = false;
+
 /** "Live product context": the Caddie knows which product page it opened on. */
 export function ContextBar({ context }: { context: WidgetContext }) {
+  if (!SHOW_CONTEXT_BAR) return null;
+
   const title = context.page.productTitle;
   if (context.page.pageType !== 'product' || !title) return null;
   return (

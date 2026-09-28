@@ -133,6 +133,13 @@
   height: auto;
   min-width: 0;
   min-height: 0;
+  /* A button's label is a control, not copy. Without this a drag - or a
+     double-tap on the basket - selects the text inside one and paints the
+     browser's own highlight over it, which on the basket count read as a blue
+     band behind the number. Text worth copying (a reply, a product name, a
+     price) is not a button, so it stays selectable. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .caddie-root :where(button:disabled) {
@@ -149,6 +156,16 @@
 .caddie-root :where(svg.caddie-icon) {
   display: block;
   flex: none;
+}
+
+/*
+ * Selected text wears the course green. The browser's default highlight is a
+ * system blue that belongs to no theme and sits badly against the widget's
+ * greens; keeping the customer's own text colour keeps it readable.
+ */
+.caddie-root ::selection {
+  background: rgba(var(--caddie-accent-rgb), 0.22);
+  color: var(--caddie-fg);
 }
 
 .caddie-root :where(:focus-visible) {
@@ -228,6 +245,11 @@
   line-height: 20px;
   text-align: center;
   box-shadow: 0 0 0 2px var(--caddie-surface);
+  /* A count is an indicator, not copy - and it sits over a button, so a stray
+     tap must not highlight it. */
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
 }
 
 /* ---------- Shell ---------- */

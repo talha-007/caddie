@@ -153,7 +153,18 @@ interface ProductOptionsProps {
   compact?: boolean;
 }
 
+/*
+ * Size, waist and leg pickers are hidden for now - we are not showing them on
+ * the card. Colour swatches stay. Everything behind this flag still works:
+ * the selection, the variant matching and "Add" are untouched, so flipping it
+ * back to true brings the pickers back exactly as they were.
+ */
+const SHOW_SIZE_OPTIONS: boolean = false;
+
 export function ProductOptions({ product, choice, compact }: ProductOptionsProps) {
+  // Nothing loaded yet: with the size pickers hidden there is nothing to ask for.
+  if (!choice.full && !SHOW_SIZE_OPTIONS) return null;
+
   if (!choice.full) {
     return (
       <button type="button" className="caddie-btn caddie-btn--ghost caddie-btn--block" onClick={choice.load} disabled={choice.loading}>
@@ -163,7 +174,8 @@ export function ProductOptions({ product, choice, compact }: ProductOptionsProps
   }
 
   const full = choice.full;
-  const options = productOptions(full);
+  // Colour only while SHOW_SIZE_OPTIONS is off.
+  const options = productOptions(full).filter((option) => SHOW_SIZE_OPTIONS || option.kind === 'colour');
   if (options.length === 0) return null;
   /*
    * Trousers have a waist and a leg: each choice says which it is ("Waist 34",
