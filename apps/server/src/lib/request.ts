@@ -21,14 +21,19 @@ export function clientKey(req: Request): string {
  * instead of keeping a basket of their own. Returns the session as it should
  * now be read, so a tool running in this same request sees the mode.
  */
-export async function noteCartMode<T extends { id: string; cartMode?: 'theme' | 'storefront' }>(
+export async function noteCartMode<T extends { id: string; cartMode?: 'theme' | 'storefront'; widgetContract?: string }>(
   req: Request,
   session: T,
-  patch: (id: string, change: { cartMode: 'theme' | 'storefront' }) => Promise<unknown>,
+  patch: (id: string, change: { cartMode?: 'theme' | 'storefront'; widgetContract?: string }) => Promise<unknown>,
 ): Promise<T> {
   const header = req.get('x-caddie-cart');
   const mode = header === 'theme' ? 'theme' : header === 'storefront' ? 'storefront' : undefined;
-  if (!mode || session.cartMode === mode) return session;
-  await patch(session.id, { cartMode: mode });
-  return { ...session, cartMode: mode };
+  // And which basket-change contract the widget speaks (x-caddie-widget): an older widget sends none, and gets no change it cannot report on.
+  const contract = (req.get('x-caddie-widget') ?? '').slice(0, 40) || undefined;
+  const change: { cartMode?: 'theme' | 'storefront'; widgetContract?: string } = {};
+  if (mode && session.cartMode !== mode) change.cartMode = mode;
+  if (contract && session.widgetContract !== contract) change.widgetContract = contract;
+  if (!Object.keys(change).length) return session;
+  await patch(session.id, change);
+  return { ...session, ...change };
 }

@@ -223,7 +223,7 @@ describe('size scales: what size choices a product really has', () => {
     expect(answerAbout(SOCKS, 'what sizes does it come in?').speech).toMatch(/one size/i);
     const id = `ct-${Math.random()}`;
     await sessions.getOrCreate(id);
-    await sessions.patch(id, { cartMode: 'theme' });
+    await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
     const added = await runTool('add_to_cart', { productId: CAP.id }, { session: await sessions.getOrCreate(id), direct: true });
     expect(added.actions?.length).toBe(1);
     expect(added.speech ?? '').not.toMatch(/which size|what size/i);
@@ -284,14 +284,14 @@ describe('one variant, one price - on the card, in the reply and in the basket',
   it('the price in a size: product details, the stock line and the basket say the same', async () => {
     const id = `ct-${Math.random()}`;
     await sessions.getOrCreate(id);
-    await sessions.patch(id, { cartMode: 'theme' });
+    await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
     const details = await runTool('get_product_details', { productId: ELITE_NAVY.id, options: { Size: '2XL' } }, { session: await sessions.getOrCreate(id), direct: true });
     expect(details.speech).toContain(formatMoney(24, 'GBP'));
     expect(priceFor(ELITE_NAVY, '2XL')).toMatchObject({ amount: 24, exact: true });
     expect(describeStock(ELITE_NAVY)).toContain('2XL (£24.00)');
     const added = await runTool('add_to_cart', { productId: ELITE_NAVY.id, options: { Size: '2XL' } }, { session: await sessions.getOrCreate(id), direct: true });
     expect(added.actions?.[0]).toMatchObject({ type: 'add', lines: [{ variantId: ELITE_NAVY.variants.find((v) => v.options.Size === '2XL')!.id.split('/').pop() }] });
-    expect(added.facts ?? '').toContain('Charged: £24.00');
+    expect(added.facts ?? '').toContain('Price: £24.00');
   });
 
   it('a size chosen with nothing else open, but the colour of a two-option product not chosen, is not a variant', async () => {
@@ -309,7 +309,7 @@ describe('one variant, one price - on the card, in the reply and in the basket',
   it('sold out in the exact size: not added, and said so', async () => {
     const id = `ct-${Math.random()}`;
     await sessions.getOrCreate(id);
-    await sessions.patch(id, { cartMode: 'theme' });
+    await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
     const added = await runTool('add_to_cart', { productId: ELITE_NAVY.id, options: { Size: 'XL' } }, { session: await sessions.getOrCreate(id), direct: true });
     expect(added.actions ?? []).toEqual([]);
     expect(added.speech).toMatch(/out of stock/i);

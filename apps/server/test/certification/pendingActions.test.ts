@@ -36,6 +36,7 @@ const { sessions } = await import('../../src/session/store.js');
 const { rememberShopper } = await import('../../src/shopper/remember.js');
 const { converse } = await import('../../src/ai/openai.js');
 const { env } = await import('../../src/env.js');
+const { confirmApplied } = await import('../support/widgetCart.js');
 
 let nextId = 13000;
 function product(title: string, options: Array<{ name: string; values: string[] }>, soldOut: (combo: Record<string, string>) => boolean = () => false, price = 30): Product {
@@ -94,7 +95,7 @@ beforeEach(async () => {
   actions = [];
   id = `pending-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
 });
 
 async function say(text: string, model: Completion[] = []) {
@@ -109,12 +110,15 @@ async function say(text: string, model: Completion[] = []) {
   actions.push(...(reply.actions ?? []));
   // The widget reports the basket back after a change.
   const session = await sessions.getOrCreate(id);
-  const basket = [...(session.basket ?? [])];
+  const wasBasket = [...(session.basket ?? [])];
+  const basket = [...wasBasket];
   for (const action of reply.actions ?? []) {
-    if (action.type === 'add') for (const line of action.lines) { const owner = ownerOf(line.variantId); basket.push({ lineId: `line-${basket.length + 1}`, productId: owner.product.id, title: owner.product.title, variantTitle: owner.variant.title, quantity: line.quantity }); }
+    if (action.type === 'add') for (const line of action.lines) { const owner = ownerOf(line.variantId); basket.push({ lineId: `line-${basket.length + 1}`, productId: owner.product.id, variantId: owner.variant.id.split('/').pop(), title: owner.product.title, variantTitle: owner.variant.title, quantity: line.quantity }); }
     if (action.type === 'add-bundle') for (const piece of action.pieces) { const owner = ownerOf(piece.variantId); basket.push({ lineId: `line-${basket.length + 1}`, productId: owner.product.id, title: owner.product.title, variantTitle: owner.variant.title, quantity: 1, bundle: action.bundleId ?? 'b1' }); }
     if (action.type === 'change') { const at = basket.findIndex((line) => line.lineId === action.lineKey); if (at >= 0) { if (action.quantity === 0) basket.splice(at, 1); else basket[at] = { ...basket[at]!, quantity: action.quantity }; } }
   }
+  // The widget's part: the change carried out in the (fake) theme cart and reported, so the gateway can complete it (test/support/widgetCart.ts).
+  await confirmApplied(id, reply.actions, wasBasket, basket);
   await sessions.patch(id, { basket });
   return { ...reply, modelCalls: modelCalls - before };
 }
@@ -367,6 +371,13 @@ describe('answers to what was asked', () => {
     const reply = await say('Add the Glen rain jacket in red in S to my basket', model);
     expect(added()).toEqual(['GLEN RAIN JACKET - RED [S] x1']);
     expect(reply.text).not.toMatch(/would you like me to add|shall i add/i);
+  });
+
+  it('24b. "I’m updating your basket" (curly apostrophe) with nothing done is a claim too', async () => {
+    await say('Show me the Elite Polo', [{ tool: { name: 'search_products', args: { productName: 'Elite Polo' } } }, { content: 'Here it is.' }]);
+    const reply = await say('Change it to L', [{ content: 'I’m updating your basket to the Elite Polo in L.' }, { content: 'Nothing has changed yet.' }]);
+    expect(reply.text).not.toMatch(/updating your basket to the/);
+    expect(added()).toEqual([]);
   });
 
   it('24. "Added it" from the model with no gateway success is not what they hear', async () => {

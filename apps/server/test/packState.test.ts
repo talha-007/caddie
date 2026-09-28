@@ -85,7 +85,7 @@ beforeEach(async () => {
   await sessions.getOrCreate(id);
   // The pack on screen, as showDeal leaves it - the red Warrior first.
   await sessions.patch(id, {
-    cartMode: 'theme',
+    cartMode: 'theme', widgetContract: 'cart-ops/1',
     lastShown: { kind: 'pack', bundle: COOL_WET.handle, items: PIECES.map((p, i) => ({ id: p.id, title: p.title, slot: COOL_WET.steps[i]!.title })) },
     // The pack in hand (session/shoppingSession.ts), as showDeal leaves it.
     activeShoppingContext: { kinds: [], request: '', turn: 1, source: 'explicit', pack: COOL_WET.handle, mission: 1, missionTurn: 1 },

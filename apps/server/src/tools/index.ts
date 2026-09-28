@@ -20,7 +20,8 @@ import {
 } from '../catalog/hybrid.js';
 import { conceptKindsInQuery, topKindsFor, type Climate } from '../catalog/concepts.js';
 import { colourAsked, intentDiagnostics, rememberedWhenEchoed, resolveSearchIntent, sizesNeverGiven } from './searchIntent.js';
-import { asksToAdd, asksToRemove, cartAuthorization, lineChangeAuthorization, offerSentence, offeredAction, quantityAsked, quantityInWords, turnNow } from './cartAuthorization.js';
+import { asksToAdd, asksToRemove, cartAuthorization, lineChangeAuthorization, offerSentence, offeredAction, quantityAsked, quantityInWords, sizeChangeAsked, turnNow } from './cartAuthorization.js';
+import { UPDATING, basketStatement } from './cartOperations.js';
 import { executeCommerceAction, registerPlanner, type ActionOutcome, type ActionPlan, type ActionSource, type CommerceAction } from './actionGateway.js';
 import { packPieces, packStatus, packStatusFacts, readPackChoices, type PackChoices } from './packState.js';
 import { namesOtherProduct, type CustomerGoal } from './journey.js';
@@ -277,6 +278,13 @@ function newBundleId(now: number): string {
 /** gid://shopify/ProductVariant/123 -> 123, as the theme's cart endpoints take ids. */
 function numericId(id: string): string {
   return id.split('/').pop() ?? id;
+}
+
+/** The variant a basket line holds: as the widget read it, else the product's variant with that title. */
+function outgoingVariantOf(line: { productId: string; variantId?: string; variantTitle: string }): string | undefined {
+  if (line.variantId) return line.variantId;
+  const product = productById(line.productId);
+  return product?.variants.find((entry) => entry.title === line.variantTitle || Object.values(entry.options).join(' / ') === line.variantTitle)?.id;
 }
 
 /**
@@ -3776,6 +3784,9 @@ const addToCartTool = defineTool({
         lead: { text: `Is that to go in the pack in place of the ${piece}, or to buy on its own?`, unless: /\b(in the pack|on its own|separately)\b/i },
       };
     }
+    // "Change that polo to L": the line in the basket, replaced by the same product in the size said - never the model's reading of it.
+    const sizeChange = !ctx.direct && (ctx.session.basket ?? []).length ? sizeChangeAsked(said) : null;
+    if (sizeChange) return changeLineSize(ctx, sizeChange.size);
     if (!ctx.direct && (ctx.session.basket ?? []).length && !asksToAdd(said) && lineChangeAuthorization(ctx) === 'customer-utterance' && !asksToRemove(said)) {
       log.info('cart.add_as_quantity_change', { sessionId: ctx.session.id, said: said.slice(0, 80) });
       return fromOutcome(await executeCommerceAction(ctx, { type: 'update-line', lineId: '', quantity: args.quantity ?? 1 }));
@@ -3784,17 +3795,59 @@ const addToCartTool = defineTool({
   },
 });
 
+/**
+ * "Change that polo to L" (audit finding E1). The line they mean is found in
+ * the basket as it is now, by the same reading update_cart_item uses; the
+ * new size is resolved on that same product and colour to an exact variant;
+ * and the change is a replacement through the gateway - the L added, the M
+ * taken out only once the L is in, the quantity carried over. A pack piece
+ * is not changed on its own: its pack goes in as a set. A size change never
+ * touches their usual size.
+ */
+async function changeLineSize(ctx: ToolContext, size: string): Promise<ToolResult> {
+  const lines = ctx.session.basket ?? [];
+  const said = ctx.utterance ?? '';
+  const found = resolveBasketLine(ctx, lines, said, 'customer-utterance', undefined, undefined);
+  if ('plan' in found) return { speech: found.plan.speech, facts: found.plan.facts, outcome: { ok: false, action: 'add-product', reason: found.plan.reason } };
+  const line = found.line;
+  const product = productById(line.productId);
+  if (!product) return { speech: "I can't find that item in the catalogue just now.", facts: 'The basket line names a product the mirror does not hold. Nothing was changed.', outcome: { ok: false, action: 'add-product', reason: 'not-found' } };
+  if (line.bundle) {
+    return {
+      speech: `The ${titleCaseWords(line.title)} is part of your pack, so I can't change its size on its own - the pack goes in as a set.`,
+      facts: `${line.title} is a pack piece (bundle ${line.bundle}); a single piece's size is not changed. Nothing was changed. To change it, the pack is rebuilt with recommend_pack.`,
+      outcome: { ok: false, action: 'add-product', reason: 'unavailable' },
+    };
+  }
+  const sizeOption = product.options.find((option) => option.name === sizeOptionOf(product));
+  const value = sizeOption?.values.find((candidate) => optionValueMatches(candidate, size));
+  if (!sizeOption || !value) {
+    return {
+      speech: `The ${titleCaseWords(garmentName(product.title))} doesn't come in ${size}${sizeOption ? ` - it comes in ${sizeOption.values.join(', ')}` : ''}.`,
+      facts: `${product.title} has no ${size}; sizes: ${sizeOption?.values.join(', ') ?? 'none'}. Nothing was changed.`,
+      outcome: { ok: false, action: 'add-product', reason: 'missing-option' },
+    };
+  }
+  const current = product.variants.find((variant) => variant.title === line.variantTitle || Object.values(variant.options).join(' / ') === line.variantTitle || (line.variantId && numericId(variant.id) === numericId(line.variantId)));
+  const options = { ...(current?.options ?? {}), [sizeOption.name]: value };
+  if (current && current.options[sizeOption.name] === value) {
+    return { speech: `The ${titleCaseWords(product.title)} is already in ${value} in your basket.`, facts: `${line.title} is already ${value}. Nothing was changed.`, outcome: { ok: false, action: 'add-product', reason: 'wrong-action' } };
+  }
+  return fromOutcome(await executeCommerceAction(ctx, { type: 'add-product', productId: product.id, options, quantity: line.quantity, replaces: line.lineId }));
+}
+
 /** A gateway outcome as the model reads it: what happened, and - when nothing did - exactly that. */
 function fromOutcome(outcome: ActionOutcome, extraFacts = ''): ToolResult {
   // What it charged, from the variant the gateway added - so the reply quotes the basket's own figure (catalog/commerce.ts).
-  const charged = outcome.ok && outcome.charge !== undefined ? `Charged: ${formatMoney(outcome.charge, storeCurrency())}${outcome.quantity && outcome.quantity > 1 ? ` for ${outcome.quantity}` : ''}.` : '';
+  // The price of what goes in, from the variant the gateway chose - a basket is not charged, so never "charged".
+  const charged = outcome.ok && outcome.charge !== undefined ? `Price: ${formatMoney(outcome.charge, storeCurrency())}${outcome.quantity && outcome.quantity > 1 ? ` for ${outcome.quantity}` : ''}.` : '';
   const facts = [outcome.facts, charged, outcome.cart ? cartFacts(outcome.cart) : '', extraFacts].filter(Boolean).join('\n');
   return {
     speech: outcome.speech,
     ...(facts ? { facts } : {}),
     ...(outcome.actions?.length ? { actions: outcome.actions } : {}),
     ...(outcome.cart ? { attachment: { kind: 'cart' as const, cart: outcome.cart } } : {}),
-    outcome: { ok: outcome.ok, action: outcome.action, ...(outcome.reason ? { reason: outcome.reason } : {}) },
+    outcome: { ok: outcome.ok, action: outcome.action, ...(outcome.reason ? { reason: outcome.reason } : {}), ...(outcome.dispatched ? { dispatched: true } : {}) },
   };
 }
 
@@ -3854,7 +3907,20 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
    * target from the customer at all, nothing is added: a model's pick alone
    * never decides what goes in the basket.
    */
-  const target: ActionTarget = ui ? (proposed ? { kind: 'bound', products: [proposed], label: proposed.title, source: 'card-action' } : { kind: 'unbound' }) : actionTarget(ctx);
+  /*
+   * A size change of a basket line ("change that polo to L", changeLineSize)
+   * replaces that line with the same product: the line the customer's words
+   * picked out of the basket is the target, resolved by code - not a name
+   * the words would have to carry again.
+   */
+  const replacedLineProduct = !ui && action.replaces && proposed && (ctx.session.basket ?? []).some((line) => line.lineId === action.replaces && sameProduct(line.productId, proposed.id)) ? proposed : undefined;
+  const target: ActionTarget = ui
+    ? proposed
+      ? { kind: 'bound', products: [proposed], label: proposed.title, source: 'card-action' }
+      : { kind: 'unbound' }
+    : replacedLineProduct
+      ? { kind: 'bound', products: [replacedLineProduct], label: replacedLineProduct.title, source: 'customer-words' }
+      : actionTarget(ctx);
   const diagnostics = {
     sessionId: ctx.session.id,
     source,
@@ -4028,11 +4094,15 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
    * otherwise more than one only when their words say how many - never a
    * number in the product's name, never the model's alone.
    */
+  // A replacement of a basket line carries that line's quantity: "change that polo to L" moves both if there were two.
+  const replacedLine = action.replaces ? (ctx.session.basket ?? []).find((line) => line.lineId === action.replaces) : undefined;
   const quantity = ui
     ? Math.max(1, Math.min(10, action.quantity ?? 1))
-    : offered?.type === 'add-product'
-      ? (quantityInWords(ctx.utterance ?? '')?.set ?? offered.quantity)
-      : quantityAsked(ctx, action.quantity);
+    : replacedLine
+      ? Math.max(1, Math.min(10, quantityInWords(ctx.utterance ?? '')?.set ?? replacedLine.quantity))
+      : offered?.type === 'add-product'
+        ? (quantityInWords(ctx.utterance ?? '')?.set ?? offered.quantity)
+        : quantityAsked(ctx, action.quantity);
   if (action.quantity !== undefined && quantity !== action.quantity) log.warn('cart.quantity_not_asked', { sessionId: ctx.session.id, proposed: action.quantity, used: quantity });
 
   const replacedIds = action.replaces
@@ -4072,6 +4142,26 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
         },
       ],
       afterSuccess,
+      /*
+       * Confirmed only by the cart's read-back (tools/cartOperations.ts): the
+       * variant's quantity must rise by what was asked, and a replacement's
+       * old line must be gone. One outgoing line at most is a replacement
+       * this slice confirms by variant; several keep the old path's checks.
+       */
+      operation: {
+        kind: 'add-product',
+        expect: {
+          add: [{ variantId: numericId(variant.id), quantity }],
+          ...(outgoingLines.length
+            ? { remove: outgoingLines.map((line) => ({ key: line.lineId, variantId: numericId(outgoingVariantOf(line) ?? ''), quantity: line.quantity })) }
+            : {}),
+        },
+        ...(outgoingLines.length === 1 && outgoingVariantOf(outgoingLines[0]!)
+          ? { outgoing: { lineId: outgoingLines[0]!.lineId, variantId: numericId(outgoingVariantOf(outgoingLines[0]!)!), quantity: outgoingLines[0]!.quantity, title: outgoingLines[0]!.title, choice: outgoingLines[0]!.variantTitle, ...(outgoingLines[0]!.fingerprint ? { fingerprint: outgoingLines[0]!.fingerprint } : {}) } }
+          : {}),
+        onApplied: { liked: [product.id], ...(replacedIds.length ? { rejected: replacedIds } : {}), lastAdded: true },
+        wording: { title: `${colourwayName(product.title).toLowerCase()} ${titleCaseWords(garmentName(product.title))}`.trim(), choice, quantity },
+      },
       productId: product.id,
       variantId: variant.id,
       quantity,
@@ -4122,23 +4212,29 @@ function lineMatches(line: { productId: string; variantTitle: string }, wanted: 
   return true;
 }
 
-async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: ActionSource): Promise<ActionPlan> {
-  if (action.type !== 'update-line') throw new Error('planUpdateLine: wrong action');
-  const theme = ctx.session.cartMode === 'theme';
-  const cart = !theme && ctx.session.cartId ? await getCart(ctx.session.cartId) : null;
-  const lines = theme
-    ? (ctx.session.basket ?? [])
-    : (cart?.lines ?? []).map((line) => ({ lineId: line.lineId, productId: line.productId, title: line.title, variantTitle: line.variantTitle, quantity: line.quantity, bundle: undefined as string | undefined }));
-  if (lines.length === 0) return { ok: false, reason: 'not-found', speech: 'Your basket is empty at the moment.', facts: 'There is nothing in the basket to change.' };
+type BasketLineRecord = { lineId: string; productId: string; variantId?: string; fingerprint?: string; title: string; variantTitle: string; quantity: number; bundle?: string };
 
-  const said = ctx.utterance ?? '';
+/**
+ * The basket line the customer means - by the product named, the kind ("the
+ * polo"), a size or colour ("the M one"), "it" (the one just added or talked
+ * about since), or the only line there is. Shared by quantity changes,
+ * removals and size changes, so "it" means the same line in each. No single
+ * line fits: the plan that asks.
+ */
+function resolveBasketLine(
+  ctx: ToolContext,
+  lines: BasketLineRecord[],
+  said: string,
+  source: ActionSource,
+  waiting: ReturnType<typeof livePending>,
+  proposedLineId: string | undefined,
+): { line: BasketLineRecord } | { plan: Extract<ActionPlan, { ok: false }> } {
   let line: (typeof lines)[number] | undefined;
-  const waiting = livePending(ctx.session);
   if (source === 'ui-cart-change') {
-    line = lines.find((entry) => entry.lineId === action.lineId);
+    line = lines.find((entry) => entry.lineId === proposedLineId);
   } else if (waiting?.type === 'update-line' && waiting.lineId && (source === 'customer-confirmation' || ctx.pendingResolved)) {
-    // Their yes to the change the record holds (tools/pending.ts): that line, and no other reading of "it".
-    line = lines.find((entry) => entry.lineId === waiting.lineId);
+    // Their yes to the change the record holds (tools/pending.ts): that line, and no other reading of "it" - re-found by variant and fingerprint if the cart re-keyed it since.
+    line = lines.find((entry) => entry.lineId === waiting.lineId) ?? lines.find((entry) => !!waiting.variantId && entry.variantId === waiting.variantId && (!waiting.lineFingerprint || entry.fingerprint === waiting.lineFingerprint) && !entry.bundle);
   } else {
     const identity = resolveCustomerProductIdentity(said);
     const offered = source === 'customer-confirmation' ? offeredAction(ctx) : null;
@@ -4178,15 +4274,34 @@ async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: 
     if (!line) {
       const listed = (candidates.length ? candidates : lines).map((entry) => `${entry.title} (${entry.variantTitle}) [line ${entry.lineId}]`).join('; ');
       return {
-        ok: false,
-        reason: candidates.length > 1 ? 'ambiguous-target' : 'no-target',
-        speech: 'Which item in your basket do you mean?',
-        facts: `Which line they mean is not certain. In the basket: ${listed}. Ask which - never change one for them.`,
+        plan: {
+          ok: false,
+          reason: candidates.length > 1 ? 'ambiguous-target' : 'no-target',
+          speech: candidates.length > 1 ? `Which one do you mean - ${candidates.map((entry) => `the ${titleCaseWords(entry.title)} in ${entry.variantTitle || 'one size'}`).join(' or ')}?` : 'Which item in your basket do you mean?',
+          facts: `Which line they mean is not certain. In the basket: ${listed}. Ask which - never change one for them.`,
+        },
       };
     }
-    if (line.lineId !== action.lineId) log.warn('identity.rejected_model_target', { sessionId: ctx.session.id, tool: 'update_cart_item', proposed: action.lineId, corrected: line.lineId });
+    if (proposedLineId !== undefined && line.lineId !== proposedLineId) log.warn('identity.rejected_model_target', { sessionId: ctx.session.id, tool: 'update_cart_item', proposed: proposedLineId, corrected: line.lineId });
   }
-  if (!line) return { ok: false, reason: 'not-found', speech: 'I cannot find that in your basket.', facts: cartSummary(ctx.session.basket ?? []) };
+  if (!line) return { plan: { ok: false, reason: 'not-found', speech: 'I cannot find that in your basket.', facts: cartSummary(ctx.session.basket ?? []) } };
+  return { line };
+}
+
+async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: ActionSource): Promise<ActionPlan> {
+  if (action.type !== 'update-line') throw new Error('planUpdateLine: wrong action');
+  const theme = ctx.session.cartMode === 'theme';
+  const cart = !theme && ctx.session.cartId ? await getCart(ctx.session.cartId) : null;
+  const lines = theme
+    ? (ctx.session.basket ?? [])
+    : (cart?.lines ?? []).map((line) => ({ lineId: line.lineId, productId: line.productId, title: line.title, variantTitle: line.variantTitle, quantity: line.quantity, bundle: undefined as string | undefined }));
+  if (lines.length === 0) return { ok: false, reason: 'not-found', speech: 'Your basket is empty at the moment.', facts: 'There is nothing in the basket to change.' };
+
+  const said = ctx.utterance ?? '';
+  const waiting = livePending(ctx.session);
+  const found = resolveBasketLine(ctx, lines, said, source, waiting, action.lineId);
+  if ('plan' in found) return found.plan;
+  const line = found.line;
 
   // How many: a click's own number; "remove" is none; otherwise the number their words give.
   let quantity: number;
@@ -4245,7 +4360,24 @@ async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: 
     if (variant && !variant.available) return { ok: false, reason: 'sold-out', speech: `The ${line.title} is sold out, so I can't add more.`, facts: `${line.title} ${line.variantTitle} is sold out.` };
   }
   const speech = quantity === 0 ? `Taking the ${line.title} out of your basket.` : `Changing the ${line.title} to ${quantity}.`;
-  if (theme) return { ok: true, speech, actions: [{ type: 'change', lineKey: line.lineId, quantity }], productId: line.productId, quantity };
+  if (theme) {
+    // Confirmed by the cart's read-back: the line's quantity must move by exactly this much (tools/cartOperations.ts).
+    const lineVariant = line.variantId ?? productById(line.productId)?.variants.find((entry) => entry.title === line!.variantTitle || Object.values(entry.options).join(' / ') === line!.variantTitle)?.id;
+    const delta = quantity - line.quantity;
+    const expect = lineVariant
+      ? delta > 0
+        ? { add: [{ variantId: numericId(lineVariant), quantity: delta }] }
+        : { remove: [{ key: line.lineId, variantId: numericId(lineVariant), quantity: -delta }] }
+      : {};
+    return {
+      ok: true,
+      speech,
+      actions: [{ type: 'change', lineKey: line.lineId, quantity }],
+      productId: line.productId,
+      quantity,
+      operation: { kind: 'update-line', expect, onApplied: {}, wording: { title: titleCaseWords(garmentName(line.title)), choice: line.variantTitle, quantity } },
+    };
+  }
   return { ok: true, speech, storefront: () => setLineQuantity(ctx.session.cartId!, line!.lineId, quantity), productId: line.productId, quantity };
 }
 
@@ -4270,6 +4402,8 @@ const updateCartTool = defineTool({
     required: ['lineId', 'quantity'],
   },
   async run(args, ctx): Promise<ToolResult> {
+    const sizeChange = !ctx.direct && (ctx.session.basket ?? []).length ? sizeChangeAsked(ctx.utterance ?? '') : null;
+    if (sizeChange) return changeLineSize(ctx, sizeChange.size);
     return fromOutcome(await executeCommerceAction(ctx, { type: 'update-line', lineId: args.lineId, quantity: args.quantity }));
   },
 });
@@ -4733,11 +4867,9 @@ const viewCartTool = defineTool({
           facts: 'The basket changes from this reply have not been made yet: the widget makes them after you answer. Do not say the basket is empty or unchanged.',
         };
       }
-      // The store cart as the widget last reported it - it sends it after every change.
-      const lines = ctx.session.basket ?? [];
-      if (lines.length === 0) return { speech: 'Your basket is empty at the moment.' };
-      const count = lines.reduce((sum, line) => sum + line.quantity, 0);
-      return { speech: `You have ${count} ${count === 1 ? 'item' : 'items'} in your basket - it is on screen.`, facts: cartSummary(lines) };
+      // The store cart as the widget last reported it, in code's words - sizes and quantities from the lines, a change still being confirmed kept apart (tools/cartOperations.ts).
+      const statement = basketStatement(ctx.session, (title) => titleCaseWords(garmentName(title)), colourwayName);
+      return { speech: statement.speech, facts: `${statement.facts}\n${cartSummary(ctx.session.basket ?? [])}` };
     }
     if (!ctx.session.cartId) return { speech: 'Your basket is empty at the moment.' };
     const cart = await getCart(ctx.session.cartId);

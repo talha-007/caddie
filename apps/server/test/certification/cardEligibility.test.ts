@@ -72,7 +72,7 @@ beforeEach(async () => {
   setDealsForTests([MIXED]);
   id = `eligibility-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
 });
 
 async function profile(update: { usualSize?: string; waist?: string }) {

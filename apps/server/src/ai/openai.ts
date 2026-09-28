@@ -12,6 +12,8 @@ import { completeGoal, confirmPackSwap, notePackSwapOffer, replacementRequired, 
 import { asksForKnown, customerGoal, describeGoal, goalLog, type CustomerGoal } from '../tools/journey.js';
 import { guardCards } from '../tools/eligibility.js';
 import { alignReplyWithPending, notePendingOffer, resolvePending } from '../tools/pending.js';
+import { UPDATING, basketStatement, unsettledOperation } from '../tools/cartOperations.js';
+import { colourwayName, garmentName } from '../catalog/colourways.js';
 import { costOfTokens } from '../usage/pricing.js';
 import { record } from '../usage/store.js';
 import { SYSTEM_PROMPT } from './prompt.js';
@@ -251,6 +253,12 @@ function cardChoiceContext(session: CaddieSession): ChatMessage | null {
  * orange polo in it, the model could not see an orange polo anywhere and added
  * the new one beside it. A handful of short lines; cheap next to a wrong order.
  */
+/** The basket and any unconfirmed change, in code's words, for the rewrite note. */
+function basketWords(session: CaddieSession): string {
+  const titled = (text: string) => text.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  return basketStatement(session, (title) => titled(garmentName(title)), colourwayName).facts;
+}
+
 function basketContext(session: CaddieSession): ChatMessage | null {
   const lines = session.basket ?? [];
   // Theme-cart shoppers have no cart id of ours: the basket is what the widget reported.
@@ -264,7 +272,10 @@ function basketContext(session: CaddieSession): ChatMessage | null {
           (line) =>
             `- ${line.title}${line.variantTitle ? ` (${line.variantTitle})` : ''} x${line.quantity}${line.bundle ? " [part of a pack]" : ""} [product ${line.productId}] [line ${line.lineId}]`,
         )
-        .join('\n'),
+        .join('\n') +
+      (unsettledOperation(session)
+        ? `\nStill being confirmed by the store cart, NOT in the basket yet: ${unsettledOperation(session)!.wording.title} ${unsettledOperation(session)!.wording.choice} x${unsettledOperation(session)!.quantity}. Say sizes and quantities only from the lines above.`
+        : ''),
   };
 }
 
@@ -288,7 +299,15 @@ async function verifyContext(sessionId: string): Promise<VerifyContext> {
   const pack = currentPack(now);
   if (pack) for (const plan of packStatus(now, pack).pieces) if (!plan.missing.length) settled.add(plan.product.id);
   if (now.lastAdded) settled.add(now.lastAdded.productId);
-  return { screen: currentScreen(now)?.products ?? [], sizeSettled: settled };
+  // The basket as the widget last reported it, and any change still being confirmed: what basket sentences are held to.
+  const unsettled = Object.values(now.cartOperations ?? {})
+    .filter((record) => record.status === 'dispatched' || record.status === 'uncertain')
+    .map((record) => ({ ...(record.productId ? { productId: record.productId } : {}), title: record.wording.title, choice: record.wording.choice, quantity: record.quantity, ...(record.outgoing ? { outgoingChoice: record.outgoing.choice } : {}) }));
+  return {
+    screen: currentScreen(now)?.products ?? [],
+    sizeSettled: settled,
+    ...(now.cartMode === 'theme' ? { basket: (now.basket ?? []).map((line) => ({ productId: line.productId, title: line.title, variantTitle: line.variantTitle, quantity: line.quantity })), unsettled } : {}),
+  };
 }
 
 export function shopperContext(session: CaddieSession): ChatMessage | null {
@@ -476,7 +495,7 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
     sessions.patch(sessionId, { recentEvidence: [...toolEvidence, session.recentEvidence ?? ''].join('\n').slice(0, 8000) });
   let lastToolSpeech = '';
   // What the Action Gateway said about each basket action this turn - whether it happened is its word, not the model's.
-  const outcomes: Array<{ ok: boolean; action: string; reason?: string; speech: string }> = [];
+  const outcomes: Array<{ ok: boolean; action: string; reason?: string; dispatched?: boolean; speech: string }> = [];
   // A sentence a tool said the reply must open with - see ToolResult.lead.
   let lead: { text: string; unless: RegExp } | undefined;
   let rewrote = false;
@@ -794,10 +813,27 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
      * what the customer hears is what the gateway (or the waiting action)
      * said.
      */
-    if (calls.length === 0 && !outcomes.some((outcome) => outcome.ok) && !goalCarriedOut && claimsDone.test(finalText)) {
-      const waiting = (await sessions.getOrCreate(sessionId)).pendingAction;
+    // Handed to the widget is not made: "added" is a claim until the cart's report says so (tools/cartOperations.ts).
+    const dispatchedNow = outcomes.find((outcome) => outcome.ok && outcome.dispatched);
+    // "I’m updating your basket" with a curly apostrophe once slipped past this check: read with plain quotes.
+    const plainText = finalText.replace(/[‘’]/g, "'");
+    const nowSession = await sessions.getOrCreate(sessionId);
+    /*
+     * "Your basket has the white Elite Polo in L" is a statement of what is
+     * there, not a claim that something was just done: it stands when the
+     * basket the widget reported holds that product and no doing-word is
+     * used (the sizes and quantities in it are held to the basket by the
+     * checker). "Nothing has changed in your basket" once replaced exactly
+     * such an answer to "what is in my basket?" (journey acceptance).
+     */
+    const statesContents =
+      /\bin your (basket|cart|bag)( now)?\b/i.test(plainText) &&
+      (nowSession.basket ?? []).some((line) => plainText.toLowerCase().includes(garmentName(line.title).toLowerCase())) &&
+      !/\b(added|adding|put|placed|placing|going in|gone in|goes in|removed|removing|updated|updating|changed|changing|swapped|swapping)\b/i.test(plainText);
+    if (calls.length === 0 && !outcomes.some((outcome) => outcome.ok && !outcome.dispatched) && !goalCarriedOut && claimsDone.test(plainText) && !statesContents) {
+      const waiting = nowSession.pendingAction;
       // "Nothing has changed": an earlier turn may well have added something.
-      const truth = refused[refused.length - 1]?.speech ?? waiting?.question ?? 'Nothing has changed in your basket.';
+      const truth = dispatchedNow ? UPDATING : (refused[refused.length - 1]?.speech ?? waiting?.question ?? 'Nothing has changed in your basket.');
       if (!rewrote) {
         rewrote = true;
         log.warn('reply.claimed_refused_action', { sessionId, reasons: refused.map((outcome) => outcome.reason), attempted: refused.length > 0 });
@@ -844,6 +880,9 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
               : '',
             violations.some((v) => v.kind === 'status')
               ? 'The pack is not ready - never say it is ready or complete. Ask only the one thing its Pack status line says to ask.'
+              : '',
+            violations.some((v) => v.kind === 'basket')
+              ? `What is in the basket is only what the "In their basket now" line and the Basket facts say: ${basketWords(await sessions.getOrCreate(sessionId))}. State sizes and quantities from that alone; a change still being confirmed is "being updated", not in the basket. Never repeat a size or quantity from an earlier turn.`
               : '',
             violations.some((v) => v.kind === 'comparison')
               ? 'Call something the cheapest, or cheaper, only when the facts give a "Price ordering" or "Price comparison" line saying so - otherwise give its price and nothing more.'

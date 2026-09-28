@@ -1,3 +1,4 @@
+import type { CartExpectation } from '@caddie/shared';
 import type { CaddieMessage, PageContext, SizeInput } from '@caddie/shared';
 import { redisEnabled, redisUsable } from '../lib/redis.js';
 import type { SizeRecommendationRecord } from '../shopper/facts.js';
@@ -6,7 +7,40 @@ import type { ShoppingFocus } from './focus.js';
 
 /** A basket action waiting on the customer's next answer (see tools/actionGateway.ts). */
 /** What a waiting action still needs from the customer. */
-export type PendingNeed = 'size' | 'colour' | 'waist' | 'leg' | 'option' | 'line' | 'quantity' | 'confirmation';
+export type PendingNeed = 'size' | 'colour' | 'waist' | 'leg' | 'option' | 'line' | 'quantity' | 'confirmation' | 'outcome';
+
+/**
+ * A basket change handed to the widget, from validation to the cart's own
+ * word on it (tools/cartOperations.ts). `dispatched` until the widget's
+ * report bears the change out; then applied, failed, partial - or uncertain,
+ * when the report could not settle it.
+ */
+export interface CartOperationRecord {
+  id: string;
+  kind: 'add-product' | 'update-line';
+  status: 'dispatched' | 'applied' | 'failed' | 'partial' | 'uncertain';
+  productId?: string;
+  /** Numeric variant id of what goes in (or changes). */
+  variantId?: string;
+  quantity: number;
+  /** A replacement: the line going out, as the basket held it. */
+  outgoing?: { lineId: string; variantId: string; quantity: number; title: string; choice: string; fingerprint?: string };
+  expect: CartExpectation;
+  /** The basket at dispatch, numeric variant id to quantity - the baseline when the widget's own read is missing. */
+  before: Record<string, number>;
+  /** The theme cart the change was made for, when the widget had told us: a report about another cart does not settle it. */
+  cartToken?: string;
+  onApplied: { liked?: string[]; rejected?: string[]; lastAdded?: boolean };
+  wording: { title: string; choice: string; quantity: number };
+  source: string;
+  turn: number;
+  mission?: number;
+  createdAt: number;
+  resolvedAt?: number;
+  /** What was said about it once settled - repeated for a duplicate report. */
+  text?: string;
+  error?: string;
+}
 
 /**
  * The one record of an action the Caddie asked something in order to finish
@@ -41,6 +75,12 @@ export interface PendingAction {
   turn: number;
   /** The shopping mission it was asked in (session/shoppingSession.ts) - an unrelated new mission ends it. */
   mission?: number;
+  /** Handed to the widget under this operation id, awaiting the cart's word (awaiting 'outcome'): held so a second yes cannot send it again. */
+  dispatched?: string;
+  /** update-line: the line's variant, so the line can be found again if the cart re-keys it before their yes. */
+  variantId?: string;
+  /** update-line: the line's distinguishing fingerprint (properties, selling plan), for the same reason. */
+  lineFingerprint?: string;
 }
 import { RedisSessionStore } from './redisStore.js';
 
@@ -72,6 +112,10 @@ export interface CaddieSession {
   basket?: Array<{
     lineId: string;
     productId: string;
+    /** Numeric variant id, as the widget read it - what a replacement's line going out is matched by. */
+    variantId?: string;
+    /** What makes this line distinct from another of the same variant (properties, selling plan), as a fingerprint - never the values. */
+    fingerprint?: string;
     title: string;
     variantTitle: string;
     quantity: number;
@@ -142,7 +186,13 @@ export interface CaddieSession {
    */
   ownerHash?: string;
   /** The product the gateway last put in the basket, and when - what "make it two" and "remove it" mean. */
-  lastAdded?: { productId: string; turn: number; byPending?: boolean };
+  lastAdded?: { productId: string; turn: number; byPending?: boolean; byOperation?: boolean };
+  /** Basket changes handed to the widget, by operation id, and what became of each (tools/cartOperations.ts). */
+  cartOperations?: Record<string, CartOperationRecord>;
+  /** The theme cart's token as the widget last reported it. */
+  cartToken?: string;
+  /** The basket-change contract the widget on this session speaks (x-caddie-widget); absent for an older widget. */
+  widgetContract?: string;
   /**
    * What the customer has chosen for each pack, by handle (see
    * tools/packState.ts): confirmed values only, and what they asked for that

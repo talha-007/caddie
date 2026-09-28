@@ -129,7 +129,7 @@ const THE_OLD_MISTAKE: Completion[] = [
 async function toTheOffer(): Promise<Played> {
   const played = { id: `coolwet-${Math.random()}`, actions: [] as CartAction[] };
   await sessions.getOrCreate(played.id);
-  await sessions.patch(played.id, { cartMode: 'theme' });
+  await sessions.patch(played.id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
   const shown = await say(played, 'Show me your Ambassador Packs, I am looking for rainy season, in red.', [
     { tool: { name: 'recommend_pack', args: { query: 'Ambassador Pack Cool & Wet', colour: 'red' } } },
     { content: 'Here is the Cool & Wet pack. What top size do you wear?' },

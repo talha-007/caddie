@@ -71,7 +71,7 @@ beforeEach(async () => {
   if (!a.ok || !b.ok) throw new Error('claim failed');
   tokenA = a.sessionToken;
   tokenB = b.sessionToken;
-  await sessions.patch(A, { cartMode: 'theme', basket: [{ lineId: 'line-a', productId: POLO.id, title: POLO.title, variantTitle: 'M', quantity: 1 }], lastShown: { kind: 'products', items: [{ id: POLO.id, title: POLO.title }] } });
+  await sessions.patch(A, { cartMode: 'theme', widgetContract: 'cart-ops/1', basket: [{ lineId: 'line-a', productId: POLO.id, title: POLO.title, variantTitle: 'M', quantity: 1 }], lastShown: { kind: 'products', items: [{ id: POLO.id, title: POLO.title }] } });
 });
 afterEach(() => {
   env.isProd = wasProd;

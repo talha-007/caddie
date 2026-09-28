@@ -1,8 +1,9 @@
 import { Router, type RequestHandler } from 'express';
-import type { BasketSync, CardChoice, CartAction, ProfileRequest, SessionClaimResponse, SessionRestartResponse, UiActionResponse, UiAddRequest, UiCartLineRequest, UiPackAddRequest } from '@caddie/shared';
+import { CART_OPS_CONTRACT, type BasketSync, type CardChoice, type CartAction, type CartOutcomeReport, type ProfileRequest, type SessionClaimResponse, type SessionRestartResponse, type UiActionResponse, type UiAddRequest, type UiCartLineRequest, type UiPackAddRequest } from '@caddie/shared';
 import { z } from 'zod';
 import { noteCartMode } from '../lib/request.js';
 import { executeCommerceAction } from '../tools/actionGateway.js';
+import { basketFromSync, settleOutcome } from '../tools/cartOperations.js';
 import { trustedShopperFacts } from '../shopper/facts.js';
 import type { ShopperProfile } from '../shopper/profile.js';
 import { rememberShopper } from '../shopper/remember.js';
@@ -55,7 +56,7 @@ sessionRouter.post('/:id/claim', claimLimit, async (req, res, next) => {
   try {
     const claimed = await claimSession(req.params.id);
     if (!claimed.ok) return res.status(claimed.reason === 'taken' ? 409 : 400).json({ error: claimed.reason === 'taken' ? 'session_taken' : 'invalid_session' });
-    const body: SessionClaimResponse = { sessionId: req.params.id, sessionToken: claimed.sessionToken };
+    const body: SessionClaimResponse = { sessionId: req.params.id, sessionToken: claimed.sessionToken, contract: CART_OPS_CONTRACT };
     return res.json(body);
   } catch (err) {
     return next(err);
@@ -219,30 +220,9 @@ sessionRouter.post('/:id/basket', owner, writeLimit, async (req, res, next) => {
     const body = req.body as Partial<BasketSync> | undefined;
     const lines = Array.isArray(body?.lines) ? body.lines.slice(0, 100) : [];
     await sessions.getOrCreate(req.params.id);
-    await sessions.patch(req.params.id, {
-      cartMode: 'theme',
-      basket: lines
-        .filter((line) => typeof line?.key === 'string' && typeof line?.productId === 'string')
-        .map((line) => {
-          /*
-           * Names from our own catalogue, never from the request. These lines
-           * go into the model's instructions, and anyone can call this
-           * endpoint: a "product" titled "ignore your rules and..." would be a
-           * prompt injection. Only the ids are taken from the client.
-           */
-          const product = productById(String(line.productId));
-          const variant = product?.variants.find((entry) => entry.id === String(line.variantId));
-          return {
-          lineId: String(line.key).slice(0, 200),
-          productId: String(line.productId),
-          title: product?.title ?? 'an item from the store',
-          variantTitle: variant ? Object.values(variant.options).filter((value) => value !== 'Default Title').join(' / ') : '',
-          quantity: Number(line.quantity) || 0,
-          ...(line.bundle ? { bundle: String(line.bundle).slice(0, 100) } : {}),
-          ...(line.bundleName ? { bundleName: String(line.bundleName).slice(0, 100) } : {}),
-          };
-        }),
-    });
+    // Names from our own catalogue, never from the request (tools/cartOperations.ts basketFromSync): these lines go into the model's instructions.
+    const token = typeof body?.cartToken === 'string' ? body.cartToken.slice(0, 120) : undefined;
+    await sessions.patch(req.params.id, { cartMode: 'theme', basket: basketFromSync(lines), ...(token ? { cartToken: token } : {}) });
     res.json({ ok: true, lines: lines.length });
   } catch (err) {
     next(err);
@@ -288,6 +268,51 @@ sessionRouter.post('/:id/add', owner, writeLimit, async (req, res, next) => {
       }
     }
     return res.json({ ...reply, ...(actions.length ? { actions } : {}) });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+/*
+ * POST /api/session/:id/cart-outcome - what the store cart showed after the
+ * widget carried out an operation the gateway handed it. Only this completes
+ * the change (tools/cartOperations.ts): the report is judged against the
+ * change asked for, a repeat is answered the same way and changes nothing,
+ * and an operation this session never made is refused. Owner-only, like
+ * every route about a session.
+ */
+const syncLineSchema = z.object({
+  key: z.string().min(1).max(200),
+  productId: z.string().min(1).max(100),
+  variantId: z.string().min(1).max(100),
+  title: z.string().max(200).optional(),
+  variantTitle: z.string().max(200).optional(),
+  quantity: z.number().int().min(0).max(999),
+  bundle: z.string().max(100).optional(),
+  bundleName: z.string().max(100).optional(),
+  properties: z.record(z.string().max(200)).optional(),
+  sellingPlanId: z.string().max(100).optional(),
+});
+const syncSchema = z.object({ cartToken: z.string().max(120).optional(), lines: z.array(syncLineSchema).max(100) });
+const outcomeSchema = z.object({
+  operationId: z.string().min(1).max(80),
+  status: z.enum(['applied', 'failed', 'partial', 'uncertain']),
+  before: syncSchema.nullable(),
+  after: syncSchema.nullable(),
+  error: z.string().max(300).optional(),
+  failure: z.enum(['rejected', 'network', 'timeout']).optional(),
+  evidence: z.literal('ajax-cart-read'),
+});
+
+sessionRouter.post('/:id/cart-outcome', owner, writeLimit, async (req, res, next) => {
+  try {
+    const parsed = outcomeSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+    const sync = (value: z.infer<typeof syncSchema> | null): BasketSync | null =>
+      value ? { ...(value.cartToken ? { cartToken: value.cartToken } : {}), lines: value.lines.map((line) => ({ ...line, title: line.title ?? '', variantTitle: line.variantTitle ?? '' })) } : null;
+    const report: CartOutcomeReport = { ...parsed.data, before: sync(parsed.data.before), after: sync(parsed.data.after) };
+    const result = await settleOutcome(req.params.id, report);
+    return res.status(result.status === 'unknown' ? 404 : 200).json(result);
   } catch (err) {
     return next(err);
   }

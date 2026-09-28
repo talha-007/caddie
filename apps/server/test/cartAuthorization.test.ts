@@ -39,7 +39,7 @@ beforeEach(() => {
 async function conversation(...turns: Array<[string, string]>) {
   const id = `auth-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
   const at = Date.now() - 60_000;
   const messages = turns.flatMap(([said, replied], i) => [
     { id: `u${i}`, role: 'user' as const, text: said, createdAt: new Date(at + i * 2000).toISOString() },

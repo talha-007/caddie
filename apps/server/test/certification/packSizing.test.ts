@@ -90,7 +90,7 @@ beforeEach(async () => {
   replies.length = 0;
   id = `rainy-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
 });
 
 async function say(text: string, model: Completion[]) {

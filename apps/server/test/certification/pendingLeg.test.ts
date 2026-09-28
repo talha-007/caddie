@@ -32,7 +32,7 @@ beforeEach(async () => {
   setDealsForTests([]);
   id = `cert-leg-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
 });
 async function turn(said: string, args: Record<string, unknown>, reply = 'OK.') {
   await readCustomerTurn(id, said);

@@ -14,8 +14,9 @@ import type {
   SizeInput,
   SizeRecommendation,
 } from '@caddie/shared';
-import { addFromCard, addPackFromCard, changeCartLine, onSessionReplaced, openEventStream, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, syncBasket } from './api.js';
-import { announceToTheme, basketSync, onStorefront, readCart, runActions } from './themeCart.js';
+import { TimeoutError, addFromCard, addPackFromCard, changeCartLine, onSessionReplaced, openEventStream, reportCartOutcome, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, syncBasket } from './api.js';
+import { announceToTheme, basketSync, observe, onStorefront, readCart, runActions, runOperation } from './themeCart.js';
+import { UNSUPPORTED_SERVER, alreadyRun, inFlight, noteDone, noteReported, noteStarted, sortActions } from './operations.js';
 import { announceCart } from './events.js';
 import { sameId } from './variants.js';
 
@@ -429,6 +430,53 @@ export function useCaddie(page: PageContext): CaddieState {
    * reach the theme's cart, in the shopper's browser, so the change is made
    * here - and a failure is said out loud rather than left looking added.
    */
+  /**
+   * One operation the server handed over: carried out in the store's cart,
+   * what the cart then showed reported back, and the server's own word on it
+   * shown - "Added the navy polo in M.", or why not. The same operation is
+   * never run twice; an answer that could not be delivered is kept and
+   * retried, never the add (operations.ts). The words come from the server's
+   * judgement of the cart, not from the action having been sent.
+   */
+  const carryOut = useCallback(
+    async (action: Extract<CartAction, { type: 'add' | 'change' }>): Promise<void> => {
+      const operationId = action.operationId!;
+      if (alreadyRun(operationId)) return;
+      noteStarted({ operationId, action, startedAt: Date.now() });
+      const report = await runOperation(action);
+      noteReported(operationId, report);
+      try {
+        updateCart(await readCart());
+      } catch {
+        // The report already carries what could be read.
+      }
+      let answer;
+      try {
+        answer = await reportCartOutcome(sessionId, report);
+      } catch {
+        // The cart was changed (or not) and the store said so; only the acknowledgement was lost. Kept for the next load - never resent as an add.
+        deliver("I couldn't confirm the update yet. I'm checking your basket.");
+        return;
+      }
+      // Settled: done with. Uncertain: kept in flight, so a later load reconciles it from the cart rather than forgetting it.
+      if (answer.status !== 'uncertain') noteDone(operationId);
+      if (answer.text) deliver(answer.text);
+      if (answer.recheck) {
+        // One more look, a moment later: a delayed add may still land.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const again = await reportCartOutcome(sessionId, await observe(operationId)).catch(() => null);
+        if (again && again.status !== 'uncertain') noteDone(operationId);
+        if (again?.text && again.status !== 'duplicate') deliver(again.text);
+        try {
+          updateCart(await readCart());
+        } catch {
+          // Shown as it was.
+        }
+      }
+    },
+    [deliver, sessionId, updateCart],
+  );
+
   const applyActions = useCallback(
     async (actions: CartAction[] | undefined) => {
       if (!actions?.length || !onStorefront()) return;
@@ -438,8 +486,16 @@ export function useCaddie(page: PageContext): CaddieState {
         for (const piece of action.pieces) chosen['gid://shopify/Product/' + piece.productId] = piece.variantId;
       }
       if (Object.keys(chosen).length) setPicked((prev) => ({ ...prev, ...chosen }));
+      const { operations, legacy: rest, unsupported } = sortActions(actions);
+      // An add or change the server would count as made on dispatch: not run, said plainly (compatibility).
+      if (unsupported.length) setError(UNSUPPORTED_SERVER);
+      for (const operation of operations) await carryOut(operation);
+      if (!rest.length) {
+        if (operations.length) void syncBasket(sessionId, basketSync()).catch(() => undefined);
+        return;
+      }
       try {
-        showStoreCart(await runActions(actions));
+        showStoreCart(await runActions(rest));
       } catch (err) {
         setError(`Your basket could not be updated: ${err instanceof Error ? err.message : 'please try again.'}`);
         try {
@@ -449,8 +505,42 @@ export function useCaddie(page: PageContext): CaddieState {
         }
       }
     },
-    [showStoreCart],
+    [carryOut, sessionId, showStoreCart],
   );
+
+  /**
+   * Operations this tab was handed and never had answered - a refresh mid-
+   * change, a lost acknowledgement, a request that timed out: reported from
+   * what the cart shows now, and never carried out again. Returns whether
+   * anything was checked.
+   */
+  const reconcile = useCallback(async (): Promise<boolean> => {
+    if (!onStorefront()) return false;
+    const waiting = inFlight();
+    if (!waiting.length) return false;
+    for (const op of waiting) {
+      try {
+        const report = op.report ?? (await observe(op.operationId));
+        const answer = await reportCartOutcome(sessionId, report);
+        if (answer.status !== 'uncertain') noteDone(op.operationId);
+        if (answer.text && answer.status !== 'duplicate') deliver(answer.text);
+      } catch {
+        // Left for the next load.
+      }
+    }
+    try {
+      updateCart(await readCart());
+    } catch {
+      // Shown as it was.
+    }
+    return true;
+  }, [deliver, sessionId, updateCart]);
+
+  useEffect(() => {
+    void reconcile();
+    // Once, for this session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   // Voice-driven results arrive here rather than as a chat response.
   useEffect(() => {
@@ -481,6 +571,10 @@ export function useCaddie(page: PageContext): CaddieState {
     });
   }, [deliver, remember, sessionId, updateCart]);
 
+  /** The reconcile step, reachable from withBusy (declared later). */
+  const reconcileRef = useRef<() => Promise<boolean>>(async () => false);
+  reconcileRef.current = reconcile;
+
   /** Runs one request with the busy flag and error handling every action shares. */
   const withBusy = useCallback(async (journey: Journey | null, task: () => Promise<void>) => {
     if (busyRef.current) return;
@@ -492,7 +586,12 @@ export function useCaddie(page: PageContext): CaddieState {
       await ready.current;
       await task();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      // Past its deadline is not failed: the store or the server may still finish. A check of the basket follows when one is owed; otherwise, how to check.
+      if (err instanceof TimeoutError) {
+        const checking = inFlight().length > 0;
+        setError(checking ? "That took longer than expected. I couldn't confirm the update yet - I'm checking your basket." : "That took longer than expected. If you were adding something, please check your basket with the cart icon before trying again.");
+        if (checking) void reconcileRef.current();
+      } else setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -635,9 +734,16 @@ export function useCaddie(page: PageContext): CaddieState {
       await withBusy(null, async () => {
         try {
           const reply = await addFromCard(sessionId, { items: items.map((item) => ({ productId: item.productId, options: item.options, quantity: 1 })) });
+          const { operations, legacy, unsupported } = sortActions(reply.actions);
           let current: Cart | null = null;
-          if (reply.actions?.length && onStorefront()) {
-            current = await runActions(reply.actions);
+          if (unsupported.length && onStorefront()) {
+            setError(UNSUPPORTED_SERVER);
+          } else if (operations.length && onStorefront()) {
+            // Confirmed by the cart's read-back; the server's own words say what went in (carryOut).
+            for (const operation of operations) await carryOut(operation);
+            void syncBasket(sessionId, basketSync()).catch(() => undefined);
+          } else if (legacy.length && onStorefront()) {
+            current = await runActions(legacy);
             void syncBasket(sessionId, basketSync()).catch(() => undefined);
           } else if (reply.cart) {
             current = reply.cart;
@@ -661,7 +767,7 @@ export function useCaddie(page: PageContext): CaddieState {
       });
       return ok;
     },
-    [sessionId, updateCart, withBusy],
+    [carryOut, sessionId, updateCart, withBusy],
   );
 
   const quietCartCall = useCallback(
@@ -720,8 +826,14 @@ export function useCaddie(page: PageContext): CaddieState {
         // The server checks the line against the basket as it is right now.
         if (onStorefront()) await syncBasket(sessionId, basketSync());
         const reply = await changeCartLine(sessionId, { lineId, quantity });
-        if (reply.actions?.length && onStorefront()) {
-          updateCart(await runActions(reply.actions));
+        const { operations, legacy, unsupported } = sortActions(reply.actions);
+        if (unsupported.length && onStorefront()) {
+          setError(UNSUPPORTED_SERVER);
+        } else if (operations.length && onStorefront()) {
+          for (const operation of operations) await carryOut(operation);
+          void syncBasket(sessionId, basketSync()).catch(() => undefined);
+        } else if (legacy.length && onStorefront()) {
+          updateCart(await runActions(legacy));
           void syncBasket(sessionId, basketSync()).catch(() => undefined);
         } else if (reply.cart) {
           updateCart(reply.cart);
@@ -735,7 +847,7 @@ export function useCaddie(page: PageContext): CaddieState {
         }, 1500);
       }
     },
-    [sessionId, updateCart],
+    [carryOut, sessionId, updateCart],
   );
 
   const refreshCart = useCallback(async () => {

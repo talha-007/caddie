@@ -3,6 +3,8 @@ import { log } from '../lib/logger.js';
 import { sessions, type PendingAction } from '../session/store.js';
 import { currentMission } from '../session/shoppingSession.js';
 import { cartAuthorization, lineChangeAuthorization, offeredAction, turnNow } from './cartAuthorization.js';
+import { STILL_UPDATING, UNCERTAIN_HELD, UPDATING, dispatch, expireDispatched, keepOperations, unsettledOperation, type PlannedOperation } from './cartOperations.js';
+import { CART_OPS_CONTRACT } from '@caddie/shared';
 import type { ToolContext } from './types.js';
 
 /**
@@ -71,6 +73,13 @@ export type ActionPlan =
       storefront?: () => Promise<Cart>;
       /** Side effects that must wait until the change is made (likes, bookkeeping). */
       afterSuccess?: () => Promise<void>;
+      /**
+       * On the storefront: the change is only made once the widget's report on
+       * the cart bears it out (tools/cartOperations.ts). Set by planners whose
+       * change the cart can confirm; the gateway then defers everything in
+       * step 4 to that report.
+       */
+      operation?: PlannedOperation;
       productId?: string;
       variantId?: string;
       quantity?: number;
@@ -89,6 +98,9 @@ export type ActionPlan =
 
 export interface ActionOutcome {
   ok: boolean;
+  /** ok, but handed to the widget and not yet borne out by the cart: nothing is added until its report says so. */
+  dispatched?: boolean;
+  operationId?: string;
   action: CommerceAction['type'];
   source?: ActionSource;
   reason?: RejectReason;
@@ -162,8 +174,25 @@ const NOT_AUTHORISED: Record<CommerceAction['type'], { speech: string; facts: (s
 export async function executeCommerceAction(ctx: ToolContext, action: CommerceAction): Promise<ActionOutcome> {
   return serialised(ctx.session.id, async () => {
     // Read fresh: an earlier action in this same reply may have changed the session.
-    const here: ToolContext = { ...ctx, session: await sessions.getOrCreate(ctx.session.id) };
+    const here: ToolContext = { ...ctx, session: await expireDispatched(ctx.session.id, await sessions.getOrCreate(ctx.session.id)) };
     const said = (ctx.utterance ?? '').slice(0, 160);
+    /*
+     * A change already handed to the widget and not yet borne out by the cart
+     * holds every other change to this basket: a second "yes" must not send
+     * the same add again, and two Caddie writes must not race in one cart.
+     * Held for OUTCOME_TIMEOUT_MS at most (expireDispatched).
+     */
+    const unsettled = unsettledOperation(here.session);
+    if (unsettled) {
+      log.info('gateway.held_for_outcome', { sessionId: ctx.session.id, action: action.type, operationId: unsettled.id, status: unsettled.status });
+      return {
+        ok: false,
+        action: action.type,
+        reason: 'not-ready',
+        speech: unsettled.status === 'uncertain' ? UNCERTAIN_HELD : STILL_UPDATING,
+        facts: `A basket change (${unsettled.wording.title}${unsettled.wording.choice ? ` in ${unsettled.wording.choice}` : ''}) is ${unsettled.status === 'uncertain' ? 'unconfirmed' : 'still being confirmed by the store cart'}. Nothing else was changed and nothing is sent again; do not add, change or offer anything for the basket until it is settled. Say only what the tool said.`,
+      };
+    }
 
     const source = authorise(here, action);
     if (!source) {
@@ -204,6 +233,68 @@ export async function executeCommerceAction(ctx: ToolContext, action: CommerceAc
         reason: plan.reason,
         speech: plan.speech,
         facts: `Nothing was ${action.type === 'update-line' ? 'changed' : 'added'} (${plan.reason}) - the basket is unchanged. ${plan.facts} Never say it was ${action.type === 'update-line' ? 'changed' : 'added'}.`,
+      };
+    }
+
+    /*
+     * 3. On the storefront, handed over - not made. The widget carries the
+     * change out in the theme's cart and reports what the cart then showed;
+     * only that report completes the action (tools/cartOperations.ts). The
+     * customer's authorisation is held on the record until then, and
+     * nothing is said to be added.
+     */
+    if (plan.operation && here.session.cartMode === 'theme' && plan.actions?.length) {
+      /*
+       * A widget that cannot report on the change (no x-caddie-widget, or an
+       * older contract) is not handed one: it would carry it out and never
+       * tell us, and the change would sit unconfirmed for good. Said plainly;
+       * the theme's own Add button still works.
+       */
+      if (here.session.widgetContract !== CART_OPS_CONTRACT) {
+        log.warn('gateway.widget_unsupported', { sessionId: ctx.session.id, action: action.type, widget: here.session.widgetContract ?? null });
+        return {
+          ok: false,
+          action: action.type,
+          reason: 'unavailable',
+          speech: "I can't change your basket from this version of the page - please refresh the page, or use the Add button on the product.",
+          facts: 'The page is running an older widget that cannot confirm basket changes; nothing was changed. Tell them to refresh, or to use the product page. Never say it was added.',
+        };
+      }
+      const { actions, record } = dispatch(here.session, plan.operation, plan.actions, {
+        source,
+        turn: turnNow(here),
+        mission: currentMission(here.session),
+        ...(plan.productId ? { productId: plan.productId } : {}),
+        ...(plan.variantId ? { variantId: plan.variantId } : {}),
+      });
+      await sessions.patch(ctx.session.id, {
+        cartOperations: keepOperations(here.session.cartOperations, record),
+        pendingAction: {
+          type: plan.operation.kind,
+          productIds: plan.productId ? [plan.productId] : [],
+          ...(plan.quantity !== undefined ? { quantity: plan.quantity } : {}),
+          awaiting: 'outcome',
+          missing: ['outcome'],
+          authorized: true,
+          dispatched: record.id,
+          turn: turnNow(here),
+          mission: currentMission(here.session),
+        },
+      });
+      log.info('gateway.dispatched', { sessionId: ctx.session.id, action: action.type, source, operationId: record.id, productId: plan.productId ?? null, variantId: plan.variantId ?? null, quantity: plan.quantity ?? null });
+      return {
+        ok: true,
+        dispatched: true,
+        operationId: record.id,
+        action: action.type,
+        source,
+        speech: UPDATING,
+        facts: `${plan.facts ?? ''}\nThe store cart is being updated and the result is confirmed separately - the customer will see the confirmation. Say only that the basket is being updated: never that it is added, in the basket or done, and do not ask about a size or colour for it.`.trim(),
+        actions,
+        ...(plan.productId ? { productId: plan.productId } : {}),
+        ...(plan.variantId ? { variantId: plan.variantId } : {}),
+        ...(plan.quantity !== undefined ? { quantity: plan.quantity } : {}),
+        ...(plan.charge !== undefined ? { charge: plan.charge } : {}),
       };
     }
 

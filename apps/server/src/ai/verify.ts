@@ -26,7 +26,7 @@ import { allProducts, catalogueVersion } from '../catalog/sync.js';
 
 export interface Violation {
   /** `wording`: ranking talk or overclaiming, reworded. `offer`: offering to show what is already on screen, dropped. */
-  kind: 'price' | 'product' | 'count' | 'colour' | 'attribute' | 'wording' | 'offer' | 'comparison' | 'length' | 'status' | 'pricing' | 'stock' | 'size';
+  kind: 'price' | 'product' | 'count' | 'colour' | 'attribute' | 'wording' | 'offer' | 'comparison' | 'length' | 'status' | 'pricing' | 'stock' | 'size' | 'basket';
   claim: string;
 }
 
@@ -73,6 +73,10 @@ function cardProducts(attachment?: CaddieAttachment): Product[] {
 export interface VerifyContext {
   screen?: Product[];
   sizeSettled?: Set<string>;
+  /** The store cart as the widget last reported it (session.basket), when the basket is the theme's. */
+  basket?: Array<{ productId: string; title: string; variantTitle: string; quantity: number }>;
+  /** A change handed to the widget and not yet settled: its target, which "being updated" sentences may name. */
+  unsettled?: Array<{ productId?: string; title: string; choice: string; quantity: number; outgoingChoice?: string }>;
 }
 
 export function verifyReply(reply: string, evidence: string, attachment?: CaddieAttachment, customerSaid?: string, context: VerifyContext = {}): Violation[] {
@@ -125,7 +129,52 @@ export function verifyReply(reply: string, evidence: string, attachment?: Caddie
   violations.push(...packReadiness(reply, evidence));
   violations.push(...packPricing(reply, evidence));
   if (customerSaid !== undefined) violations.push(...replyShape(reply, customerSaid, products));
+  if (context.basket) violations.push(...unsupportedBasketClaims(reply, context));
   return violations;
+}
+
+/* ---------------- what is in the basket ---------------- */
+
+const BASKET_WORDS = /\b(basket|cart|bag)\b/i;
+const IN_PROGRESS = /\b(updat(?:e|ed|ing)|being (?:added|changed|put|removed)|going in|adding|changing|will be|about to|on its way)\b/i;
+const SIZE_TOKEN = /\b(?:size |in )(xs|s|m|l|xl|xxl|2xl|3xl|4xl|small|medium|large|x-?large|\d{2})\b/gi;
+const QUANTITY_WORD = /\b(two|three|four|five|six|2|3|4|5|6)\b(?=\s*(?:x|of|white|black|navy|red|blue|grey|green|pink|[A-Z]|\w+ polos?|\w+ jackets?))|\bx\s?(\d)\b/g;
+const NUMBER: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6 };
+
+/**
+ * Sizes and quantities said of what is in the basket, held to the basket as
+ * the widget last reported it - and, for a change still being confirmed, to
+ * that change's target. "Your basket is still showing the polo in M" with an
+ * L line, or "two polos in M" for a change to two in L, is a claim the basket
+ * does not support (single-product journey acceptance).
+ */
+export function unsupportedBasketClaims(reply: string, context: VerifyContext): Violation[] {
+  const basket = context.basket ?? [];
+  const unsettled = context.unsettled ?? [];
+  const found: Violation[] = [];
+  for (const sentence of reply.split(/(?<=[.!?])\s+/)) {
+    if (!BASKET_WORDS.test(sentence) || NEGATED.test(normalise(sentence)) || /\?\s*$/.test(sentence.trim())) continue;
+    const text = normalise(sentence);
+    const inProgress = IN_PROGRESS.test(sentence);
+    // The products this sentence is about: those in the basket or being changed whose design it names; none named means any of them.
+    const candidates = [...basket, ...unsettled.map((op) => ({ productId: op.productId ?? '', title: op.title, variantTitle: inProgress ? op.choice : '', quantity: op.quantity }))];
+    const named = candidates.filter((line) => text.includes(normalise(garmentName(line.title)).replace(RANGE_WORDS, ' ').replace(/\s+/g, ' ').trim()));
+    const subjects = named.length ? named : candidates;
+    if (!subjects.length) continue;
+    const supported = inProgress
+      ? unsettled.filter((op) => !named.length || named.some((line) => garmentName(line.title) === garmentName(op.title))).map((op) => ({ size: op.choice.toLowerCase(), quantity: op.quantity }))
+      : basket.filter((line) => !named.length || named.some((candidate) => candidate.title === line.title)).map((line) => ({ size: line.variantTitle.toLowerCase(), quantity: line.quantity }));
+    if (!supported.length && inProgress) continue;
+    for (const match of sentence.matchAll(SIZE_TOKEN)) {
+      const size = normaliseSize(match[1] ?? '') ?? (match[1] ?? '');
+      if (!supported.some((line) => line.size.toUpperCase() === size.toUpperCase() || line.size.toUpperCase().split(' / ').includes(size.toUpperCase()))) found.push({ kind: 'basket', claim: match[0] });
+    }
+    for (const match of sentence.matchAll(QUANTITY_WORD)) {
+      const quantity = NUMBER[(match[1] ?? match[2] ?? '').toLowerCase()];
+      if (quantity !== undefined && !supported.some((line) => line.quantity === quantity)) found.push({ kind: 'basket', claim: match[0] });
+    }
+  }
+  return [...new Map(found.map((violation) => [violation.claim, violation])).values()];
 }
 
 /* ---------------- Short, for chat and for voice ---------------- */

@@ -34,6 +34,7 @@ const { sessions } = await import('../../src/session/store.js');
 const { converse } = await import('../../src/ai/openai.js');
 const { customerGoal } = await import('../../src/tools/journey.js');
 const { env } = await import('../../src/env.js');
+const { confirmApplied } = await import('../support/widgetCart.js');
 
 let nextId = 7000;
 function garment(title: string, stock: Record<string, boolean>, price = 40): Product {
@@ -97,7 +98,7 @@ interface Played {
 async function start(): Promise<Played> {
   const id = `journey-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
   return { id, actions: [], replies: [] };
 }
 
@@ -111,13 +112,14 @@ async function say(played: Played, text: string, model: Completion[]) {
     { id: `a-${Math.random()}`, role: 'assistant', text: reply.text, createdAt: new Date().toISOString() },
   ]);
   const session = await sessions.getOrCreate(played.id);
-  const basket = [...(session.basket ?? [])];
+  const before = [...(session.basket ?? [])];
+  const basket = [...before];
   for (const action of reply.actions ?? []) {
     played.actions.push(action);
     if (action.type === 'add') {
       for (const line of action.lines) {
         const owner = variantOwner.get(line.variantId)!;
-        basket.push({ lineId: `line-${basket.length + 1}`, productId: owner.product.id, title: owner.product.title, variantTitle: owner.variant.title, quantity: line.quantity });
+        basket.push({ lineId: `line-${basket.length + 1}`, productId: owner.product.id, variantId: owner.variant.id.split('/').pop(), title: owner.product.title, variantTitle: owner.variant.title, quantity: line.quantity });
       }
     }
     if (action.type === 'add-bundle') {
@@ -134,6 +136,8 @@ async function say(played: Played, text: string, model: Completion[]) {
       }
     }
   }
+  // The widget's part: the change carried out in the (fake) theme cart and reported, so the gateway can complete it (test/support/widgetCart.ts).
+  await confirmApplied(played.id, reply.actions, before, basket);
   await sessions.patch(played.id, { basket });
   played.replies.push(reply.text);
   return reply;

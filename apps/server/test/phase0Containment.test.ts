@@ -77,7 +77,7 @@ const post = async (path: string, body: unknown, headers: Record<string, string>
 async function someoneElse(): Promise<string> {
   const id = `victim-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
   await rememberShopper(id, { usualSize: 'M', range: 'men' }, 'customer-words');
   return id;
 }
@@ -124,7 +124,8 @@ describe('/api/tools in production: only what the storefront widget calls', () =
     await sessions.getOrCreate(id);
     // As the widget does: the size tapped on the card first, then Add.
     expect((await post(`/api/session/${id}/choice`, { productId: POLO.id, options: { Size: 'M' } })).status).toBe(200);
-    const res = await post('/api/tools/add_to_cart', { sessionId: id, args: { productId: POLO.id, options: { Size: 'M' } } }, { 'x-caddie-cart': 'theme' });
+    // As the widget does: on the storefront it says which basket-change contract it speaks, or it is handed nothing it cannot report on.
+    const res = await post('/api/tools/add_to_cart', { sessionId: id, args: { productId: POLO.id, options: { Size: 'M' } } }, { 'x-caddie-cart': 'theme', 'x-caddie-widget': 'cart-ops/1' });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { actions?: unknown[] };
     expect(body.actions?.length).toBe(1);

@@ -44,6 +44,26 @@ const OFFERED_CHANGE = /\b(remove|take [^.?!]{0,40}\bout|change [^.?!]{0,40}\bto
 /** Their words take something out of the basket. */
 const ASKS_TO_REMOVE =
   /\b(remove|delete|take (it|them|that|those|this|these|the\b[^.?!]{0,40}) out|take out|get rid of|(don'?t|do not|no longer) want (it|them|that|those|this|the\b)|drop (it|them|that|those|the\b))/i;
+/**
+ * "Change that polo to L", "make it a large", "change its size to 34": a
+ * size change of something in the basket - never a quantity (audit finding
+ * E1: "change it to 34" once read as thirty-four). Read before the quantity
+ * words, which it takes precedence over.
+ */
+const SIZE_WORD = String.raw`(xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|small|medium|large|x-?large|extra large|extra small|\d{2})`;
+const ASKS_SIZE_CHANGE = new RegExp(
+  String.raw`\b(?:change|swap|switch|make|alter|update|move)\b[^.?!]{0,60}?\b(?:to|into|for)\b\s*(?:a |an |the |size |a size )?${SIZE_WORD}\b(?!\s*(?:of them|of those|pairs?|polos?|jackets?|items?))|\bsize\b[^.?!]{0,20}\bto\b\s*(?:a |an )?${SIZE_WORD}\b|\bmake (?:it|that|them|this|the [a-z ]{1,30}?) (?:a |an )?${SIZE_WORD}\b(?!\s*(?:of them|of those|pairs?|polos?|jackets?|items?))|\b(?:in|to) (?:a |an )?${SIZE_WORD} instead\b`,
+  'i',
+);
+/** The size their words change something in the basket to, or null. */
+export function sizeChangeAsked(said: string): { size: string } | null {
+  const match = ASKS_SIZE_CHANGE.exec(said.toLowerCase());
+  if (!match) return null;
+  const word = match.slice(1).find(Boolean) ?? '';
+  const size = normaliseSize(word) ?? word;
+  return size ? { size: size.toUpperCase() } : null;
+}
+
 /** Their words change how many of something is in the basket. */
 const ASKS_FOR_QUANTITY =
   /\b(make (it|that|them|those|this|these|the\b[^.?!]{0,40}) (\d{1,2}|one|two|three|four|five|six)|change (it|that|them|those|this|the\b[^.?!]{0,40}) to (\d{1,2}|one|two|three|four|five|six)|quantity|(\d{1,2}|two|three|four|five|six) of (them|those|these|it)|one more|another one|add another|just one|only one)\b/i;
@@ -179,6 +199,8 @@ export function lineChangeAuthorization(ctx: ToolContext): 'customer-utterance' 
   if (!said) return null;
   const reply = readReply(said);
   if (reply.declines) return null;
+  // A size change is a replacement (add_to_cart with replaces), never a quantity change.
+  if (sizeChangeAsked(said) && !ASKS_TO_REMOVE.test(said)) return null;
   if (ASKS_TO_REMOVE.test(said) || ASKS_FOR_QUANTITY.test(said)) return 'customer-utterance';
   const pending = livePending(ctx.session);
   if (pending?.type === 'update-line' && reply.affirms) return 'customer-confirmation';
@@ -223,6 +245,8 @@ const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, both: 2, couple: 
  * meant: "change the second one to 3" is 3. Null when no quantity is said.
  */
 export function quantityInWords(text: string, identity?: CustomerIdentity): { set?: number; more?: number } | null {
+  // "Change its size to 34" is a size, whatever the number: never a quantity (audit finding E1).
+  if (sizeChangeAsked(text)) return null;
   const said = withoutProductName(text.toLowerCase(), identity ?? resolveCustomerProductIdentity(text))
     .replace(/\b(size|uk|waist|leg|chest|inside leg)\s*\d{1,3}\b/g, ' ')
     .replace(/\b\d{1,3}\s*(waist|leg|cm|in|inch|inches|kg|lb|%|")/g, ' ');

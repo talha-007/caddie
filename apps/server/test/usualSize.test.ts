@@ -41,7 +41,7 @@ beforeEach(() => {
 async function customer(...said: string[]) {
   const id = `usual-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
   for (const text of said) await noteCustomerWords(id, text);
   return id;
 }

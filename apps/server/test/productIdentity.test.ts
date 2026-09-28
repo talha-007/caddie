@@ -70,7 +70,7 @@ beforeEach(async () => {
   setDealsForTests([]);
   id = `identity-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
 });
 
 /** A customer message, read as converse() reads it, and recorded. */

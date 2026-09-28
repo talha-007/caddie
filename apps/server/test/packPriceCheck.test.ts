@@ -53,7 +53,7 @@ const pack = (handle: string, price: number) => ({
 
 async function addPack(handle: string) {
   const id = `price-${Math.random()}`;
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
   let session = await sessions.getOrCreate(id);
   await runTool('recommend_pack', { query: 'ambassador pack mixed conditions' }, { session });
   session = await sessions.getOrCreate(id);
@@ -101,7 +101,7 @@ describe('what is said about the price', () => {
 
   async function show(handle: string) {
     const id = `said-${Math.random()}`;
-    await sessions.patch(id, { cartMode: 'theme' });
+    await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
     const shown = await runTool('recommend_pack', { query: 'ambassador pack mixed conditions' }, { session: await sessions.getOrCreate(id), utterance: 'the mixed conditions one' });
     const added = await runTool('add_pack_to_cart', { size: 'M', pack: `ambassador pack ${handle}` }, { session: await sessions.getOrCreate(id), utterance: 'add it in medium' });
     const card = shown.attachment?.kind === 'pack' ? shown.attachment.recommendation.total.amount : NaN;
@@ -197,7 +197,7 @@ describe('a swap that changes the price', () => {
     const base = pack('mixed-swap', 129.99);
     setDealsForTests([{ ...base, steps: [{ ...base.steps[0]!, productIds: new Set(['gid://shopify/Product/1', 'gid://shopify/Product/3']) }, base.steps[1]!] }]);
     const id = `swap-${Math.random()}`;
-    await sessions.patch(id, { cartMode: 'theme' });
+    await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
     const first = await runTool('recommend_pack', { query: 'ambassador pack mixed conditions' }, { session: await sessions.getOrCreate(id), utterance: 'the mixed conditions pack please' });
     expect(first.facts).not.toContain('This change takes it');
     const lead = first.attachment?.kind === 'pack' ? first.attachment.recommendation.items[0]!.id : '';

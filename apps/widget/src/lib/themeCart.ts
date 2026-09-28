@@ -6,6 +6,7 @@ import {
   type BundleDeal,
   type Cart,
   type CartAction,
+  type CartOutcomeReport,
 } from '@caddie/shared';
 
 /**
@@ -23,7 +24,18 @@ interface ShopifyGlobal {
   shop?: string;
   country?: string;
   currency?: { active?: string };
+  /** The store's locale-aware root ("/", "/en-gb/"), as the theme's own cart calls use it. */
+  routes?: { root?: string };
 }
+
+/** Cart endpoints under the store's root, so a localised storefront ("/fr/") is not sent to the wrong cart. */
+export function cartPath(path: string): string {
+  const root = shopify()?.routes?.root ?? '/';
+  return `${root.endsWith('/') ? root.slice(0, -1) : root}${path}`;
+}
+
+/** How long one cart request may take before the widget stops waiting for it (a timeout is not a cancellation). */
+export const CART_REQUEST_MS = 15_000;
 
 function shopify(): ShopifyGlobal | undefined {
   return (window as unknown as { Shopify?: ShopifyGlobal }).Shopify;
@@ -52,20 +64,54 @@ interface AjaxCart {
     final_price: number;
     final_line_price: number;
     properties: Record<string, unknown> | null;
+    selling_plan_allocation?: { selling_plan?: { id?: number | string } } | null;
   }>;
 }
 
+/** A cart request that ran past its deadline: the store may still have done the work. */
+export class CartTimeout extends Error {
+  constructor(readonly path: string) {
+    super('The basket took too long to respond.');
+  }
+}
+
 async function ajax<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    credentials: 'same-origin',
-    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...(init?.headers ?? {}) },
-    ...init,
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CART_REQUEST_MS);
+  let res: Response;
+  try {
+    res = await fetch(cartPath(path), {
+      credentials: 'same-origin',
+      ...init,
+      // After the spread: an init with its own headers once replaced these, and every POST went out without Accept.
+      headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...((init?.headers as Record<string, string> | undefined) ?? {}) },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (controller.signal.aborted) throw new CartTimeout(path);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { description?: string; message?: string };
-    throw new Error(body.description || body.message || `The basket could not be updated (${res.status}).`);
+    throw new CartRejected(res.status, body.description || body.message || `The basket could not be updated (${res.status}).`);
   }
   return res.json() as Promise<T>;
+}
+
+/** The store answered and refused: the one failure whose outcome is known - nothing was changed by this request. */
+export class CartRejected extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+
+/** How a failed request is classed for the report: only a refusal the store sent is a known outcome. */
+export function failureKind(err: unknown): 'rejected' | 'network' | 'timeout' {
+  if (err instanceof CartTimeout) return 'timeout';
+  if (err instanceof CartRejected) return 'rejected';
+  return 'network';
 }
 
 const gid = (kind: 'Product' | 'ProductVariant', id: number) => `gid://shopify/${kind}/${id}`;
@@ -108,19 +154,122 @@ export async function readCart(): Promise<Cart> {
 }
 
 /** The cart as the server needs it, so the model can see what is really in it. */
-export function basketSync(): BasketSync {
+export function basketSync(raw: AjaxCart | null = lastRaw): BasketSync {
   return {
-    lines: (lastRaw?.items ?? []).map((item) => ({
+    ...(raw?.token ? { cartToken: raw.token } : {}),
+    lines: (raw?.items ?? []).map((item) => ({
       key: item.key,
       productId: gid('Product', item.product_id),
       variantId: gid('ProductVariant', item.variant_id),
       title: item.product_title,
       variantTitle: item.variant_title ?? '',
       quantity: item.quantity,
+      ...(item.properties && Object.keys(item.properties).length ? { properties: Object.fromEntries(Object.entries(item.properties).map(([key, value]) => [key, String(value ?? '')])) } : {}),
+      ...(item.selling_plan_allocation?.selling_plan?.id !== undefined ? { sellingPlanId: String(item.selling_plan_allocation.selling_plan.id) } : {}),
       ...(bundleOf(item) ? { bundle: bundleOf(item) } : {}),
       ...(typeof item.properties?.['__Bundle_Name'] === 'string' ? { bundleName: String(item.properties['__Bundle_Name']) } : {}),
     })),
   };
+}
+
+/** A fresh read of the cart, or null when the store did not answer - never a stale copy passed off as fresh. */
+async function readRaw(): Promise<AjaxCart | null> {
+  try {
+    lastRaw = await ajax<AjaxCart>('/cart.js');
+    return lastRaw;
+  } catch {
+    return null;
+  }
+}
+
+const sameProperties = (a: Record<string, unknown> | null, b: Record<string, unknown> | null) => JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
+const samePlan = (a: AjaxCart['items'][number], b: AjaxCart['items'][number]) => String(a.selling_plan_allocation?.selling_plan?.id ?? '') === String(b.selling_plan_allocation?.selling_plan?.id ?? '');
+
+/**
+ * One operation the server handed over, carried out in the store's cart and
+ * reported as the cart then showed it (server: tools/cartOperations.ts).
+ *
+ * The cart is read before, so the report can show the change and not just
+ * the state, and after every step. A replacement adds the new size first
+ * and only then takes the old line out - re-found in the fresh read, by key
+ * or, when the add re-keyed the cart, by variant and properties - so a
+ * refused add leaves the old line untouched, and an add that went in but a
+ * removal that did not is reported as exactly that, never as done. A
+ * request that times out is reported uncertain: the store may have done
+ * the work, and only a read can say.
+ */
+export async function runOperation(action: Extract<CartAction, { type: 'add' | 'change' }>): Promise<CartOutcomeReport> {
+  const operationId = action.operationId ?? '';
+  const beforeRaw = await readRaw();
+  const before = beforeRaw ? basketSync(beforeRaw) : null;
+  const report = (status: CartOutcomeReport['status'], after: AjaxCart | null, error?: string, failure?: CartOutcomeReport['failure']): CartOutcomeReport => ({
+    operationId,
+    status,
+    before,
+    after: after ? basketSync(after) : null,
+    ...(error ? { error } : {}),
+    ...(failure ? { failure } : {}),
+    evidence: 'ajax-cart-read',
+  });
+  // A refusal the store sent is a failure with a known outcome; a request that got no answer, or that the widget stopped waiting for, is uncertain.
+  const failed = (err: unknown) => (failureKind(err) === 'rejected' ? 'failed' : 'uncertain') as 'uncertain' | 'failed';
+  const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+  if (action.type === 'change') {
+    try {
+      await changeLine(action.lineKey, action.quantity);
+    } catch (err) {
+      return report(failed(err), await readRaw(), message(err), failureKind(err));
+    }
+    const after = await readRaw();
+    announceToTheme(after);
+    return report(after ? 'applied' : 'uncertain', after);
+  }
+
+  // add, and for a replacement the old line out once the new one is in
+  try {
+    await addLines(action.lines);
+  } catch (err) {
+    return report(failed(err), await readRaw(), message(err), failureKind(err));
+  }
+  const afterAdd = await readRaw();
+  const outgoing = action.removeKeys ?? [];
+  if (!outgoing.length) {
+    announceToTheme(afterAdd);
+    return report(afterAdd ? 'applied' : 'uncertain', afterAdd);
+  }
+  if (!afterAdd) return report('uncertain', null, 'The basket could not be read after the add.');
+  // The lines going out, as the cart holds them now: by key, or - the add re-keyed the cart - by the variant and properties the key had before.
+  const keys: string[] = [];
+  for (const key of outgoing) {
+    const held = afterAdd.items.find((item) => item.key === key);
+    if (held) {
+      keys.push(held.key);
+      continue;
+    }
+    const was = beforeRaw?.items.find((item) => item.key === key);
+    const expected = action.expect?.remove?.find((line) => line.key === key);
+    const variant = was?.variant_id ?? (expected ? Number(expected.variantId) : undefined);
+    const again = afterAdd.items.find((item) => item.variant_id === variant && (!was || (sameProperties(item.properties, was.properties) && samePlan(item, was))) && !action.lines.some((line) => Number(line.variantId) === item.variant_id && item.quantity === line.quantity && !was));
+    if (again) keys.push(again.key);
+  }
+  if (keys.length !== outgoing.length) return report('partial', afterAdd, 'The line to take out could not be found in the basket.');
+  try {
+    if (keys.length === 1) await changeLine(keys[0]!, 0);
+    else await setLines(Object.fromEntries(keys.map((key) => [key, 0])));
+  } catch (err) {
+    const after = await readRaw();
+    return report(err instanceof CartTimeout && !after ? 'uncertain' : 'partial', after, message(err), failureKind(err));
+  }
+  const after = await readRaw();
+  announceToTheme(after);
+  return report(after ? 'applied' : 'uncertain', after);
+}
+
+/** A read of the cart for an operation whose outcome was never reported (a refresh, a lost answer): what the cart shows now. */
+export async function observe(operationId: string): Promise<CartOutcomeReport> {
+  const after = await readRaw();
+  return { operationId, status: 'uncertain', before: null, after: after ? basketSync(after) : null, evidence: 'ajax-cart-read' };
 }
 
 /**
@@ -198,6 +347,8 @@ async function addBundle(
  * never leave the customer with neither.
  */
 export async function runActions(actions: CartAction[]): Promise<Cart> {
+  // An operation the server will only count as made on its report is never run here: see runOperation.
+  actions = actions.filter((action) => !((action.type === 'add' || action.type === 'change') && action.operationId));
   // Removals together first, in one request - see setLines.
   const removals = actions.filter((action): action is Extract<CartAction, { type: 'change' }> => action.type === 'change' && action.quantity === 0);
   if (removals.length > 1) {

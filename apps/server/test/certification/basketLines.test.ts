@@ -43,7 +43,7 @@ beforeEach(async () => {
   setDealsForTests([]);
   id = `cert-lines-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
 });
 
 type Line = { lineId: string; productId: string; title: string; variantTitle: string; quantity: number; bundle?: string };
@@ -69,13 +69,13 @@ describe('certification: the basket line the customer names, never one that mere
   it('same size on two products: "remove the Elite Polo" removes the polo', async () => {
     await basket([polM, jacM], JACKET.id);
     const { changes } = await ask('remove the Elite Polo', { lineId: 'jacket-m', quantity: 0 });
-    expect(changes).toEqual([{ type: 'change', lineKey: 'polo-m', quantity: 0 }]);
+    expect(changes).toMatchObject([{ type: 'change', lineKey: 'polo-m', quantity: 0 }]);
   });
 
   it('"make the jacket two" changes the jacket line', async () => {
     await basket([polM, jacM]);
     const { changes } = await ask('make the jacket two', { lineId: 'polo-m', quantity: 2 });
-    expect(changes).toEqual([{ type: 'change', lineKey: 'jacket-m', quantity: 2 }]);
+    expect(changes).toMatchObject([{ type: 'change', lineKey: 'jacket-m', quantity: 2 }]);
   });
 
   it('"remove the M one" with an M polo and an L jacket (the jacket just added): the M polo, or a question - never the jacket', async () => {
@@ -113,7 +113,7 @@ describe('certification: the basket line the customer names, never one that mere
   it('a generic variant title (Default Title) on socks: "remove the socks" is the socks line', async () => {
     await basket([polM, socks]);
     const { changes } = await ask('remove the socks', { lineId: 'polo-m', quantity: 0 });
-    expect(changes).toEqual([{ type: 'change', lineKey: 'socks', quantity: 0 }]);
+    expect(changes).toMatchObject([{ type: 'change', lineKey: 'socks', quantity: 0 }]);
   });
 
   it('a pack piece: asked first, then its whole pack comes out on their yes, nothing else (V1 task 3)', async () => {
@@ -133,7 +133,7 @@ describe('certification: "make it two" sent to add_to_cart', () => {
     await basket([polM], POLO.id);
     await readCustomerTurn(id, 'Make it two.');
     const result = await runTool('add_to_cart', { productId: POLO.id, options: { Size: 'M' }, quantity: 2, replaces: 'polo-m' }, { session: await sessions.getOrCreate(id), utterance: 'Make it two.' });
-    expect(result.actions).toEqual([{ type: 'change', lineKey: 'polo-m', quantity: 2 }]);
+    expect(result.actions).toMatchObject([{ type: 'change', lineKey: 'polo-m', quantity: 2 }]);
   });
 
   it('"add another one" is not turned into a line change', async () => {
@@ -160,16 +160,16 @@ describe('certification: "remove one" of two', () => {
   it('takes one off, not the line', async () => {
     await basket([{ ...jacL, quantity: 2 }], JACKET.id);
     const { changes } = await ask('Remove one.', { lineId: 'jacket-l', quantity: 1 });
-    expect(changes).toEqual([{ type: 'change', lineKey: 'jacket-l', quantity: 1 }]);
+    expect(changes).toMatchObject([{ type: 'change', lineKey: 'jacket-l', quantity: 1 }]);
   });
   it('"remove the jacket" still takes the line out', async () => {
     await basket([{ ...jacL, quantity: 2 }], JACKET.id);
     const { changes } = await ask('Remove the jacket.', { lineId: 'jacket-l', quantity: 0 });
-    expect(changes).toEqual([{ type: 'change', lineKey: 'jacket-l', quantity: 0 }]);
+    expect(changes).toMatchObject([{ type: 'change', lineKey: 'jacket-l', quantity: 0 }]);
   });
   it('"remove one" of one takes it out', async () => {
     await basket([jacL], JACKET.id);
     const { changes } = await ask('Remove one.', { lineId: 'jacket-l', quantity: 0 });
-    expect(changes).toEqual([{ type: 'change', lineKey: 'jacket-l', quantity: 0 }]);
+    expect(changes).toMatchObject([{ type: 'change', lineKey: 'jacket-l', quantity: 0 }]);
   });
 });

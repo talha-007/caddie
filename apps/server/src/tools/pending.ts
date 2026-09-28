@@ -14,6 +14,9 @@ import { executeCommerceAction, type ActionOutcome } from './actionGateway.js';
 import { readReply, type ReadReply } from './answers.js';
 import { asksToAdd, quantityInWords } from './cartAuthorization.js';
 import { eligibilityFor } from './eligibility.js';
+import { optionValueMatches } from '../recommend/sizeWords.js';
+import { OUTCOME_TIMEOUT_MS, STILL_UPDATING, UNCERTAIN_HELD, expireDispatched } from './cartOperations.js';
+import { categoriesAsked, isCategory, sizeInRequest } from '../catalog/constraints.js';
 import { swapPackPiece } from './index.js';
 import { customerGoal } from './journey.js';
 import { packPieces, packStatus, readPackChoices } from './packState.js';
@@ -56,6 +59,7 @@ export interface PendingTurn {
 const STALE_AFTER_TURNS = 12;
 
 const NEED_WORDS: Record<PendingNeed, string> = {
+  outcome: 'the store cart to confirm it',
   colour: 'the colour',
   size: 'the size',
   waist: 'the waist size',
@@ -82,6 +86,28 @@ export async function resolvePending(sessionId: string, said: string): Promise<P
     await sessions.patch(sessionId, { pendingAction: undefined });
     return { status: 'none', remainder: said };
   }
+  /*
+   * Handed to the widget and not yet borne out by the cart (tools/
+   * cartOperations.ts): a yes, or "add it" again, sends nothing a second
+   * time - the customer is told it is still being updated. Anything else
+   * goes to the model as usual, with the record left standing.
+   */
+  if (pending.awaiting === 'outcome') {
+    const record = pending.dispatched ? session.cartOperations?.[pending.dispatched] : undefined;
+    if (!record || (record.status !== 'dispatched' && record.status !== 'uncertain')) {
+      await sessions.patch(sessionId, { pendingAction: undefined });
+      return { status: 'none', remainder: said };
+    }
+    if (record.status === 'dispatched' && Date.now() - record.createdAt > OUTCOME_TIMEOUT_MS) await expireDispatched(sessionId, session);
+    const heard = readReply(said);
+    if (heard.affirms || asksToAdd(said)) {
+      log.info('pending.held_for_outcome', { sessionId, operationId: record.id, status: record.status });
+      const speech = record.status === 'dispatched' && Date.now() - record.createdAt <= OUTCOME_TIMEOUT_MS ? STILL_UPDATING : UNCERTAIN_HELD;
+      return { status: 'asked', result: { speech, facts: 'A basket change is unconfirmed. Nothing else was changed, and nothing is sent again. Say only what the tool said.' }, remainder: '' };
+    }
+    return { status: 'none', remainder: said };
+  }
+
   const reply = readReply(said);
   const ctx: ToolContext = { session, utterance: said };
 
@@ -237,6 +263,8 @@ function questionFor(need: PendingNeed, name: string, product: Product | undefin
       return `Which option would you like for the ${spoken}?`;
     case 'confirmation':
       return `Shall I add the ${spoken}${sized.length ? ` in ${sized.join(' / ')}` : ''} to your basket?`;
+    case 'outcome':
+      return 'Updating your basket…';
   }
 }
 
@@ -358,10 +386,32 @@ export async function notePendingOffer(sessionId: string, reply: string): Promis
     products = goal.products.map((id) => productById(id)).filter((product): product is Product => !!product);
     if (goal.action?.type === 'add-product') options = goal.action.options;
   } else {
-    // The product the offer itself names - bound now, by code, never re-read on the yes.
-    products = identityProducts(resolveCustomerProductIdentity(question, 'offer'));
+    /*
+     * The product the offer itself names - bound now, by code, never re-read
+     * on the yes. Only one the customer has in front of them (on screen or
+     * in hand): a product the model brings up on its own ("shall I add the
+     * Tyde Jacket to go with it?") is a suggestion, not a choice, and a
+     * record for it once turned a stray "yes" into "which colour of the
+     * Tyde Jacket?" (product-to-basket journey).
+     */
+    const seen = new Set([...(session.lastShown?.items ?? []).map((item) => item.id), ...(session.activeShoppingContext?.productId ? [session.activeShoppingContext.productId] : [])]);
+    products = identityProducts(resolveCustomerProductIdentity(question, 'offer')).filter((product) => seen.has(product.id));
   }
   if (!products.length) return;
+  /*
+   * Just put in the basket, or on its way there: no offer reopens its size
+   * or colour. "Would you like to add a polo to go under it?" after the
+   * midlayer went in once became "Which colour of the Stealth Midlayer would
+   * you like?" (audit finding T1b). And an offer of another kind of garment
+   * is not an offer of this product.
+   */
+  const added = session.lastAdded;
+  if (added && products.some((product) => product.id === added.productId) && turn - added.turn <= 6) {
+    log.info('pending.offer_not_reopened', { sessionId, product: added.productId });
+    return;
+  }
+  const kinds = categoriesAsked(question);
+  if (kinds.length && !products.some((product) => isCategory(product, kinds))) return;
   const missing: PendingNeed[] = [];
   if (products.length > 1) missing.push('colour');
   else {
@@ -420,6 +470,29 @@ export async function alignReplyWithPending(sessionId: string, reply: string): P
     }
   }
   if (question && TRANSACTIONAL.test(question) && !pending) {
+    /*
+     * "Would you like me to add this in M?" of the card the code chose to
+     * lead with: the lead is a code-known target, so the offer binds to it
+     * rather than becoming "which one would you like?" (audit finding T1c).
+     */
+    const lead = await bindLeadOffer(sessionId, session, question, reply);
+    if (lead) {
+      if (lead !== question) sentences[questionAt] = lead;
+      return sentences.join(' ');
+    }
+    /*
+     * An offer to add a product the customer has not got in front of them
+     * ("shall I add the Storm Jacket to go with it?") is a suggestion: made
+     * as an offer to show it, which a yes can answer without a record.
+     */
+    const suggested = identityProducts(resolveCustomerProductIdentity(question, 'offer'));
+    const seen = new Set([...(session.lastShown?.items ?? []).map((item) => item.id), ...(session.activeShoppingContext?.productId ? [session.activeShoppingContext.productId] : [])]);
+    if (suggested.length && !suggested.some((product) => seen.has(product.id))) {
+      const shown = `Would you like to see the ${titleCase(garmentName(suggested[0]!.title))}?`;
+      log.info('reply.offer_made_a_showing', { sessionId, product: suggested[0]!.title });
+      sentences[questionAt] = shown;
+      return sentences.join(' ');
+    }
     const ask = targetQuestion(session);
     log.warn('reply.offer_unbound_converted', { sessionId, question: question.slice(0, 120), ask, reply: reply.slice(0, 300) });
     sentences[questionAt] = ask;
@@ -461,6 +534,8 @@ function asksFor(pending: PendingAction, reply: string): boolean {
     case 'line':
     case 'option':
       return /\bwhich\b/i.test(asked);
+    case 'outcome':
+      return true;
     case 'confirmation': {
       // "Which jacket would you like to replace it with?" asks for a choice, not a yes - whatever verbs it holds.
       const last = questions[questions.length - 1]!;
@@ -508,6 +583,46 @@ async function bindSuggestedSwap(sessionId: string, session: CaddieSession): Pro
   });
   log.info('pending.offer_recorded', { sessionId, type: 'replace-pack-piece', product: product.title, from: 'suggested' });
   return question;
+}
+
+/**
+ * An offer of "this" or "it", or of the lead by name, with the lead card the
+ * code chose still on screen: the record is that product, in the size their
+ * card choice or usual size gives, and the question stands - or becomes the
+ * field still open. Null when the offer is of something else.
+ */
+async function bindLeadOffer(sessionId: string, session: CaddieSession, question: string, reply: string): Promise<string | null> {
+  const lead = session.lastLead ? productById(session.lastLead.id) : null;
+  if (!lead || !(session.lastShown?.items ?? []).some((item) => item.id === lead.id)) return null;
+  const pronoun = /\b(?:this|it|that|this one|that one)\b/i.test(question);
+  const named = identityProducts(resolveCustomerProductIdentity(question, 'offer'));
+  const ofLead = named.some((product) => sameDesign(product, lead));
+  if (!pronoun && !ofLead) return null;
+  if (named.length && !ofLead) return null;
+  const goal = customerGoal(session);
+  if (goal?.products?.length && !goal.products.includes(lead.id)) return null;
+  const card = session.cardChoices?.[lead.id]?.options ?? {};
+  const sizeOption = sizeOptionName(lead);
+  const options: Record<string, string> = { ...card };
+  // The size the offer itself names ("add it in size L?") is the record's, over a card choice or their usual size: the words and the record must agree.
+  // The size may be in the sentence before the question: "I can get it in size L. Should I add it?"
+  const offered = sizeInRequest(question) ?? sizeInRequest(reply);
+  const wanted = offered && sizeApplies(lead, offered) ? offered : (await knownSizeFor(session, lead));
+  if (sizeOption && (offered || !options[sizeOption]) && wanted && sizeApplies(lead, wanted)) {
+    const value = lead.options.find((option) => option.name === sizeOption)?.values.find((candidate) => optionValueMatches(candidate, wanted));
+    if (value) options[sizeOption] = value;
+  }
+  const resolution = resolveVariant(lead, options);
+  const missing: PendingNeed[] = [];
+  if (resolution.status === 'incomplete') for (const option of resolution.missing) missing.push(needOf(option));
+  missing.push('confirmation');
+  const name = garmentName(lead.title);
+  const asked = missing[0] === 'confirmation' ? question : questionFor(missing[0]!, name, lead, options);
+  await sessions.patch(sessionId, {
+    pendingAction: { type: 'add-product', productIds: [lead.id], ...(Object.keys(options).length ? { options } : {}), awaiting: missing[0]!, missing, authorized: false, question: asked, turn: customerTurn(session, false), mission: currentMission(session) },
+  });
+  log.info('pending.offer_recorded', { sessionId, type: 'add-product', products: [lead.title], missing, from: 'lead' });
+  return asked;
 }
 
 /** What to ask for instead of a confirmation that binds nothing: the target still missing. */

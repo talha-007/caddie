@@ -4,6 +4,8 @@ import type {
   CaddieMessage,
   CardChoice,
   CartAction,
+  CartOutcomeReport,
+  CartOutcomeResponse,
   ChatRequest,
   PageContext,
   ProfileRequest,
@@ -15,6 +17,7 @@ import type {
   UiCartLineRequest,
   UiPackAddRequest,
 } from '@caddie/shared';
+import { CART_OPS_CONTRACT } from '@caddie/shared';
 import { onStorefront } from './themeCart.js';
 
 const BASE = (import.meta.env.VITE_CADDIE_API_URL ?? 'http://localhost:8787').replace(/\/$/, '');
@@ -23,6 +26,44 @@ export class ApiError extends Error {
   /** Seconds the server asked us to wait, when it limited the request. */
   constructor(message: string, readonly status: number, readonly retryAfter?: number) {
     super(message);
+  }
+}
+
+/**
+ * A request that ran past its deadline. The widget gives up waiting - it
+ * does not know whether the server, or the store's cart, went on to finish
+ * the work - so what follows a timeout is a check of the basket, never a
+ * repeat of the request (audit finding B5: a hung request once left every
+ * control loading for good).
+ */
+export class TimeoutError extends ApiError {
+  constructor(readonly what: string, readonly ms: number) {
+    super(`${what} took longer than ${Math.round(ms / 1000)}s`, 0);
+  }
+}
+
+const envMs = (key: string, fallback: number): number => {
+  const raw = Number((import.meta.env as Record<string, string | undefined>)[key]);
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+};
+/** Deadlines, finite and configurable: the model can take a while; a basket call cannot. */
+export const TIMEOUTS = {
+  chat: envMs('VITE_CADDIE_CHAT_TIMEOUT_MS', 45_000),
+  voice: envMs('VITE_CADDIE_VOICE_TIMEOUT_MS', 90_000),
+  cart: envMs('VITE_CADDIE_CART_TIMEOUT_MS', 15_000),
+};
+
+/** fetch with a deadline: the request is aborted and a TimeoutError thrown when it passes. */
+export async function fetchWithDeadline(input: string, init: RequestInit, ms: number, what: string): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted) throw new TimeoutError(what, ms);
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -53,6 +94,18 @@ function cartHeader(): Record<string, string> {
  * sent in a header, never in a URL.
  */
 const TOKEN_HEADER = 'x-caddie-session-token';
+/**
+ * The basket-change contract this widget speaks, sent on every request about
+ * a session; and the one the server spoke when the session was claimed. A
+ * server without it hands over changes it will count as made on dispatch,
+ * which this widget will not carry out: it would have no way to report them
+ * (serverSupportsOperations).
+ */
+const WIDGET_HEADER = 'x-caddie-widget';
+const serverContracts = new Map<string, string | null>();
+export function serverSupportsOperations(sessionId: string): boolean {
+  return serverContracts.get(currentId(sessionId)) === CART_OPS_CONTRACT;
+}
 const TOKEN_KEY = 'druids-caddie-session-token';
 const tokens = new Map<string, Promise<string>>();
 
@@ -94,6 +147,7 @@ async function claim(sessionId: string): Promise<string> {
     throw new ApiError('Let me catch up - try again in a minute.', 429, seconds);
   }
   const body = await unwrap<SessionClaimResponse>(res);
+  serverContracts.set(sessionId, body.contract ?? null);
   try {
     sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ sessionId, token: body.sessionToken }));
   } catch {
@@ -162,11 +216,11 @@ function retarget(path: string, init: RequestInit, from: string, to: string): { 
  * the request sent once more. If the session was claimed but its token lost,
  * a new session replaces it and the request goes there instead.
  */
-async function authed(sessionId: string, path: string, init: RequestInit & { headers?: Record<string, string> }): Promise<Response> {
+async function authed(sessionId: string, path: string, init: RequestInit & { headers?: Record<string, string> }, deadline: { ms: number; what: string } = { ms: TIMEOUTS.cart, what: 'The request' }): Promise<Response> {
   const send = async (id: string) => {
     const target = retarget(path, init, sessionId, id);
     const token = await sessionToken(id);
-    return fetch(`${BASE}${target.path}`, { ...target.init, headers: { ...((target.init.headers as Record<string, string>) ?? {}), [TOKEN_HEADER]: token } });
+    return fetchWithDeadline(`${BASE}${target.path}`, { ...target.init, headers: { ...((target.init.headers as Record<string, string>) ?? {}), [TOKEN_HEADER]: token, [WIDGET_HEADER]: CART_OPS_CONTRACT } }, deadline.ms, deadline.what);
   };
   let id = currentId(sessionId);
   try {
@@ -181,13 +235,39 @@ async function authed(sessionId: string, path: string, init: RequestInit & { hea
   }
 }
 
-async function post<T>(sessionId: string, path: string, body: unknown): Promise<T> {
-  const res = await authed(sessionId, path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...cartHeader() },
-    body: JSON.stringify(body),
-  });
+async function post<T>(sessionId: string, path: string, body: unknown, deadline?: { ms: number; what: string }): Promise<T> {
+  const res = await authed(
+    sessionId,
+    path,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...cartHeader() },
+      body: JSON.stringify(body),
+    },
+    deadline,
+  );
   return unwrap<T>(res);
+}
+
+/**
+ * What the store cart showed after an operation the server handed over -
+ * the only thing that completes it (server: tools/cartOperations.ts). A
+ * lost acknowledgement is retried a few times here, then left to the next
+ * load (operations.ts); the add itself is never sent again.
+ */
+export async function reportCartOutcome(sessionId: string, report: CartOutcomeReport, attempts = 3): Promise<CartOutcomeResponse> {
+  let last: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await post<CartOutcomeResponse>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/cart-outcome`, report, { ms: TIMEOUTS.cart, what: 'Confirming the basket' });
+    } catch (err) {
+      // A 404 is the server's answer (not this session's operation), not a delivery failure.
+      if (err instanceof ApiError && err.status === 404) return { status: 'unknown' };
+      last = err;
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+    }
+  }
+  throw last instanceof Error ? last : new Error('The basket update could not be confirmed.');
 }
 
 /* ---------------- the calls ---------------- */
@@ -212,9 +292,9 @@ export function restartSession(sessionId: string) {
   return post<SessionRestartResponse>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/restart`, {});
 }
 
-export function sendMessage(sessionId: string, text: string, context?: PageContext) {
+export function sendMessage(sessionId: string, text: string, context?: PageContext, deadline: { ms: number; what: string } = { ms: TIMEOUTS.chat, what: 'The Caddie' }) {
   const body: ChatRequest = { sessionId, text, ...(context ? { context } : {}) };
-  return post<{ sessionId: string; message: CaddieMessage }>(sessionId, '/api/chat', body);
+  return post<{ sessionId: string; message: CaddieMessage }>(sessionId, '/api/chat', body, deadline);
 }
 
 /** Runs a tool directly. Useful while building UI before the AI understands the phrasing. */
@@ -283,7 +363,7 @@ export async function sendVoice(sessionId: string, clip: Blob) {
     method: 'POST',
     headers: { 'Content-Type': contentType, ...cartHeader() },
     body: clip,
-  });
+  }, { ms: TIMEOUTS.voice, what: 'Listening' });
   return unwrap<VoiceResponse>(res);
 }
 

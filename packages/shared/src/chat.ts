@@ -45,14 +45,40 @@ export type ProfileRequest = ShopperSizes;
  * browser. The server cannot touch it; it decides what goes in and hands the
  * widget the change. Numeric Shopify ids, as the theme's cart endpoints take.
  */
+/**
+ * What the store cart must show once an operation has been carried out, in
+ * the widget's read-back: the change, not the state. A variant that was
+ * already in the basket proves nothing about whether this add went in; its
+ * quantity rising by the amount asked for does.
+ */
+export interface CartExpectation {
+  /** Lines whose quantity must rise by this much (numeric variant ids). */
+  add?: Array<{ variantId: string; quantity: number }>;
+  /** Lines that must be gone, or reduced by this much - the old size of a replacement. Keyed as held; re-resolved by variant when the cart re-keys. */
+  remove?: Array<{ key: string; variantId: string; quantity: number }>;
+}
+
+/**
+ * A change the server has validated and handed to the widget to make - carried
+ * on every CartAction of that change. The widget reports what the cart then
+ * showed under this id (CartOutcomeReport), and only then does the server
+ * count the change as made. A model's reply is not a receipt; nor is the
+ * action itself.
+ */
+export interface CartOperationRef {
+  /** Stable, chosen by the server; one per validated change. */
+  operationId: string;
+  expect: CartExpectation;
+}
+
 export type CartAction =
-  | {
+  | ({
       type: 'add';
       lines: Array<{ variantId: string; quantity: number }>;
       /** Cart line keys to remove once the add has succeeded - a swap. */
       removeKeys?: string[];
-    }
-  | { type: 'change'; lineKey: string; quantity: number }
+    } & Partial<CartOperationRef>)
+  | ({ type: 'change'; lineKey: string; quantity: number } & Partial<CartOperationRef>)
   | {
       type: 'add-bundle';
       bundle: BundleDeal;
@@ -72,7 +98,17 @@ export type CartAction =
  * The store cart as the widget last read it, sent back so the model can see
  * what is in it. Line keys are what /cart/change.js takes.
  */
+/**
+ * The contract between widget and server for basket changes: a widget that
+ * sends this in x-caddie-widget can carry an operation out and report on it;
+ * a server that returns it from the claim will only count a change as made
+ * on that report. Either side without it does not start such a change.
+ */
+export const CART_OPS_CONTRACT = 'cart-ops/1';
+
 export interface BasketSync {
+  /** The theme cart's own token, so an operation is judged against the cart it was made for and no other. */
+  cartToken?: string;
   lines: Array<{
     key: string;
     productId: string;
@@ -80,6 +116,10 @@ export interface BasketSync {
     title: string;
     variantTitle: string;
     quantity: number;
+    /** The line's properties, as the theme's cart holds them - what tells two lines of one variant apart. */
+    properties?: Record<string, string>;
+    /** The selling plan the line was added under, when the store sells that way - part of what makes a line distinct. */
+    sellingPlanId?: string;
     /** Set on lines that belong to a bundle deal: that pack's bundle id. */
     bundle?: string;
     /** Which deal, by page handle, e.g. "golf-ambassador-pack". */
@@ -194,6 +234,42 @@ export interface UiCartLineRequest {
   quantity: number;
 }
 
+/**
+ * POST /api/session/:id/cart-outcome - what the store cart showed after the
+ * widget carried out an operation. The evidence is the theme's own /cart.js
+ * read in the shopper's browser - what the shopper's cart page would show -
+ * not a signed receipt from Shopify; the server judges the expected change
+ * against it and can still call the outcome uncertain.
+ */
+export interface CartOutcomeReport {
+  operationId: string;
+  /** What the widget observed: every step accepted; a step refused with nothing changed; the add in but the removal not; or the cart could not be read. */
+  status: 'applied' | 'failed' | 'partial' | 'uncertain';
+  /** The cart read just before the first request, and after the last (or after a failure). Null when a read failed. */
+  before: BasketSync | null;
+  after: BasketSync | null;
+  /** Shopify's own words for a refused request. */
+  error?: string;
+  /**
+   * How the request failed, when it did: the store answered and refused
+   * (rejected - the only failure with an observed outcome); the request
+   * never got an answer (network - it may or may not have reached the
+   * store); or the widget stopped waiting (timeout - the store may still
+   * finish). Only `rejected` can settle an operation as failed.
+   */
+  failure?: 'rejected' | 'network' | 'timeout';
+  evidence: 'ajax-cart-read';
+}
+
+export interface CartOutcomeResponse {
+  /** The operation as the server now records it. `duplicate` repeats an earlier answer; `unknown` is not this session's operation. */
+  status: 'applied' | 'failed' | 'partial' | 'uncertain' | 'duplicate' | 'unknown';
+  /** What the Caddie says about it, for the thread. */
+  text?: string;
+  /** The widget should read the cart again and report once more. */
+  recheck?: boolean;
+}
+
 /** The answer to all three. */
 export interface UiActionResponse {
   ok: boolean;
@@ -215,4 +291,6 @@ export interface UiActionResponse {
 export interface SessionClaimResponse {
   sessionId: string;
   sessionToken: string;
+  /** The basket-change contract this server speaks (CART_OPS_CONTRACT); absent on an older server. */
+  contract?: string;
 }

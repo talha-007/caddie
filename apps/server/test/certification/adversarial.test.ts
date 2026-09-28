@@ -51,7 +51,7 @@ beforeEach(async () => {
   setDealsForTests([PACK]);
   id = `cert-adv-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
 });
 
 async function turn(said: string, run?: (ctx: ToolContext) => Promise<Awaited<ReturnType<typeof runTool>>>, reply = 'OK.') {
@@ -115,7 +115,7 @@ describe('certification: bad model proposals are corrected or blocked', () => {
       ],
     });
     const result = await turn('remove the Elite Polo', tool('update_cart_item', { lineId: 'j', quantity: 0 }));
-    expect(result?.actions).toEqual([{ type: 'change', lineKey: 'p', quantity: 0 }]);
+    expect(result?.actions).toMatchObject([{ type: 'change', lineKey: 'p', quantity: 0 }]);
   });
 
   it('pack not in hand - model adds the pack after the customer left it [pack binding]', async () => {

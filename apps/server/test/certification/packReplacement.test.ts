@@ -62,7 +62,7 @@ beforeEach(async () => {
   setDealsForTests([MIXED]);
   id = `replace-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
 });
 afterEach(() => setDealsForTests([]));
 

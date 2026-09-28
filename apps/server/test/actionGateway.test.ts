@@ -13,6 +13,7 @@ import { sessionRouter } from '../src/routes/session.js';
 import { focusFromCard, noteShoppingFocus } from '../src/session/focus.js';
 import { sessions } from '../src/session/store.js';
 import { runTool } from '../src/tools/index.js';
+import { playWidget } from './support/widgetCart.js';
 import { notePendingOffer } from '../src/tools/pending.js';
 
 /**
@@ -72,7 +73,7 @@ beforeEach(async () => {
   resetLimits();
   id = `gw-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
 });
 
 async function said(text: string) {
@@ -88,7 +89,10 @@ async function onScreen(products: Product[]) {
   await sessions.patch(id, { lastShown: { kind: 'products', items: products.map((p) => ({ id: p.id, title: p.title })) } });
 }
 async function tool(name: string, args: Record<string, unknown>, utterance: string) {
-  return runTool(name, args, { session: await sessions.getOrCreate(id), utterance });
+  const result = await runTool(name, args, { session: await sessions.getOrCreate(id), utterance });
+  // The widget's part: a change handed over is carried out and reported before it counts as made (test/support/widgetCart.ts).
+  await playWidget(id, result.actions);
+  return result;
 }
 const adds = (actions: CartAction[] | undefined) => (actions ?? []).flatMap((a) => (a.type === 'add' ? a.lines : []));
 const changes = (actions: CartAction[] | undefined) => (actions ?? []).flatMap((a) => (a.type === 'change' ? [{ lineKey: a.lineKey, quantity: a.quantity }] : []));
@@ -220,7 +224,7 @@ describe('basket changes, from chat', () => {
     await sessions.patch(id, { basket: [...basket, { lineId: 'line-polo-l', productId: ELITE_WHITE.id, title: ELITE_WHITE.title, variantTitle: 'L', quantity: 1 }] });
     const result = await tool('update_cart_item', { lineId: 'line-polo', quantity: 0 }, 'Remove the polo');
     expect(changes(result.actions)).toEqual([]);
-    expect(result.speech).toMatch(/Which item/);
+    expect(result.speech).toMatch(/Which one do you mean|Which item/);
   });
 
   it('"make it two" with nothing to say which: asked, not guessed', async () => {

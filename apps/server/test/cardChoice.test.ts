@@ -70,7 +70,7 @@ beforeEach(() => {
 async function shopper(): Promise<string> {
   const id = `card-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
   return id;
 }
 

@@ -61,7 +61,7 @@ beforeEach(async () => {
   setDealsForTests([]);
   id = `facts-${Math.random()}`;
   await sessions.getOrCreate(id);
-  await sessions.patch(id, { cartMode: 'theme' });
+  await sessions.patch(id, { cartMode: 'theme', widgetContract: 'cart-ops/1' });
 });
 
 /** One customer message, read as converse() reads it before the model runs - then recorded once the turn is over. */
