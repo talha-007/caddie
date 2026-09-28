@@ -20,7 +20,8 @@ import { onStorefront } from './themeCart.js';
 const BASE = (import.meta.env.VITE_CADDIE_API_URL ?? 'http://localhost:8787').replace(/\/$/, '');
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  /** Seconds the server asked us to wait, when it limited the request. */
+  constructor(message: string, readonly status: number, readonly retryAfter?: number) {
     super(message);
   }
 }
@@ -65,9 +66,33 @@ function storedToken(sessionId: string): string | null {
   }
 }
 
+/**
+ * A session this tab can no longer use: claimed, but the token never reached
+ * us - the reply was lost on the way (a server restart mid-request, a tunnel
+ * error). The server will not hand out its token twice, so it is gone for
+ * good, and a new session takes its place (see authed).
+ */
+class SessionLost extends Error {}
+
+/*
+ * Claims are limited per session and per address. Once the server says wait,
+ * nothing claims until then. Before this, a tab whose claim reply was lost
+ * retried on every request and every 3s from the event stream - 171 claims in
+ * 17 minutes, each counted, all refused.
+ */
+let claimsBlockedUntil = 0;
+
 async function claim(sessionId: string): Promise<string> {
+  const wait = Math.ceil((claimsBlockedUntil - Date.now()) / 1000);
+  if (wait > 0) throw new ApiError('Let me catch up - try again in a minute.', 429, wait);
   const res = await fetch(`${BASE}/api/session/${encodeURIComponent(sessionId)}/claim`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-  if (res.status === 409) throw new ApiError('This chat was opened somewhere else. Refresh the page to start a new one.', 409);
+  if (res.status === 409) throw new SessionLost(sessionId);
+  if (res.status === 429) {
+    const detail = (await res.json().catch(() => ({}))) as { retryAfter?: number };
+    const seconds = Number(detail.retryAfter ?? res.headers.get('Retry-After') ?? 60) || 60;
+    claimsBlockedUntil = Date.now() + seconds * 1000;
+    throw new ApiError('Let me catch up - try again in a minute.', 429, seconds);
+  }
   const body = await unwrap<SessionClaimResponse>(res);
   try {
     sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ sessionId, token: body.sessionToken }));
@@ -97,17 +122,63 @@ function forgetToken(sessionId: string): void {
   }
 }
 
+/* ---------------- a lost session, replaced ---------------- */
+
+type SessionReplaced = (from: string, to: string) => void;
+const replacedListeners = new Set<SessionReplaced>();
+/** Old id -> the one that replaced it, so a request still holding the old id follows. */
+const replacements = new Map<string, string>();
+
+/** Told when this tab's session is replaced - the hook moves everything to the new id. */
+export function onSessionReplaced(listener: SessionReplaced): () => void {
+  replacedListeners.add(listener);
+  return () => replacedListeners.delete(listener);
+}
+
+function currentId(sessionId: string): string {
+  let id = sessionId;
+  while (replacements.has(id)) id = replacements.get(id)!;
+  return id;
+}
+
+function replaceSession(lost: string): string {
+  const fresh = crypto.randomUUID();
+  replacements.set(lost, fresh);
+  forgetToken(lost);
+  for (const listener of replacedListeners) listener(lost, fresh);
+  return fresh;
+}
+
+/** The request re-addressed to another session id: in its path, and in a JSON body that names it. */
+function retarget(path: string, init: RequestInit, from: string, to: string): { path: string; init: RequestInit } {
+  if (from === to) return { path, init };
+  const swap = (text: string) => text.split(from).join(to);
+  return { path: swap(path), init: typeof init.body === 'string' ? { ...init, body: swap(init.body) } : init };
+}
+
 /**
  * A request about this session, with its token. If the server no longer
  * knows the session - two hours idle, or a restart - it is claimed again and
- * the request sent once more.
+ * the request sent once more. If the session was claimed but its token lost,
+ * a new session replaces it and the request goes there instead.
  */
 async function authed(sessionId: string, path: string, init: RequestInit & { headers?: Record<string, string> }): Promise<Response> {
-  const send = async () => fetch(`${BASE}${path}`, { ...init, headers: { ...(init.headers ?? {}), [TOKEN_HEADER]: await sessionToken(sessionId) } });
-  const res = await send();
-  if (res.status !== 401) return res;
-  forgetToken(sessionId);
-  return send();
+  const send = async (id: string) => {
+    const target = retarget(path, init, sessionId, id);
+    const token = await sessionToken(id);
+    return fetch(`${BASE}${target.path}`, { ...target.init, headers: { ...((target.init.headers as Record<string, string>) ?? {}), [TOKEN_HEADER]: token } });
+  };
+  let id = currentId(sessionId);
+  try {
+    const res = await send(id);
+    if (res.status !== 401) return res;
+    forgetToken(id);
+    return await send(id);
+  } catch (err) {
+    if (!(err instanceof SessionLost)) throw err;
+    id = replaceSession(id);
+    return send(id);
+  }
 }
 
 async function post<T>(sessionId: string, path: string, body: unknown): Promise<T> {
@@ -256,6 +327,7 @@ export function openEventStream(sessionId: string, onEvent: (event: CaddieEvent)
   const run = async () => {
     while (!stopped) {
       controller = new AbortController();
+      let wait = 3000;
       try {
         const res = await authed(sessionId, `/api/events/${encodeURIComponent(sessionId)}`, { headers: { Accept: 'text/event-stream' }, signal: controller.signal });
         if (res.ok && res.body) {
@@ -274,10 +346,16 @@ export function openEventStream(sessionId: string, onEvent: (event: CaddieEvent)
             }
           }
         }
-      } catch {
-        // Dropped, or closed on purpose - the loop decides which.
+        // Limited: wait as long as the server asked before trying again.
+        else if (res.status === 429) {
+          const detail = (await res.json().catch(() => ({}))) as { retryAfter?: number };
+          wait = (Number(detail.retryAfter) || 60) * 1000;
+        }
+      } catch (err) {
+        // Dropped, or closed on purpose - the loop decides which. A limited claim says how long to wait.
+        if (err instanceof ApiError && err.retryAfter) wait = err.retryAfter * 1000;
       }
-      if (!stopped) await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (!stopped) await new Promise((resolve) => setTimeout(resolve, wait));
     }
   };
   void run();

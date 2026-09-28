@@ -5,6 +5,7 @@ import { singular } from '../catalog/identity.js';
 import { chooseDeal, namesADeal } from '../recommend/deals.js';
 import { normaliseSize } from '../recommend/sizeWords.js';
 import { currentPack, livePending } from '../session/shoppingSession.js';
+import { readReply } from './answers.js';
 import type { ToolContext } from './types.js';
 
 /**
@@ -57,11 +58,6 @@ function sizeAnswer(text: string): boolean {
     .filter((word) => word && !['please', 'in', 'a', 'an', 'the', 'size', 'one', 'thanks', 'thank', 'you', 'that', 'go', 'with', 'for', 'me', 'it'].includes(word))
     .join(' ');
   return !!rest && !!normaliseSize(rest);
-}
-
-/** "Navy", "the black one please" - a colour and little else, for an add waiting on its colour. */
-function colourAnswer(text: string): boolean {
-  return parseColours(text).colours.length > 0 && text.trim().split(/\s+/).length <= 5;
 }
 
 function customerTurns(ctx: ToolContext): number {
@@ -133,25 +129,36 @@ export function asksToAdd(said: string): boolean {
 export function cartAuthorization(ctx: ToolContext, opts: { replaces?: string } = {}): CartAuthorization {
   // The Add button (or a developer calling the tool directly): no model in between.
   if (ctx.direct) return { authorized: true, source: 'ui-add' };
+  // The waiting action's resolver: their words were read against the record already (tools/pending.ts).
+  if (ctx.pendingResolved) return { authorized: true, source: 'continuation' };
   const said = (ctx.utterance ?? '').trim();
   if (!said || REFUSES.test(said)) return { authorized: false, source: 'none' };
+  const reply = readReply(said);
+  if (reply.declines) return { authorized: false, source: 'none' };
   if (ASKS_TO_ADD.test(said) || (opts.replaces && ASKS_TO_SWAP.test(said))) return { authorized: true, source: 'utterance' };
 
-  // "Yes" - only to an add the Caddie had just offered. A size, to that offer, is a yes in that size.
-  if (OFFERED_ADD.test(lastReply(ctx)) && (YES.test(said) || sizeAnswer(said))) return { authorized: true, source: 'confirmation' };
+  /*
+   * A yes, read by clause - "yeah, I think that will be fine, and can we do a
+   * pack?" is a yes (tools/answers.ts) - to the add the record says is
+   * waiting for one. A size alone answers a size question; it authorises
+   * nothing (V1 task 3).
+   */
+  const pending = livePending(ctx.session);
+  if (pending && (pending.awaiting === 'confirmation' || !pending.authorized) && reply.affirms && !namesAnotherProduct(said, pending.productIds)) {
+    return { authorized: true, source: 'confirmation' };
+  }
+  // No record, no yes: an offer the code could not bind is never asked (tools/pending.ts alignReplyWithPending), so a yes to one cannot arise.
 
   /*
-   * The answer an add they asked for last turn was waiting on - for that
-   * product. "Actually the Elite Polo in M", after "what size?" for a jacket,
-   * names another product: it does not finish the jacket's add, and it is not
-   * an add of the polo either until they ask for one.
+   * The answer an add they asked for was waiting on - for that product, for
+   * as long as it waits (the record's own lifetime, not one turn). "Actually
+   * the Elite Polo in M", after "what size?" for a jacket, names another
+   * product: it does not finish the jacket's add.
    */
-  // Only one from this mission: after "show me jackets", "M" is not the polo's size (session/shoppingSession.ts).
-  const pending = livePending(ctx.session);
   if (
     pending?.type === 'add-product' &&
-    pending.turn + 1 === customerTurns(ctx) &&
-    (sizeAnswer(said) || (pending.awaiting === 'colour' && colourAnswer(said))) &&
+    pending.authorized &&
+    (sizeAnswer(said) || reply.sizeReference || (pending.awaiting === 'colour' && reply.colours.length > 0)) &&
     !namesAnotherProduct(said, pending.productIds)
   ) {
     return { authorized: true, source: 'continuation' };
@@ -167,10 +174,14 @@ export function cartAuthorization(ctx: ToolContext, opts: { replaces?: string } 
  */
 export function lineChangeAuthorization(ctx: ToolContext): 'customer-utterance' | 'customer-confirmation' | 'ui-cart-change' | null {
   if (ctx.direct) return 'ui-cart-change';
+  if (ctx.pendingResolved) return 'customer-confirmation';
   const said = (ctx.utterance ?? '').trim();
   if (!said) return null;
+  const reply = readReply(said);
+  if (reply.declines) return null;
   if (ASKS_TO_REMOVE.test(said) || ASKS_FOR_QUANTITY.test(said)) return 'customer-utterance';
-  if (YES.test(said) && offeredAction(ctx)?.type === 'update-line') return 'customer-confirmation';
+  const pending = livePending(ctx.session);
+  if (pending?.type === 'update-line' && reply.affirms) return 'customer-confirmation';
   return null;
 }
 

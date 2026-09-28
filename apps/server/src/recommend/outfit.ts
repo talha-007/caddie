@@ -138,6 +138,8 @@ export function namedSlots(text: string): string[] {
 export interface OutfitOptions {
   /** Pieces staying as they are - a swap rebuilds one slot around these. */
   keep?: OutfitPiece[];
+  /** Whether a piece may be offered (tools/eligibility.ts): candidates and kept pieces alike. */
+  eligible?: (product: Product) => boolean;
   /** Products that must not come back: the one being swapped out, and earlier ones. */
   exclude?: Iterable<string>;
   /** The range they are known to shop. Named in the seed wins; see catalog/audience.ts. */
@@ -209,7 +211,9 @@ export async function recommendOutfit(
   slots: OutfitSlot[] = DEFAULT_SLOTS,
   options: OutfitOptions = {},
 ): Promise<OutfitRecommendation> {
-  const kept = options.keep ?? [];
+  const offerable = (product: Product) => !options.eligible || options.eligible(product);
+  // A kept piece no longer to be had is not kept: its slot is filled again.
+  const kept = (options.keep ?? []).filter((piece) => offerable(piece.product));
   const pieces: OutfitPiece[] = [];
   /** Slots filled with a neutral because nothing came in their colour. */
   const stoodIn: Array<{ slot: string; title: string }> = [];
@@ -280,6 +284,7 @@ export async function recommendOutfit(
             // Nobody wears the Ambassador Pack as a top.
             !isPack(p) &&
             hasSize(p, input.size) &&
+            offerable(p) &&
             // A polo is not a pair of shorts, whatever the search thinks.
             fitsSlot(p, slot) &&
             // And nothing gets worn twice.
@@ -315,7 +320,7 @@ export async function recommendOutfit(
       });
       pick = withinBudget(
         results.filter(
-          (p) => p.price.amount > 0 && !isPack(p) && hasSize(p, input.size) && fitsSlot(p, slot) && !used.has(p.id),
+          (p) => p.price.amount > 0 && !isPack(p) && hasSize(p, input.size) && offerable(p) && fitsSlot(p, slot) && !used.has(p.id),
         ),
         remaining,
         input.size,

@@ -111,5 +111,6 @@ export function stockedInSize(
    * belt's "M/L" is an M, which this copy did not.
    */
   const status = sizeStatus({ variants } as unknown as Product, size);
-  return status === 'in-stock' || status === 'other-scale';
+  // A cap in one size, or a waist against a polo: that size says nothing about it.
+  return status === 'in-stock' || status === 'other-scale' || status === 'not-applicable';
 }

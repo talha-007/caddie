@@ -56,7 +56,7 @@ function dealNudge(pieces: Product[]): NextStep | null {
 
 export async function nextStep(
   focus: Product[],
-  context: { profile?: ShopperProfile; basketProductIds?: string[] },
+  context: { profile?: ShopperProfile; basketProductIds?: string[]; eligible?: (product: Product) => boolean },
 ): Promise<NextStep | null> {
   const profile = context.profile ?? {};
   if (profile.justThis) return null;
@@ -101,7 +101,7 @@ export async function nextStep(
   const fallback = colour ? await searchProducts({ query, limit: 12 }) : [];
   const exclude = new Set([...pieces.map((p) => p.id), ...(profile.rejected ?? [])]);
   const pick = [...results, ...fallback].find(
-    (product) => needs!(product) && !exclude.has(product.id) && rangeOf(product) === range && !isPack(product),
+    (product) => needs!(product) && !exclude.has(product.id) && rangeOf(product) === range && !isPack(product) && (!context.eligible || context.eligible(product)),
   );
   if (!pick) return null;
   return {

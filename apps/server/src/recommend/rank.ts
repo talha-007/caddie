@@ -1,4 +1,4 @@
-import { formatMoney } from '../catalog/commerce.js';
+import { formatMoney, sizeApplies } from '../catalog/commerce.js';
 import type { Product } from '@caddie/shared';
 import { FEATURE_LABEL, WEATHER_NEEDS, attributesOf, hasFeature, type Feature, type Weather } from '../catalog/attributes.js';
 import { rangeOf, type Range } from '../catalog/audience.js';
@@ -65,15 +65,6 @@ export interface Ranked {
 
 function money(amount: number, currency: string): string {
   return formatMoney(amount, currency, { short: true });
-}
-
-/** Whether a size means anything for this product - a waist is no help on a polo. */
-function sizedOnSameScale(product: Product, size: string): boolean {
-  const wanted = normaliseSize(size) ?? size;
-  const numeric = /^\d+$/.test(wanted);
-  const sizes = product.options.find((option) => /size/i.test(option.name))?.values ?? [];
-  if (sizes.length === 0) return false;
-  return sizes.some((value) => /^\d+$/.test(normaliseSize(value) ?? value) === numeric);
 }
 
 export function rankProducts(products: Product[], request: RankRequest): Ranked[] {
@@ -181,7 +172,8 @@ export function rankProducts(products: Product[], request: RankRequest): Ranked[
     }
 
     // Their top size for tops, their waist for trousers - whichever this product is sized in.
-    const size = [request.size, request.waist].find((candidate) => candidate && sizedOnSameScale(product, candidate));
+    // Only a size that applies to it (catalog/commerce.ts): a waist is no help on a polo, an M none on a cap in one size.
+    const size = [request.size, request.waist].find((candidate) => candidate && sizeApplies(product, candidate));
     if (size) {
       if (stockedInSize(product.variants, size)) {
         matched.push(`${normaliseSize(size) ?? size} in stock`);

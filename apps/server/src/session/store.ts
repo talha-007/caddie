@@ -5,18 +5,41 @@ import type { ShopperProfile } from '../shopper/profile.js';
 import type { ShoppingFocus } from './focus.js';
 
 /** A basket action waiting on the customer's next answer (see tools/actionGateway.ts). */
+/** What a waiting action still needs from the customer. */
+export type PendingNeed = 'size' | 'colour' | 'waist' | 'leg' | 'option' | 'line' | 'quantity' | 'confirmation';
+
+/**
+ * The one record of an action the Caddie asked something in order to finish
+ * (tools/pending.ts, V1 task 3). Every question that exists to complete a
+ * basket change writes one; the customer's next words are read against it
+ * before the model runs, and a "yes" means this and nothing else. What "yes"
+ * meant was once re-read from the Caddie's previous sentence, and a yes
+ * inside a longer message meant nothing at all.
+ */
 export interface PendingAction {
-  type: 'add-product';
-  /** The products it may finish with: the one named, or its colourways. */
+  type: 'add-product' | 'add-pack' | 'replace-pack-piece' | 'update-line';
+  /** add-product: the products it may finish with - the one named, or its colourways. replace-pack-piece: the replacement. */
   productIds: string[];
   /** Options already settled, kept when the answer fills in the rest. */
   options?: Record<string, string>;
   quantity?: number;
-  /** What it is waiting for. */
-  awaiting: 'size' | 'colour' | 'option';
-  /** Their message count when it was asked - only their next message can finish it. */
+  /** add-pack, replace-pack-piece: the pack, and the step and piece being replaced. */
+  pack?: string;
+  step?: number;
+  outgoing?: string;
+  /** update-line: the basket line. */
+  lineId?: string;
+  /** The one thing it is waiting for now. */
+  awaiting: PendingNeed;
+  /** Everything still needed, first first. */
+  missing?: PendingNeed[];
+  /** Whether the customer has asked for it - so a field answered later needs no second "yes". */
+  authorized?: boolean;
+  /** The question asked, in the code's words - so the reply can be held to it. */
+  question?: string;
+  /** Their message count when it was asked. */
   turn: number;
-  /** The shopping mission it was asked in (session/shoppingSession.ts) - a new mission ends it. */
+  /** The shopping mission it was asked in (session/shoppingSession.ts) - an unrelated new mission ends it. */
   mission?: number;
 }
 import { RedisSessionStore } from './redisStore.js';
@@ -119,13 +142,13 @@ export interface CaddieSession {
    */
   ownerHash?: string;
   /** The product the gateway last put in the basket, and when - what "make it two" and "remove it" mean. */
-  lastAdded?: { productId: string; turn: number };
+  lastAdded?: { productId: string; turn: number; byPending?: boolean };
   /**
    * What the customer has chosen for each pack, by handle (see
    * tools/packState.ts): confirmed values only, and what they asked for that
    * the pack does not come in. Never a card's default or a model's guess.
    */
-  packChoices?: Record<string, { top?: string; waist?: string; leg?: string; requested?: { top?: string; waist?: string; leg?: string } }>;
+  packChoices?: Record<string, { top?: string; waist?: string; leg?: string; belt?: string; requested?: { top?: string; waist?: string; leg?: string } }>;
   /**
    * What the customer is shopping for now - the kind, range, product and
    * colours they last asked for, read from their own words (session/focus.ts).

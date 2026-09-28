@@ -96,7 +96,7 @@ function fillWithinBudget(
   return chosen;
 }
 
-export async function recommendPack(input: PackInput, known?: 'men' | 'women'): Promise<PackRecommendation> {
+export async function recommendPack(input: PackInput, known?: 'men' | 'women', eligible?: (product: Product) => boolean): Promise<PackRecommendation> {
   const itemCount = input.itemCount ?? DEFAULT_ITEM_COUNT;
   // One range for the whole pack, as for outfits - never kids unless asked.
   const range = parseRange(input.query).range ?? known ?? 'men';
@@ -125,7 +125,8 @@ export async function recommendPack(input: PackInput, known?: 'men' | 'women'): 
     });
 
     // A pack is a product too, and must not end up inside another pack.
-    const available = results.filter((p) => p.price.amount > 0 && !isPack(p));
+    // Only what may be offered (tools/eligibility.ts) - the fallback below never reaches a piece sold out in their size.
+    const available = results.filter((p) => p.price.amount > 0 && !isPack(p) && (!eligible || eligible(p)));
     const preferred = available.filter((p) => matchesColour(p, input.colour) && hasSize(p, input.size));
     const candidates = preferred.length >= itemCount ? preferred : available;
 

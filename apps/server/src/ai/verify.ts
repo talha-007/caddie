@@ -116,7 +116,9 @@ export function verifyReply(reply: string, evidence: string, attachment?: Caddie
   violations.push(...unsupportedAttributes(reply, productsInEvidence(products, evidence), products[0]));
   violations.push(...stockClaims(reply, productsInEvidence(products, evidence), products));
   violations.push(...absenceClaims(reply));
-  violations.push(...sizeRequests(reply, [...new Map([...productsInEvidence(products, evidence), ...(context.screen ?? [])].map((product) => [product.id, product])).values()], context.sizeSettled));
+  const inPlay = [...new Map([...productsInEvidence(products, evidence), ...(context.screen ?? [])].map((product) => [product.id, product])).values()];
+  violations.push(...sizeRequests(reply, inPlay, context.sizeSettled));
+  violations.push(...sizeClaims(reply, inPlay));
   violations.push(...salesWording(reply, products));
   violations.push(...priceComparisons(reply, evidence));
   violations.push(...packReadiness(reply, evidence));
@@ -401,9 +403,10 @@ const SIZE_WORD = String.raw`(?:xxs|xs|xxxl|xxl|[2-5]xl|xl|x-?large|extra large|
 const SIZE_LIST = String.raw`(${SIZE_WORD}(?:\s*(?:,|and|or|&)\s*${SIZE_WORD})*)`;
 const CLAIMS: Array<{ says: 'in-stock' | 'sold-out'; pattern: RegExp }> = [
   { says: 'sold-out', pattern: new RegExp(String.raw`\b(?:sizes?\s+)?${SIZE_LIST}\s+(?:is|are|'s)\s+(?:currently\s+|now\s+)?(?:sold out|out of stock|not (?:in stock|available))\b`, 'gi') },
-  { says: 'sold-out', pattern: new RegExp(String.raw`\b(?:sold out|out of stock)\s+in\s+(?:sizes?\s+)?${SIZE_LIST}\b`, 'gi') },
+  { says: 'sold-out', pattern: new RegExp(String.raw`\b(?:sold out|out of stock|(?:not|isn['’]?t|aren['’]?t)\s+(?:in stock|available)|unavailable)\s+in\s+(?:sizes?\s+)?${SIZE_LIST}\b`, 'gi') },
   { says: 'in-stock', pattern: new RegExp(String.raw`\b(?:sizes?\s+)?${SIZE_LIST}\s+(?:is|are|'s)\s+(?:currently\s+|now\s+|still\s+)?(?:in stock|available)\b`, 'gi') },
-  { says: 'in-stock', pattern: new RegExp(String.raw`\b(?:in stock|available)\s+in\s+(?:sizes?\s+)?${SIZE_LIST}\b`, 'gi') },
+  // Not after a "not": "isn't available in size S" is the opposite claim - it was read as "available in S", and the true sentence was cut.
+  { says: 'in-stock', pattern: new RegExp(String.raw`(?<!\b(?:not|isn['’]?t|aren['’]?t|never)\s+)\b(?:in stock|available)\s+in\s+(?:sizes?\s+)?${SIZE_LIST}\b`, 'gi') },
 ];
 
 /**
@@ -433,6 +436,11 @@ export function stockClaims(reply: string, products: Product[], card: Product[])
           // A lone s, m or l is a size only when the sentence talks of sizes or stock around it - "it's" is not S.
           const statuses = subject.map((product) => supportsSize(product, wanted));
           if (statuses.every((status) => status === 'other-scale')) continue;
+          // A size that says nothing about it - "not available in M" of a cap in one size - is wrong whichever way it is said.
+          if (statuses.every((status) => status === 'not-applicable')) {
+            found.push({ kind: 'stock', claim: match[0] });
+            continue;
+          }
           const right = says === 'in-stock' ? statuses.some((status) => status === 'in-stock') : statuses.every((status) => status !== 'in-stock');
           if (!right) found.push({ kind: 'stock', claim: match[0] });
         }
@@ -497,6 +505,32 @@ export function sizeRequests(reply: string, pool: Product[], settled: Set<string
     if (!subject.length) continue;
     const stillOpen = subject.filter((product) => !sizeScale(product).oneSize && !settled.has(product.id));
     if (!stillOpen.length) found.push({ kind: 'size', claim: sentence.trim() });
+  }
+  return found;
+}
+
+/** A size put on a product: "in your size", "in your size M", "fitting your medium size", "size 32". */
+const SIZE_ON = /\b(?:in|fits?|fitting|for)\s+your\s+size\b|\b(?:in|fits?|fitting|for)\s+your\s+(?:size\s+)?(?:xxs|xs|s|m|l|xl|[2-5]xl|small|medium|large|\d{2})\b|\byour\s+(?:xs|s|m|l|xl|[2-5]xl|small|medium|large|\d{2})\s+(?:size|waist)\b|\b(?:in\s+)?size\s+(?:xxs|xs|s|m|l|xl|[2-5]xl|small|medium|large|\d{2})\b/i;
+
+/**
+ * Their size put on something that has none - "the cap is £4 in your size M",
+ * "one size socks in your size M" (live replay, V1 task 1). The cards were
+ * right; the words told them a size mattered where none does. Held like a
+ * size question (sizeRequests): the products it names, else the kind it
+ * names, else everything in play - and only when every one is one size.
+ */
+export function sizeClaims(reply: string, pool: Product[]): Violation[] {
+  if (!pool.length) return [];
+  const keys = pool.map((product) => ({ product, key: designKey(product) })).filter((entry) => entry.key.trim().length > 2);
+  const found: Violation[] = [];
+  for (const sentence of reply.split(/(?<=[.!?])\s+/)) {
+    if (!SIZE_ON.test(sentence)) continue;
+    const text = normalise(sentence);
+    const named = keys.filter((entry) => text.includes(entry.key)).map((entry) => entry.product);
+    const kinds = categoriesAsked(sentence);
+    const ofKind = kinds.length ? pool.filter((product) => isCategory(product, kinds)) : [];
+    const subject = named.length ? named : ofKind.length ? ofKind : kinds.length ? [] : pool;
+    if (subject.length && subject.every((product) => sizeScale(product).oneSize)) found.push({ kind: 'size', claim: sentence.trim() });
   }
   return found;
 }

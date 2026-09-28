@@ -213,7 +213,8 @@ describe('the next pack question after the swap', () => {
     await turn('top size S', 'recommend_pack', { query: 'Ambassador Pack Mixed Conditions' });
     const result = await turn('add the pack to my bag, size small', 'add_pack_to_cart', {});
     expect(adds(result)).toEqual([]);
-    expect(result.speech).toMatch(/Tour Pro Belt - Black doesn't come in S - which size would you like: M\/L or L\/XL\?/);
+    // The belt's own size is asked for, by name - a top size never chooses it (V1 task 2).
+    expect(result.speech).toMatch(/Tour Pro Belt - Black: M\/L or L\/XL\?/);
     expect(result.speech).not.toMatch(/What top size/);
   });
 });

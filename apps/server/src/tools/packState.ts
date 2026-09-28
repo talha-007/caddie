@@ -32,11 +32,18 @@ export interface PackChoices {
   top?: string;
   waist?: string;
   leg?: string;
+  /**
+   * A belt's combined size ("M/L"), its own choice - never the top size. A top
+   * size says nothing about which belt fits (catalog/commerce.ts), and "M/L"
+   * said for the belt once became every top's size. Tapped on the card, or
+   * said as the belt's own value.
+   */
+  belt?: string;
   /** Said, but not a value the piece comes in: "leg 36" for trousers made in 30, 32 and 34. */
   requested?: { top?: string; waist?: string; leg?: string };
 }
 
-type Kind = 'top' | 'waist' | 'leg' | 'other';
+type Kind = 'top' | 'waist' | 'leg' | 'belt' | 'other';
 
 export interface PiecePlan {
   step: string;
@@ -74,6 +81,7 @@ function kindOf(option: { name: string; values: string[] }): Kind {
   const scale = optionScale(option);
   if (scale === 'leg') return 'leg';
   if (scale === 'waist') return 'waist';
+  if (scale === 'combined') return 'belt';
   return scale ? 'top' : 'other';
 }
 
@@ -142,17 +150,71 @@ export function readPackChoices(
    * The top size read with the waist and leg taken out: "top size M, waist
    * 34, leg 32" gave the reader the 34 first, and the M was never confirmed.
    */
-  const lettered = said.replace(WAIST, ' ').replace(LEG, ' ').replace(PAIR, ' ');
+  // The belt's own value, exactly as the belt comes: "M/L". Taken out before the top size is read - it is never an M.
+  const beltValues = valuesFor(pieces, 'belt');
+  const beltSaid = beltValues.find((value) => new RegExp(`(^|[^a-z])${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s*\/\s*/g, '\\s*\\/\\s*')}($|[^a-z])`, 'i').test(said));
+  if (beltSaid) next.belt = beltSaid;
+  const lettered = said.replace(WAIST, ' ').replace(LEG, ' ').replace(PAIR, ' ').replace(/\b[a-z0-9]+\s*\/\s*[a-z0-9]+\b/gi, ' ');
   const top = [sizeInRequest(lettered), readIntent(lettered).usualSize].find((value) => !!value && !/^\d/.test(value));
   if (top && !/^\d/.test(top)) set('top', top);
   else {
     const alone = normaliseSize(text.replace(/\b(please|thanks|in|size|a|an|the|for the tops?|tops?)\b/g, ' ').replace(/[^a-z0-9\s]/g, ' ').trim());
     if (alone && !/^\d/.test(alone)) set('top', alone);
+    /*
+     * A top size said in a sentence, or a yes to one named back to them.
+     * "My top size would be medium", "that is also medium", "yes it is
+     * confirmed" to "is medium your top size?" - each went unread, the pack's
+     * top size stayed open, and the Caddie asked for it again and again
+     * (preview store). Only one letter size in the words, and only with a
+     * top-size cue or a top-size question just asked - "a large range" is no size.
+     */
+    else {
+      const phrased = topSizeSaid(lettered, lastReply);
+      const confirmed = phrased ? undefined : topSizeConfirmed(said, lastReply);
+      if (phrased ?? confirmed) set('top', (phrased ?? confirmed)!);
+    }
   }
   if (accepted?.top && !next.top && !next.requested?.top) set('top', accepted.top);
   if (accepted?.waist && !next.waist && !next.requested?.waist) set('waist', accepted.waist);
   if (!Object.keys(next.requested!).length) delete next.requested;
   return next;
+}
+
+/** Words that say a size is for the top half: "top size", "I'm a", "that is also". */
+const TOP_CUE = /\b(top|tops|jacket|polo|midlayer|shirt|chest|i'?m|i am|that'?s|that is|it'?s|it is|also|size (?:is|would be|will be|of))\b/i;
+/** The Caddie's last question asked for a top size. */
+const ASKED_TOP = /\b(top size|what size do you wear|size (?:for|do you wear for) (?:the )?(?:jacket|tops?|polo|midlayer)|jacket, midlayer|for the tops?)\b[^?]*\?/i;
+
+/** The letter sizes in some words - "medium", "M", "extra large", "2XL" - read as sizesNeverGiven reads them. */
+function letterSizesIn(words: string): string[] {
+  const tokens = words.toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9\s/-]/g, ' ').split(/\s+/).filter(Boolean);
+  const found = new Set<string>();
+  for (let i = 0; i < tokens.length; i += 1) {
+    const pair = normaliseSize(`${tokens[i]} ${tokens[i + 1] ?? ''}`.trim());
+    const one = normaliseSize(tokens[i]!);
+    const size = pair && pair !== one ? pair : one;
+    if (size && !/^\d+$/.test(size) && !['a', 'i', 'in'].includes(tokens[i]!)) {
+      found.add(size.toUpperCase());
+      if (pair && pair !== one) i += 1;
+    }
+  }
+  return [...found];
+}
+
+/** One top size said in a sentence with a cue that it is the top size, or answering the question for it. */
+function topSizeSaid(words: string, lastReply: string): string | undefined {
+  const sizes = letterSizesIn(words);
+  if (sizes.length !== 1) return undefined;
+  return TOP_CUE.test(words) || ASKED_TOP.test(lastReply) ? sizes[0] : undefined;
+}
+
+/** A yes to a question naming one top size: "Is medium your top size?" - "Yes it is confirmed". */
+function topSizeConfirmed(said: string, lastReply: string): string | undefined {
+  if (!/^\s*(yes|yeah|yep|yup|correct|confirmed|that'?s right|right|exactly|it is|sure)\b/i.test(said) || /\b(no|not|isn'?t|wrong)\b/i.test(said)) return undefined;
+  const question = lastReply.split(/(?<=[.!?])\s+/).filter((sentence) => sentence.includes('?')).pop() ?? '';
+  if (!/\b(size|top|jacket|polo|midlayer|tops)\b/i.test(question)) return undefined;
+  const sizes = letterSizesIn(question.replace(/\b(?:waist|leg(?: length)?)\s*\d{2}\b/gi, ' '));
+  return sizes.length === 1 ? sizes[0] : undefined;
 }
 
 /** Each piece resolved against the confirmed choices - and whether the pack is ready. */
@@ -174,7 +236,7 @@ export function packStatus(session: CaddieSession, handle: string, pieces: Produ
     for (const option of product.options.filter((own) => own.values.length > 1)) {
       const kind = kindOf(option);
       const byTap = Object.entries(tapped).find(([name]) => name.toLowerCase() === option.name.toLowerCase())?.[1];
-      const wanted = byTap ?? (kind === 'top' ? top : kind === 'waist' ? waist : kind === 'leg' ? choices.leg : undefined);
+      const wanted = byTap ?? (kind === 'top' ? top : kind === 'waist' ? waist : kind === 'leg' ? choices.leg : kind === 'belt' ? choices.belt : undefined);
       // A combined size - the belt's "S/M" - holds their size when one half is it.
       const value = wanted
         ? option.values.find((own) => own.toLowerCase() === wanted.toLowerCase() || optionValueMatches(own, wanted)) ??
@@ -271,6 +333,7 @@ export function packStatusFacts(status: PackStatus): string {
     status.choices.top && !profiled.top ? `top ${status.choices.top}` : '',
     status.choices.waist && !profiled.waist ? `waist ${status.choices.waist}` : '',
     status.choices.leg ? `leg ${status.choices.leg}` : '',
+    status.choices.belt ? `belt ${status.choices.belt}` : '',
   ]
     .filter(Boolean)
     .join(', ');

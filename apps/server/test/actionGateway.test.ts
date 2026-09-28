@@ -13,6 +13,7 @@ import { sessionRouter } from '../src/routes/session.js';
 import { focusFromCard, noteShoppingFocus } from '../src/session/focus.js';
 import { sessions } from '../src/session/store.js';
 import { runTool } from '../src/tools/index.js';
+import { notePendingOffer } from '../src/tools/pending.js';
 
 /**
  * Phase 2: every change to the basket goes through the Action Gateway. The
@@ -80,6 +81,8 @@ async function said(text: string) {
 }
 async function caddie(text: string) {
   await sessions.append(id, [{ id: `a-${Math.random()}`, role: 'assistant', text, createdAt: new Date().toISOString() }]);
+  // The offer in it is bound by code, as converse binds every reply before it goes out (tools/pending.ts).
+  await notePendingOffer(id, text);
 }
 async function onScreen(products: Product[]) {
   await sessions.patch(id, { lastShown: { kind: 'products', items: products.map((p) => ({ id: p.id, title: p.title })) } });

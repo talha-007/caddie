@@ -102,14 +102,22 @@ describe('not asking: nothing added, whatever the model calls', () => {
 });
 
 describe('a yes counts only as a yes to an add', () => {
-  it('after "want me to add it?": added', async () => {
+  it('after "want me to add it?", with the record the offer wrote: added', async () => {
     const id = await conversation(['XL', 'The Warrior Jacket is in stock in XL at £16. Want me to add it to your basket in XL?']);
+    // The offer is bound by code before it is asked (tools/pending.ts); the yes answers the record, never the sentence.
+    const session = await sessions.getOrCreate(id);
+    await sessions.patch(id, { pendingAction: { type: 'add-product', productIds: [JACKET.id], options: { Size: 'XL' }, awaiting: 'confirmation', missing: ['confirmation'], authorized: false, turn: session.messages.length, question: 'Want me to add it to your basket in XL?' } });
     expect((await modelAdds(id, 'Yes please', { productId: JACKET.id, options: { Size: 'XL' } })).lines).toEqual([{ variantId: '704', quantity: 1 }]);
   });
 
-  it('a size, in answer to "which size shall I add?": added', async () => {
+  it('after "want me to add it?" with no record - an offer the code could not bind - a yes adds nothing (V1 task 3 closure)', async () => {
+    const id = await conversation(['XL', 'The Warrior Jacket is in stock in XL at £16. Want me to add it to your basket in XL?']);
+    expect((await modelAdds(id, 'Yes please', { productId: JACKET.id, options: { Size: 'XL' } })).lines).toEqual([]);
+  });
+
+  it('a size alone, in answer to "shall I add it? which size?": a size, never a yes - nothing added (V1 task 3)', async () => {
     const id = await conversation(['Show me the Warrior Jacket', 'It is £16. Shall I add it to your basket? Which size?']);
-    expect((await modelAdds(id, 'L', { productId: JACKET.id, options: { Size: 'L' } })).lines).toEqual([{ variantId: '703', quantity: 1 }]);
+    expect((await modelAdds(id, 'L', { productId: JACKET.id, options: { Size: 'L' } })).lines).toEqual([]);
   });
 
   it('after "would you like another colour?": nothing added', async () => {
@@ -128,13 +136,12 @@ describe('"add it", then the size it was waiting for', () => {
     expect((await modelAdds(id, 'M')).lines).toEqual([{ variantId: '702', quantity: 1 }]);
   });
 
-  it('but only as the very next thing they say', async () => {
+  it('and still after a question about it in between: the add they asked for waits for its size (V1 task 3)', async () => {
     const id = await conversation(['Show me the Warrior Jacket in black.', 'It is £16.']);
     await modelAdds(id, 'Add it', { productId: JACKET.id });
     await recordTurn(id, 'Add it', 'Which size would you like for the Warrior Jacket?');
     await recordTurn(id, 'Is it waterproof?', 'Yes, it is described as waterproof.');
-    // M is now a size they said, so only the lapsed ask stops it.
-    expect((await modelAdds(id, 'M')).lines).toEqual([]);
+    expect((await modelAdds(id, 'M')).lines).toEqual([{ variantId: '702', quantity: 1 }]);
   });
 });
 

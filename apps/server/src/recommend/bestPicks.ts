@@ -2,7 +2,7 @@ import type { Product } from '@caddie/shared';
 import { rangeOf, type Range } from '../catalog/audience.js';
 import { bestSellerRank } from '../catalog/bestSellers.js';
 import { garmentName } from '../catalog/colourways.js';
-import { primaryKind, supportsSize } from '../catalog/commerce.js';
+import { primaryKind, sizeApplies } from '../catalog/commerce.js';
 import { categoriesAsked, type Category } from '../catalog/constraints.js';
 import { env } from '../env.js';
 import { isPack } from './packs.js';
@@ -75,11 +75,6 @@ export function kindsNamed(text: string): PickKind[] {
   return KINDS.filter(([, pattern]) => pattern.test(lower)).map(([kind]) => kind);
 }
 
-/** Whether a size is on the scale this product is sized on - an M says nothing about trousers (catalog/commerce.ts). */
-function sizedOnScale(product: Product, size: string): boolean {
-  return supportsSize(product, size) !== 'other-scale';
-}
-
 export interface PickOptions {
   range: Range;
   size?: string;
@@ -88,6 +83,8 @@ export interface PickOptions {
   limit?: number;
   /** Everything else we know, for ordering within a kind (colour, weather, budget). */
   rank?: RankRequest;
+  /** Whether a product may be offered (tools/eligibility.ts). */
+  eligible?: (product: Product) => boolean;
 }
 
 export function bestPicks(catalogue: Product[], options: PickOptions): Product[] {
@@ -104,8 +101,10 @@ export function bestPicks(catalogue: Product[], options: PickOptions): Product[]
     const kind = kindOf(product);
     if (!kind || !kinds.includes(kind)) continue;
     // In stock in their size - whichever of their sizes this product is sized in.
-    const size = [options.size, options.waist].find((candidate) => candidate && sizedOnScale(product, candidate));
+    // The one applicability rule (catalog/commerce.ts): an M says nothing about trousers or a cap in one size.
+    const size = [options.size, options.waist].find((candidate) => candidate && sizeApplies(product, candidate));
     if (size && !stockedInSize(product.variants, size)) continue;
+    if (options.eligible && !options.eligible(product)) continue;
     const list = byKind.get(kind) ?? [];
     list.push(product);
     byKind.set(kind, list);

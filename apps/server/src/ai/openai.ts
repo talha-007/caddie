@@ -4,11 +4,14 @@ import { UpstreamError } from '../lib/errors.js';
 import { fetchWithTimeout, Semaphore } from '../lib/http.js';
 import { log } from '../lib/logger.js';
 import { sessions, type CaddieSession } from '../session/store.js';
-import { currentPack, currentScreen, tappedSinceLastSaid } from '../session/shoppingSession.js';
+import { currentPack, currentScreen, livePending, tappedSinceLastSaid } from '../session/shoppingSession.js';
 import { packStatus } from '../tools/packState.js';
 import { describeShopper } from '../shopper/facts.js';
 import { readCustomerTurn } from './turn.js';
-import { runTool, toolDefinitionsForVapi } from '../tools/index.js';
+import { completeGoal, confirmPackSwap, notePackSwapOffer, replacementRequired, runTool, toolDefinitionsForVapi } from '../tools/index.js';
+import { asksForKnown, customerGoal, describeGoal, goalLog, type CustomerGoal } from '../tools/journey.js';
+import { guardCards } from '../tools/eligibility.js';
+import { alignReplyWithPending, notePendingOffer, resolvePending } from '../tools/pending.js';
 import { costOfTokens } from '../usage/pricing.js';
 import { record } from '../usage/store.js';
 import { SYSTEM_PROMPT } from './prompt.js';
@@ -16,7 +19,7 @@ import { verifyReply, withoutClaims, type VerifyContext } from './verify.js';
 import { namesADeal } from '../recommend/deals.js';
 import { productById } from '../catalog/sync.js';
 import { asksToAdd } from '../tools/cartAuthorization.js';
-import { describeFocus } from '../session/focus.js';
+import { customerTurn, describeFocus } from '../session/focus.js';
 import { allDeals } from '../catalog/bundles.js';
 import { resolveVariant, sizeScale } from '../catalog/commerce.js';
 
@@ -214,6 +217,16 @@ function focusContext(session: CaddieSession): ChatMessage | null {
 }
 
 /**
+ * The customer's goal (tools/journey.ts): what is settled, never to be asked
+ * again, and the one thing still needed. Per turn and short - it varies, so
+ * it does not cache.
+ */
+function goalContext(goal: CustomerGoal | null): ChatMessage | null {
+  if (!goal || goal.kind === 'browse-products') return null;
+  return { role: 'system', content: describeGoal(goal) };
+}
+
+/**
  * What they picked on a product card themselves - the product they are
  * handling now, and the size they chose for it. "Add it" means this.
  */
@@ -364,13 +377,77 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
    * pack in hand - read by code before the model runs, so every tool this
    * turn already uses it (ai/turn.ts).
    */
-  await readCustomerTurn(sessionId, userText);
+  /*
+   * The action the Caddie is waiting to finish, first (tools/pending.ts):
+   * their yes, colour, size or no is read against that one record before
+   * anything else moves - before the focus, which a second request in the
+   * same message ("...and show me socks") would carry off. Complete and
+   * theirs, it is done here, once.
+   */
+  const pendingTurn = await resolvePending(sessionId, userText);
+  const turnRead = await readCustomerTurn(sessionId, userText);
   const session = await sessions.getOrCreate(sessionId);
   const turnStartedAt = Date.now();
+  // The job they are doing (tools/journey.ts), read from the session this turn's words have just updated.
+  const startGoal = customerGoal(session, userText);
+  log.info('journey.goal', { sessionId, at: 'start', ...goalLog(startGoal) });
+
+  /*
+   * A yes to the pack swap just offered is made here, before the model runs.
+   * Left to the model, "Yes, please replace it" went to add_pack_to_cart, the
+   * pack was still not ready for the sold-out Warrior, and the same swap was
+   * offered again (Cool & Wet, preview store). The tool's own words say what
+   * changed and the one thing the pack needs next.
+   */
+  // Through the same last check as every tool's card (tools/eligibility.ts).
+  /*
+   * A piece of the pack in hand can no longer be had in the size just given
+   * (revalidatePack): that is this turn's answer, before the model runs - what
+   * cannot stay, and only what can be had in its place, for them to choose.
+   * Never a substitute picked for them after they have seen the pack.
+   */
+  const revalidated = turnRead.revalidated;
+  const revalidatedDeal = revalidated ? allDeals().find((deal) => deal.handle === revalidated.handle) : undefined;
+  if (revalidated && revalidatedDeal) {
+    const required = await guardCards(await replacementRequired({ session, utterance: userText }, revalidatedDeal, revalidated.step), { session: await sessions.getOrCreate(sessionId), utterance: userText }, 'pack-revalidation');
+    log.info('journey.replacement_required_before_model', { sessionId, pack: revalidated.handle, piece: revalidated.piece });
+    const content = required.facts ? `${required.speech}\n\nFACTS (data, do not read aloud):\n${required.facts}` : required.speech;
+    await sessions.patch(sessionId, { recentEvidence: [content, session.recentEvidence ?? ''].join('\n').slice(0, 8000) });
+    return { text: required.speech, ...(required.attachment ? { attachment: required.attachment } : {}) };
+  }
+
+  /*
+   * Their message was about the waiting action and nothing else: what was
+   * done, or the one thing still needed, is the reply - the model is not
+   * asked whether an action already made should be made, or a question
+   * already answered asked again.
+   */
+  const onlyPending = pendingTurn.status !== 'none' && !/[a-z]{3,}/i.test(pendingTurn.remainder);
+  if (onlyPending) {
+    const result = pendingTurn.result ?? { speech: 'No problem - nothing has been added.', facts: 'They cancelled the waiting action. Nothing changed.' };
+    log.info('journey.pending_answered_before_model', { sessionId, status: pendingTurn.status, action: result.outcome?.action ?? null, ok: result.outcome?.ok ?? null });
+    const content = result.facts ? `${result.speech}\n\nFACTS (data, do not read aloud):\n${result.facts}` : result.speech;
+    await sessions.patch(sessionId, { recentEvidence: [content, session.recentEvidence ?? ''].join('\n').slice(0, 8000) });
+    // What the action's own words offer next ("shall I add the pack?") is bound like any other offer.
+    await notePackSwapOffer(sessionId, result.speech);
+    await notePendingOffer(sessionId, result.speech);
+    return { text: result.speech, ...(result.attachment ? { attachment: result.attachment } : {}), ...(result.actions?.length ? { actions: result.actions } : {}) };
+  }
+
+  const confirmed = await confirmPackSwap({ session, utterance: userText });
+  const swapped = confirmed ? await guardCards(confirmed, { session, utterance: userText }, 'confirm-pack-swap') : null;
+  if (swapped) {
+    log.info('journey.swap_confirmed_before_model', { sessionId });
+    const content = swapped.facts ? `${swapped.speech}\n\nFACTS (data, do not read aloud):\n${swapped.facts}` : swapped.speech;
+    await sessions.patch(sessionId, { recentEvidence: [content, session.recentEvidence ?? ''].join('\n').slice(0, 8000) });
+    await notePackSwapOffer(sessionId, swapped.speech);
+    await notePendingOffer(sessionId, swapped.speech);
+    return { text: swapped.speech, ...(swapped.attachment ? { attachment: swapped.attachment } : {}), ...(swapped.actions?.length ? { actions: swapped.actions } : {}) };
+  }
 
   const messages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
-    ...([pageContext(session), screenContext(session), focusContext(session), basketContext(session), shopperContext(session)].filter(Boolean) as ChatMessage[]),
+    ...([pageContext(session), screenContext(session), focusContext(session), goalContext(startGoal), basketContext(session), shopperContext(session)].filter(Boolean) as ChatMessage[]),
     ...history(session),
     /*
      * Last before their words: the tap happened after the reply before it.
@@ -405,10 +482,45 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
   let rewrote = false;
   // Whether an add was tried this turn - once it has, a question back is the tool's, not the model skipping it.
   let addTried = false;
+  // Whether the goal was carried out by code this turn (see below) - once, never twice.
+  let goalCarriedOut = false;
 
   let attachment: CaddieAttachment | undefined;
   const actions: CartAction[] = [];
   let attachmentWeight = -1;
+
+  /*
+   * The waiting action dealt with before the model ran, and a second request
+   * in the same message: the model is told what was done - or what is still
+   * needed, which opens the reply - and answers the rest. "Yeah, that will be
+   * fine. Can we create a pack as well?" adds the jacket once and then builds
+   * the pack, in one turn.
+   */
+  if (pendingTurn.status !== 'none') {
+    const result = pendingTurn.result;
+    if (result) {
+      if (result.actions) actions.push(...result.actions);
+      if (result.outcome) outcomes.push({ ...result.outcome, speech: result.speech });
+      if (result.attachment) {
+        attachment = result.attachment;
+        attachmentWeight = cardWeight(result.attachment, !!result.outcome?.ok);
+      }
+      const content = result.facts ? `${result.speech}\n\nFACTS (data, do not read aloud):\n${result.facts}` : result.speech;
+      evidence.push(content);
+      toolEvidence.push(content);
+      lastToolSpeech = result.speech;
+    }
+    const note =
+      pendingTurn.status === 'executed'
+        ? `Already done this turn, before you: "${result?.speech ?? ''}" It is done - do not do it again, do not offer it again, do not ask about it. Now answer the rest of what they said: "${pendingTurn.remainder}".`
+        : pendingTurn.status === 'asked'
+          ? `The action they asked for is still waiting: ${result?.speech ?? ''} Your reply must open with exactly that question (nothing has been added). Then answer the rest of what they said: "${pendingTurn.remainder}".`
+          : `They cancelled what was waiting - nothing was added or changed. Answer what they said: "${pendingTurn.remainder}".`;
+    messages.splice(messages.length - 1, 0, { role: 'system', content: note });
+    evidence.push(note);
+    if (pendingTurn.status === 'asked' && result?.speech) lead = { text: result.speech, unless: new RegExp(result.speech.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 40), 'i') };
+    log.info('journey.pending_before_model', { sessionId, status: pendingTurn.status, remainder: pendingTurn.remainder.slice(0, 80) });
+  }
   /** Set when searches were merged, so "on screen" is updated to match. */
   let merged = false;
 
@@ -436,6 +548,129 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
      * words - which are always exact - are what the customer hears.
      */
     let finalText = choice.message.content?.trim() ?? '';
+    // The goal as the turn ends - what the reply is judged against.
+    let turnGoal: CustomerGoal | null = null;
+    if (calls.length === 0 && !goalCarriedOut) {
+      const now = await sessions.getOrCreate(sessionId);
+      const goal = customerGoal(now, userText);
+      turnGoal = goal;
+      /*
+       * Ready and authorised, and nothing done: done now, by code. The model
+       * asking "shall I add it?" to "yes, add this, size small" - with the
+       * product, colour and size all settled - was a loop the customer could
+       * not get out of. Whatever the model did with the turn, the outcome is
+       * the same.
+       */
+      if (goal?.status === 'ready' && !outcomes.some((outcome) => outcome.ok)) {
+        const done = await completeGoal(goal, { session: now, utterance: userText, pendingActions: actions.length });
+        const succeeded = !!done && (done.outcome ? done.outcome.ok : done.attachment?.kind === 'pack');
+        if (done && succeeded) {
+          goalCarriedOut = true;
+          log.info('journey.completed_by_code', { sessionId, ...goalLog(goal), modelSaid: finalText.slice(0, 160) });
+          if (done.actions) actions.push(...done.actions);
+          if (done.outcome) outcomes.push({ ...done.outcome, speech: done.speech });
+          if (done.attachment) {
+            attachment = done.attachment;
+            attachmentWeight = cardWeight(done.attachment, !!done.outcome);
+          }
+          const content = done.facts ? `${done.speech}\n\nFACTS (data, do not read aloud):\n${done.facts}` : done.speech;
+          evidence.push(content);
+          toolEvidence.push(content);
+          lastToolSpeech = done.speech;
+          // The tool's own words are exact: what was done, and the next thing the goal needs.
+          finalText = done.speech;
+        }
+      }
+      /*
+       * Asked to add, the goal still missing something, and no add tried: the
+       * add is still what they asked for. The model answered "which size?"
+       * without calling add_to_cart, so nothing was waiting - the "S" that
+       * followed authorised nothing, and the Caddie asked "shall I add it?".
+       * The request goes to the gateway now: it records the add as waiting,
+       * on exactly what is missing, so their answer finishes it.
+       */
+      if (!goalCarriedOut && goal && (goal.kind === 'choose-product' || goal.kind === 'add-product') && goal.status === 'open' && goal.products?.length && !addTried && asksToAdd(userText) && !livePending(now)) {
+        addTried = true;
+        const asked = await runTool('add_to_cart', { productId: goal.products[0]! }, { session: now, utterance: userText, pendingActions: actions.length });
+        log.info('journey.add_requested_by_code', { sessionId, ok: asked.outcome?.ok ?? null, reason: asked.outcome?.reason ?? null, ...goalLog(goal) });
+        if (asked.outcome) outcomes.push({ ...asked.outcome, speech: asked.speech });
+        const content = asked.facts ? `${asked.speech}\n\nFACTS (data, do not read aloud):\n${asked.facts}` : asked.speech;
+        evidence.push(content);
+        toolEvidence.push(content);
+        if (asked.outcome?.ok) {
+          goalCarriedOut = true;
+          if (asked.actions) actions.push(...asked.actions);
+          if (asked.attachment) {
+            attachment = asked.attachment;
+            attachmentWeight = cardWeight(asked.attachment, true);
+          }
+          finalText = asked.speech;
+        } else if (!/\?/.test(finalText)) finalText = asked.speech;
+      }
+      /*
+       * The same for the pack: "add the pack to my basket" answered with
+       * "which leg length?" and no tool called, so nothing recorded that they
+       * had asked - and their "34" then bought them "shall I add it?" (live
+       * replay, V1 task 3). The gateway records the add, with their yes, on
+       * exactly what the pack still needs.
+       */
+      if (!goalCarriedOut && goal?.kind === 'configure-pack' && !addTried && asksToAdd(userText) && !livePending(now)) {
+        addTried = true;
+        const asked = await runTool('add_pack_to_cart', {}, { session: now, utterance: userText, pendingActions: actions.length });
+        log.info('journey.pack_add_requested_by_code', { sessionId, ok: asked.outcome?.ok ?? null, reason: asked.outcome?.reason ?? null });
+        if (asked.outcome) outcomes.push({ ...asked.outcome, speech: asked.speech });
+        const content = asked.facts ? `${asked.speech}\n\nFACTS (data, do not read aloud):\n${asked.facts}` : asked.speech;
+        evidence.push(content);
+        toolEvidence.push(content);
+        if (asked.outcome?.ok) {
+          goalCarriedOut = true;
+          if (asked.actions) actions.push(...asked.actions);
+          if (asked.attachment) {
+            attachment = asked.attachment;
+            attachmentWeight = cardWeight(asked.attachment, true);
+          }
+          finalText = asked.speech;
+        } else if (!/\?/.test(finalText)) finalText = asked.speech;
+      }
+      /*
+       * Offering again what is done - "shall I add it now?" to a bare "yes"
+       * after the jacket went in. Sent back once: it is in the basket.
+       */
+      if (goal?.status === 'done' && !goalCarriedOut && !rewrote && /\b(add|put)\b[^.?!]*\?|\b(shall i|should i|would you like me to|want me to|like me to) (add|put)\b/i.test(finalText)) {
+        rewrote = true;
+        log.warn('reply.offered_done_again', { sessionId, ...goalLog(goal) });
+        messages.push({ role: 'assistant', content: finalText });
+        messages.push({ role: 'system', content: `${goal.known.product ?? 'It'} is already in their basket - it went in earlier. Do not offer to add it again. Say it is in their basket and ask whether they need anything else.` });
+        continue;
+      }
+      /*
+       * Asking again for what is settled - "what size?" to a customer who has
+       * said S twice. Sent back once, told what is known and the one thing
+       * still needed.
+       */
+      const askedAgain = goal && !goalCarriedOut ? asksForKnown(goal, finalText) : [];
+      if (goal && askedAgain.length && !rewrote) {
+        rewrote = true;
+        log.warn('reply.asked_known', { sessionId, asked: askedAgain, ...goalLog(goal) });
+        messages.push({ role: 'assistant', content: finalText });
+        messages.push({ role: 'system', content: `Do not ask for ${askedAgain.join(' or ')} - it is already settled. ${describeGoal(goal)}` });
+        continue;
+      }
+    }
+    /*
+     * The record before the words (V1 task 3): a swap or an add the model's
+     * reply offers is bound now, from what the session holds - the one
+     * candidate, the product in hand, its size - before the checker below
+     * may rewrite the reply. A rewrite that loses the product's name, or the
+     * question, loses nothing: the record stands and the question comes back
+     * from it (alignReplyWithPending). After the goal above: an add the
+     * customer asked for is the gateway's record, with their authorisation
+     * - never an offer's, which would wait for a yes they already gave.
+     */
+    if (calls.length === 0 && finalText && !rewrote) {
+      await notePackSwapOffer(sessionId, finalText);
+      await notePendingOffer(sessionId, finalText);
+    }
     /*
      * Asking the customer to confirm a product's name without having looked.
      * "Could you confirm the exact name of the jacket?" came back for the Tour
@@ -472,7 +707,13 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
      */
     const asksSize = /\b(what|which)\s+size\b|\bsize (would|do|should) you\b|\byour size\b/i.test(finalText);
     const askedInstead = asksSize || /\?\s*$/.test(finalText);
-    if (calls.length === 0 && !rewrote && !addTried && askedInstead && asksToAdd(userText)) {
+    /*
+     * Not when the goal still needs something: "add this Hexa instead of the
+     * red jacket" rightly gets "which colour?" - sent back to call
+     * add_to_cart, it put a standalone jacket beside the pack.
+     */
+    const goalStillNeeds = !!turnGoal && (turnGoal.kind === 'replace-pack-piece' || turnGoal.kind === 'configure-pack') && turnGoal.missing.length > 0;
+    if (calls.length === 0 && !rewrote && !addTried && !goalStillNeeds && askedInstead && asksToAdd(userText)) {
       rewrote = true;
       log.warn(asksSize ? 'reply.asked_size_without_trying' : 'reply.asked_instead_of_adding', { sessionId });
       messages.push({ role: 'assistant', content: finalText });
@@ -506,7 +747,8 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
      * to change it. Sent back once to make the change, then say so.
      */
     const claimsChange =
-      /\b(I'?ve|I have|I'?ll|I will|I)\s+(now\s+)?(swapped|changed|switched|replaced|updated|added|removed|swap|change|switch|replace|update|add|remove)\b|\bhas been (swapped|changed|replaced|added|removed)\b/i.test(
+      // "Shall I add it?" is an offer, not a claim: a bare "I" only with a past tense (V1 task 3).
+      /\b(I'?ve|I have|I'?ll|I will)\s+(now\s+)?(swapped|changed|switched|replaced|updated|added|removed|swap|change|switch|replace|update|add|remove)\b|\bI\s+(now\s+)?(swapped|changed|switched|replaced|updated|added|removed)\b|\bhas been (swapped|changed|replaced|added|removed)\b/i.test(
         finalText,
       );
     if (calls.length === 0 && !rewrote && step === 0 && claimsChange) {
@@ -544,20 +786,32 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
      */
     const refused = outcomes.filter((outcome) => !outcome.ok);
     const claimsDone =
-      /\b(i'?ve|i have|i'?m|i am|it'?s|they'?re|is|are|has been|have been)\s+(now\s+)?(added|adding|put|putting|placed|placing|removed|removing|taken|taking|updated|updating|changed|changing|swapped|swapping)\b|\b(going|gone|goes)\s+(in|into)\s+(your|the)\s+(basket|cart|bag)\b|\bin your (basket|cart|bag)( now)?\b/i;
-    if (calls.length === 0 && refused.length && !outcomes.some((outcome) => outcome.ok) && claimsDone.test(finalText)) {
+      /\b(i'?ve|i have|i'?m|i am|it'?s|they'?re|is|are|has been|have been)\s+(now\s+)?(added|adding|put|putting|placed|placing|removed|removing|taken|taking|updated|updating|changed|changing|swapped|swapping)\b|\b(going|gone|goes)\s+(in|into)\s+(your|the)\s+(basket|cart|bag)\b|\bin your (basket|cart|bag)( now)?\b|^\s*(added|removed|updated|swapped|changed)\b/i;
+    /*
+     * "I've added it" with no gateway success this turn - refused, or never
+     * even attempted (V1 task 3). The gateway's word is the only word on
+     * whether the basket changed: sent back once, and if it still claims,
+     * what the customer hears is what the gateway (or the waiting action)
+     * said.
+     */
+    if (calls.length === 0 && !outcomes.some((outcome) => outcome.ok) && !goalCarriedOut && claimsDone.test(finalText)) {
+      const waiting = (await sessions.getOrCreate(sessionId)).pendingAction;
+      // "Nothing has changed": an earlier turn may well have added something.
+      const truth = refused[refused.length - 1]?.speech ?? waiting?.question ?? 'Nothing has changed in your basket.';
       if (!rewrote) {
         rewrote = true;
-        log.warn('reply.claimed_refused_action', { sessionId, reasons: refused.map((outcome) => outcome.reason) });
+        log.warn('reply.claimed_refused_action', { sessionId, reasons: refused.map((outcome) => outcome.reason), attempted: refused.length > 0 });
         messages.push({ role: 'assistant', content: finalText });
         messages.push({
           role: 'system',
-          content: `Nothing changed in the basket - the ${refused.map((outcome) => outcome.action).join(' and ')} was not made (${refused.map((outcome) => outcome.reason ?? 'refused').join(', ')}). Never say it was added, changed or removed. Say what the tool said and ask only what it asked: "${refused[refused.length - 1]!.speech}"`,
+          content: refused.length
+            ? `Nothing changed in the basket - the ${refused.map((outcome) => outcome.action).join(' and ')} was not made (${refused.map((outcome) => outcome.reason ?? 'refused').join(', ')}). Never say it was added, changed or removed. Say what the tool said and ask only what it asked: "${truth}"`
+            : `Nothing changed in the basket this turn - no basket tool succeeded. Never say it was added, changed or removed. ${waiting ? `Ask only: "${truth}"` : 'Say nothing has been added yet.'}`,
         });
         continue;
       }
       log.warn('reply.claimed_refused_action_after_rewrite', { sessionId });
-      finalText = refused[refused.length - 1]!.speech;
+      finalText = truth;
     }
     if (calls.length === 0 && finalText) {
       const violations = verifyReply(finalText, evidence.join('\n'), attachment, userText, await verifyContext(sessionId));
@@ -608,6 +862,7 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
     }
 
     if (calls.length === 0) {
+      log.info('journey.goal', { sessionId, at: 'end', ...goalLog(customerGoal(await sessions.getOrCreate(sessionId), userText)) });
       log.info('openai.turn', {
         sessionId,
         model: env.openai.model,
@@ -647,6 +902,15 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
         log.warn('reply.lead_restored', { sessionId });
         finalText = `${lead.text} ${finalText.replace(/^(yes|yeah|sure|of course)\b[,!.]?\s*/i, '')}`;
       }
+      /*
+       * Words the code put in (a tool's own speech, a rewrite) may offer too;
+       * then the words are held to the record: a confirmation that binds
+       * nothing is not asked, and a record whose question was lost gets it
+       * back (V1 task 3).
+       */
+      await notePackSwapOffer(sessionId, finalText);
+      await notePendingOffer(sessionId, finalText);
+      finalText = await alignReplyWithPending(sessionId, finalText);
       return {
         text: finalText || 'Sorry, I did not catch that.',
         attachment,

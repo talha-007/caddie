@@ -25,6 +25,7 @@ const { sessionRouter } = await import('../src/routes/session.js');
 const { sessions } = await import('../src/session/store.js');
 const { runTool } = await import('../src/tools/index.js');
 const { env } = await import('../src/env.js');
+const { notePendingOffer } = await import('../src/tools/pending.js');
 
 const BRAND = [env.shopify.brandTag].filter(Boolean) as string[];
 function product(id: string, title: string, sizes: string[] | null, price: number, soldOut: string[] = []): Product {
@@ -117,6 +118,8 @@ describe('from chat', () => {
       { id: 'u1', role: 'user', text: "I'm an M", createdAt: new Date(Date.now() - 2000).toISOString() },
       { id: 'a1', role: 'assistant', text: 'The pack is ready in M. Shall I add the pack to your basket?', createdAt: new Date(Date.now() - 1000).toISOString() },
     ]);
+    // The offer is bound by code before it is asked (tools/pending.ts); the yes answers the record.
+    await notePendingOffer(id, 'The pack is ready in M. Shall I add the pack to your basket?');
     expect(bundles((await chat('Yes')).actions)).toHaveLength(1);
   });
 

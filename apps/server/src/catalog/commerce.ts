@@ -5,7 +5,7 @@ import { attributesOf, shapesOf, strongerOf, type Feature, type ProductFit } fro
 import { rangeOf, type Range } from './audience.js';
 import { colourWordsOf, matchesColourText } from './colour.js';
 import { colourwayName, garmentName, otherColourways } from './colourways.js';
-import { categoriesOf, sizeStatus, type Category, type SizeStatus } from './constraints.js';
+import { categoriesOf, scaleOfSize, sizeScale, sizeStatus, type Category, type SizeScaleKind, type SizeStatus } from './constraints.js';
 import { productById } from './sync.js';
 
 /**
@@ -175,64 +175,8 @@ export function commerceAttributes(product: Product): CommerceAttributes {
 
 /* ---------------- sizes ---------------- */
 
-/**
- * The size choices a product really has. Druids sizes tops by letter
- * (S-4XL), bottoms by waist and leg, ladies by UK number, belts in combined
- * letters (S/M, L/XL), kids by age, and socks and caps in one size. They
- * are separate scales: an M says nothing about a 34 waist, and a product
- * whose only size is ONE SIZE has no size to choose.
- */
-export type SizeScaleKind = 'letter' | 'combined' | 'waist' | 'leg' | 'number' | 'age' | 'other';
-
-export interface SizeDimension {
-  option: string;
-  scale: SizeScaleKind;
-  values: string[];
-}
-
-export interface SizeScale {
-  /** No size choice at all: one size, or nothing sized. */
-  oneSize: boolean;
-  dimensions: SizeDimension[];
-}
-
-const COLOUR_OPTION = /^(colou?r|colourway|colorway|shade)$/i;
-const ONE_SIZE_VALUE = /^(one size( fits (all|most))?|os|osfa|default title)$/i;
-
-/** The scale one option is measured on - null for a colour, or an option that is no size at all. */
-export function optionScale(option: ProductOption): SizeScaleKind | null {
-  return scaleOfOption(option);
-}
-
-function scaleOfOption(option: ProductOption): SizeScaleKind | null {
-  if (COLOUR_OPTION.test(option.name)) return null;
-  if (/leg|length|inseam/i.test(option.name)) return 'leg';
-  const values = option.values.map((value) => value.trim());
-  if (/waist/i.test(option.name) || values.every((value) => /^\d{2}$/.test(value) && Number(value) >= 26 && Number(value) <= 48)) return 'waist';
-  if (values.every((value) => /^\d{1,2}\s*[/-]\s*\d{1,2}$|^\d{1,2}\s*(yrs?|years?)$/i.test(value))) return 'age';
-  if (values.some((value) => /^[a-z0-9]+\s*\/\s*[a-z0-9]+$/i.test(value) && value.split('/').every((half) => normaliseSize(half.trim())))) return 'combined';
-  if (values.every((value) => normaliseSize(value) && !/^\d+$/.test(value))) return 'letter';
-  if (values.every((value) => /^\d{1,2}$/.test(value))) return 'number';
-  return /size/i.test(option.name) ? 'other' : null;
-}
-
-const scaleCache = new WeakMap<Product, SizeScale>();
-
-export function sizeScale(product: Product): SizeScale {
-  let cached = scaleCache.get(product);
-  if (!cached) {
-    const dimensions: SizeDimension[] = [];
-    for (const option of product.options) {
-      const real = option.values.filter((value) => !ONE_SIZE_VALUE.test(value.trim()));
-      if (real.length <= 1) continue;
-      const scale = scaleOfOption(option);
-      if (scale) dimensions.push({ option: option.name, scale, values: option.values });
-    }
-    cached = { oneSize: dimensions.length === 0, dimensions };
-    scaleCache.set(product, cached);
-  }
-  return cached;
-}
+// The size scales and the one size check live beside the size reader (constraints.ts); this is where every caller finds them.
+export { optionScale, sizeScale, type SizeDimension, type SizeScale, type SizeScaleKind } from './constraints.js';
 
 /** Nothing to choose at all - no option with more than one value. A colourway product with one size is this. */
 export function nothingToChoose(product: Product): boolean {
@@ -246,9 +190,104 @@ export function availableSizes(product: Product): string[] {
   return main.values.filter((value) => product.variants.some((variant) => variant.available && variant.options[main.option] === value));
 }
 
-/** Whether it can be bought in this size: in stock, sold out, not made, or sized on another scale (constraints.ts). */
+/** Whether it can be bought in this size: in stock, sold out, not made, sized on another scale, or no such size applies (constraints.ts). */
 export function supportsSize(product: Product, size: string): SizeStatus {
   return sizeStatus(product, size);
+}
+
+/** Whether a size says anything about this product - it does unless no size of that kind applies to it. */
+export function sizeApplies(product: Product, size: string): boolean {
+  const status = sizeStatus(product, size);
+  return status === 'in-stock' || status === 'sold-out' || status === 'not-made';
+}
+
+/* ---------------- offerability ---------------- */
+
+/**
+ * Whether a product may be put in front of the customer as something to buy
+ * - the one card eligibility decision, for every card, recommendation, pack
+ * piece, replacement, outfit piece and cross-sell (V1 hardening task 1).
+ *
+ *   eligible            a size of theirs applies and that exact variant can
+ *                       be bought; or none applies and some variant can
+ *   not-eligible        the size of theirs that applies is sold out or not
+ *                       made; or nothing can be bought at all
+ *   informational-only  not eligible, but they named it themselves: it may
+ *                       be talked about ("sold out in S"), never offered
+ *
+ * Their sizes come in priority order (tools/eligibility.ts buyingSizes). Each
+ * applies only on the product's own scale: an M says nothing about a cap in
+ * one size, a 32 waist nothing about a polo, and a top size nothing about a
+ * belt made in M/L and L/XL. The first size that applies to a dimension is
+ * the one it is judged in.
+ */
+export type Offerability = 'eligible' | 'not-eligible' | 'informational-only';
+
+export interface OfferDecision {
+  offer: Offerability;
+  /** The sizes it was judged in, by option - empty when none of theirs applies. */
+  sizes: Record<string, string>;
+  /** Why it is not eligible: "sold out", "sold out in S", "not made in 3XL". */
+  reason?: string;
+  /**
+   * Which: nothing buyable at all, their size sold out, or their size not
+   * made. A pack asks about a size its pieces are not made in ("the trousers
+   * don't come in a 36 leg - 30, 32 or 34?") rather than dropping the piece;
+   * a sold-out one it never shows.
+   */
+  why?: 'unavailable' | 'sold-out' | 'not-made';
+}
+
+/**
+ * One of the customer's sizes, and the dimension it was given for when that
+ * is known: a 34 given as a leg is never judged as a 34 waist.
+ */
+export interface BuyingSize {
+  size: string;
+  as?: 'top' | 'waist' | 'leg';
+}
+
+export function offerability(product: Product, given: Array<string | BuyingSize> = [], opts: { named?: boolean } = {}): OfferDecision {
+  const sizes = given.map((entry) => (typeof entry === 'string' ? { size: entry } : entry));
+  const notEligible = (reason: string, judged: Record<string, string>, why: OfferDecision['why']): OfferDecision => ({ offer: opts.named ? 'informational-only' : 'not-eligible', sizes: judged, reason, why });
+  if (!isBuyable(product)) return notEligible('sold out', {}, 'unavailable');
+  // One value per size dimension - the first of theirs that is on that dimension's scale.
+  const judged: Record<string, string> = {};
+  for (const dimension of sizeScale(product).dimensions) {
+    const own = sizes.find((entry) => dimensionTakes(dimension, entry));
+    if (own) judged[dimension.option] = dimension.values.find((value) => sameSizeValue(value, own.size)) ?? own.size;
+  }
+  const entries = Object.entries(judged);
+  if (!entries.length) return { offer: 'eligible', sizes: {} };
+  const said = entries.map(([, value]) => value).join(' / ');
+  // Every judged value must be one the product is made in.
+  const made = entries.every(([name]) => sizeScale(product).dimensions.find((dimension) => dimension.option === name)!.values.some((value) => sameSizeValue(value, judged[name]!)));
+  if (!made) return notEligible(`not made in ${said}`, judged, 'not-made');
+  const exact = product.variants.some((variant) => variant.available && entries.every(([name, value]) => sameSizeValue(variant.options[name] ?? '', value)));
+  return exact ? { offer: 'eligible', sizes: judged } : notEligible(`sold out in ${said}`, judged, 'sold-out');
+}
+
+/** Whether a size is on this dimension's scale: an M on a lettered dimension, a 32 on a waist - never an M on a belt's M/L. */
+function dimensionTakes(dimension: { scale: string; values: string[] }, { size, as }: BuyingSize): boolean {
+  if (as === 'leg') return dimension.scale === 'leg';
+  if (dimension.scale === 'leg') return false;
+  if (as === 'waist') return dimension.scale === 'waist';
+  const kind = sizeKindOf(size);
+  if (!kind || (as === 'top' && kind === 'waist')) return false;
+  if (dimension.scale === 'combined') return kind === 'combined' && dimension.values.some((value) => sameSizeValue(value, size));
+  if (dimension.scale === 'other') return dimension.values.some((value) => sameSizeValue(value, size));
+  return dimension.scale === kind;
+}
+
+/** The scale a customer's size is on - the one reader, beside the size check (constraints.ts). */
+export function sizeKindOf(size: string): SizeScaleKind | null {
+  return scaleOfSize(normaliseSize(size) ?? size.trim());
+}
+
+/** One size value as another - "M" and "Medium", "2XL" and "XXL" - exactly: a combined "M/L" is never an M here. */
+function sameSizeValue(a: string, b: string): boolean {
+  const key = (value: string) => (normaliseSize(value.trim()) ?? value.trim()).toUpperCase();
+  return key(a) === key(b);
 }
 
 /* ---------------- variant ---------------- */

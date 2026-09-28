@@ -1,4 +1,4 @@
-import type { Product } from '@caddie/shared';
+import type { Product, ProductOption } from '@caddie/shared';
 import { normaliseSize } from '../recommend/sizeWords.js';
 import { normaliseQuery } from './taxonomy.js';
 
@@ -166,59 +166,144 @@ export function withoutSize(text: string, size: string | undefined): string {
     .trim();
 }
 
-export type SizeStatus = 'in-stock' | 'sold-out' | 'not-made' | 'other-scale';
+/**
+ * The size choices a product really has. Druids sizes tops by letter
+ * (S-4XL), bottoms by waist and leg, ladies by UK number, belts in combined
+ * letters (S/M, L/XL), kids by age, and socks and caps in one size. They
+ * are separate scales: an M says nothing about a 34 waist, and a product
+ * whose only size is ONE SIZE has no size to choose.
+ */
+export type SizeScaleKind = 'letter' | 'combined' | 'waist' | 'leg' | 'number' | 'age' | 'other';
 
-/** 2XL is a letter size that starts with a digit: only a number (34, 12, 7/8) is on the number scale. */
-function scaleOf(code: string): 'letter' | 'number' {
-  return /^\d+(\s*\/\s*\d+)?$/.test(code) ? 'number' : 'letter';
+export interface SizeDimension {
+  option: string;
+  scale: SizeScaleKind;
+  values: string[];
 }
 
-/**
- * Whether this product can be bought in this size - strictly.
- *
- * Unlike stockedInSize, which lets a product on another size scale through
- * so an outfit keeps its trousers, a customer who asked for XL is only shown
- * what they can buy in XL: a ladies polo sized 8 to 18 is not an XL polo.
- * The option name is not trusted - "Size", "SIZE", "JACKET SIZE", "WAIST
- * SIZE" all appear - only the values are read. A combined size ("L/XL") is
- * that size for either half.
- */
-export function sizeStatus(product: Product, size: string): SizeStatus {
-  const wanted = sizeKey(normaliseSize(size) ?? size);
-  const sizes = sizesOf(product);
-  const found = sizes.byKey.get(wanted);
-  if (found !== undefined) return found ? 'in-stock' : 'sold-out';
-  return sizes.scales.has(scaleOf(wanted)) ? 'not-made' : 'other-scale';
+export interface SizeScale {
+  /** No size choice at all: one size, or nothing sized. */
+  oneSize: boolean;
+  dimensions: SizeDimension[];
 }
 
-const sizeKey = (value: string) => value.trim().toUpperCase();
+const COLOUR_OPTION = /^(colou?r|colourway|colorway|shade)$/i;
+const ONE_SIZE_VALUE = /^(one size( fits (all|most))?|os|osfa|default title)$/i;
 
-/**
- * Every size a product is made in, and whether any variant in it can be
- * bought - read once per product. Checking each variant's option text on
- * every search took a sized search of the polos from 5ms to 55ms, on the one
- * thread every customer shares. A changed product is a new object, so this
- * is never stale.
- */
-const sizeCache = new WeakMap<Product, { byKey: Map<string, boolean>; scales: Set<'letter' | 'number'> }>();
+/** The scale one option is measured on - null for a colour, or an option that is no size at all. */
+export function optionScale(option: ProductOption): SizeScaleKind | null {
+  return scaleOfOption(option);
+}
 
-function sizesOf(product: Product): { byKey: Map<string, boolean>; scales: Set<'letter' | 'number'> } {
-  let cached = sizeCache.get(product);
+function scaleOfOption(option: ProductOption): SizeScaleKind | null {
+  if (COLOUR_OPTION.test(option.name)) return null;
+  if (/leg|length|inseam/i.test(option.name)) return 'leg';
+  const values = option.values.map((value) => value.trim());
+  if (/waist/i.test(option.name) || values.every((value) => /^\d{2}$/.test(value) && Number(value) >= 26 && Number(value) <= 48)) return 'waist';
+  if (values.every((value) => /^\d{1,2}\s*[/-]\s*\d{1,2}$|^\d{1,2}\s*(yrs?|years?)$/i.test(value))) return 'age';
+  if (values.some((value) => /^[a-z0-9]+\s*\/\s*[a-z0-9]+$/i.test(value) && value.split('/').every((half) => normaliseSize(half.trim())))) return 'combined';
+  if (values.every((value) => normaliseSize(value) && !/^\d+$/.test(value))) return 'letter';
+  if (values.every((value) => /^\d{1,2}$/.test(value))) return 'number';
+  return /size/i.test(option.name) ? 'other' : null;
+}
+
+const scaleCache = new WeakMap<Product, SizeScale>();
+
+export function sizeScale(product: Product): SizeScale {
+  let cached = scaleCache.get(product);
   if (!cached) {
-    const byKey = new Map<string, boolean>();
-    const scales = new Set<'letter' | 'number'>();
-    for (const variant of product.variants) {
-      for (const value of Object.values(variant.options)) {
-        // "L/XL" is that size for either half; "M" and "Medium" are one size.
-        const keys = new Set([value, ...value.split('/')].map((part) => sizeKey(normaliseSize(part) ?? part)));
-        for (const key of keys) {
-          byKey.set(key, (byKey.get(key) ?? false) || variant.available);
-          scales.add(scaleOf(key));
-        }
-      }
+    const dimensions: SizeDimension[] = [];
+    for (const option of product.options) {
+      const real = option.values.filter((value) => !ONE_SIZE_VALUE.test(value.trim()));
+      if (real.length <= 1) continue;
+      const scale = scaleOfOption(option);
+      if (scale) dimensions.push({ option: option.name, scale, values: option.values });
     }
-    cached = { byKey, scales };
-    sizeCache.set(product, cached);
+    cached = { oneSize: dimensions.length === 0, dimensions };
+    scaleCache.set(product, cached);
   }
   return cached;
+}
+
+/**
+ * Whether a product can be bought in a size:
+ *
+ *   in-stock        made in it, and some variant in it can be bought
+ *   sold-out        made in it, none can be bought now
+ *   not-made        sized on that scale, but not in that size (3XL of S-2XL)
+ *   other-scale     a top size against a top sized another way - an XL
+ *                   against a ladies polo in 8-18: not an XL polo
+ *   not-applicable  no size of that kind: a cap in one size, a 32 waist
+ *                   against a polo, a top size against a belt in M/L
+ *
+ * Read from the product's size dimensions (sizeScale) only. The values of
+ * every option used to be read - colour names and ONE SIZE counted as
+ * lettered sizes - so a one-size cap was "not made in M" for a customer
+ * whose usual size is M, and hidden from them (preview store).
+ */
+export type SizeStatus = 'in-stock' | 'sold-out' | 'not-made' | 'other-scale' | 'not-applicable';
+
+/** Sizes worn on the body's top half, on different scales: a letter, a UK number, an age. */
+const TOP_SCALES = new Set<SizeScaleKind>(['letter', 'number', 'age']);
+
+export function sizeStatus(product: Product, size: string): SizeStatus {
+  const wanted = normaliseSize(size) ?? size.trim();
+  const kind = scaleOfSize(wanted);
+  const dimensions = sizedDimensions(product);
+  if (!kind || !dimensions.length) return 'not-applicable';
+  const same = dimensions.filter((dimension) => dimension.scale === kind || (dimension.scale === 'other' && dimension.values.some((value) => sizeKey(value) === sizeKey(wanted))));
+  if (same.length) {
+    const option = same.find((dimension) => dimension.values.some((value) => sizeKey(value) === sizeKey(wanted)));
+    if (!option) return 'not-made';
+    return product.variants.some((variant) => variant.available && sizeKey(variant.options[option.option] ?? '') === sizeKey(wanted)) ? 'in-stock' : 'sold-out';
+  }
+  if (TOP_SCALES.has(kind) && dimensions.some((dimension) => TOP_SCALES.has(dimension.scale))) return 'other-scale';
+  return 'not-applicable';
+}
+
+const sizeKey = (value: string) => (normaliseSize(value.trim()) ?? value.trim()).toUpperCase();
+
+/** The scale a size is written on: "M" lettered, "32" a waist, "12" a UK number, "7/8" an age, "M/L" combined. */
+export function scaleOfSize(size: string): SizeScaleKind | null {
+  const text = size.trim();
+  if (/^\d{1,2}\s*[/-]\s*\d{1,2}$|^\d{1,2}\s*(yrs?|years?)$/i.test(text)) return 'age';
+  if (/^[a-z0-9]+\s*\/\s*[a-z0-9]+$/i.test(text)) return 'combined';
+  if (/^\d{2}$/.test(text) && Number(text) >= 26 && Number(text) <= 48) return 'waist';
+  if (/^\d{1,2}$/.test(text)) return 'number';
+  // A lettered size beyond any we sell ("5XL") is still a lettered size - one it is not made in.
+  return normaliseSize(text) || /^(\d?x{0,5}[sl]|m|\dxl)$/i.test(text) ? 'letter' : null;
+}
+
+/**
+ * The options that are sizes, with their values - the product's own
+ * dimensions, and a size it is made in only one of (a polo left in M) as
+ * well: that is still an M, where a cap's ONE SIZE is no size at all. Built
+ * from the variants when the options are missing (a test's bare variants).
+ */
+const dimensionCache = new WeakMap<object, SizeDimension[]>();
+
+function sizedDimensions(product: Product): SizeDimension[] {
+  let cached = dimensionCache.get(product);
+  if (!cached) {
+    const options = product.options?.length ? product.options : optionsFromVariants(product.variants ?? []);
+    cached = [];
+    for (const option of options) {
+      const real = option.values.filter((value) => !ONE_SIZE_VALUE.test(value.trim()));
+      if (!real.length) continue;
+      const scale = scaleOfOption({ name: option.name, values: real });
+      if (scale) cached.push({ option: option.name, scale, values: real });
+    }
+    dimensionCache.set(product, cached);
+  }
+  return cached;
+}
+
+function optionsFromVariants(variants: Array<{ options: Record<string, string> }>): ProductOption[] {
+  const byName = new Map<string, string[]>();
+  for (const variant of variants) for (const [name, value] of Object.entries(variant.options)) {
+    const values = byName.get(name) ?? [];
+    if (!values.includes(value)) values.push(value);
+    byName.set(name, values);
+  }
+  return [...byName].map(([name, values]) => ({ name, values }));
 }

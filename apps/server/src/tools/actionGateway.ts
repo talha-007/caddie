@@ -183,9 +183,20 @@ export async function executeCommerceAction(ctx: ToolContext, action: CommerceAc
 
     if (!plan.ok) {
       log.info('gateway.refused', { sessionId: ctx.session.id, action: action.type, source, reason: plan.reason });
-      // What it waits for next turn - or nothing: a refused action never leaves an old one waiting.
-      // Stamped with its mission: a new mission ends it (session/shoppingSession.ts livePending).
-      await sessions.patch(ctx.session.id, { pendingAction: plan.pending ? { ...plan.pending, turn: turnNow(here), mission: currentMission(here.session) } : undefined });
+      /*
+       * What it waits for - or nothing: a refused action never leaves an old
+       * one waiting. The record carries whether they asked for it (their
+       * words, a yes, or an answer to a question of its own), so a field
+       * given later needs no second yes, and the question asked in the code's
+       * own words (tools/pending.ts). Stamped with its mission: an unrelated
+       * new mission ends it (session/shoppingSession.ts livePending).
+       */
+      const authorized = source === 'customer-utterance' || source === 'customer-confirmation' || source === 'pending-action-continuation' || !!here.session.pendingAction?.authorized;
+      await sessions.patch(ctx.session.id, {
+        pendingAction: plan.pending
+          ? { ...plan.pending, authorized, question: plan.speech, missing: plan.pending.missing ?? [plan.pending.awaiting], turn: turnNow(here), mission: currentMission(here.session) }
+          : undefined,
+      });
       return {
         ok: false,
         action: action.type,
@@ -202,7 +213,7 @@ export async function executeCommerceAction(ctx: ToolContext, action: CommerceAc
     await plan.afterSuccess?.();
     await sessions.patch(ctx.session.id, {
       pendingAction: undefined,
-      ...(plan.productId && action.type !== 'update-line' ? { lastAdded: { productId: plan.productId, turn: turnNow(here) } } : {}),
+      ...(plan.productId && action.type !== 'update-line' ? { lastAdded: { productId: plan.productId, turn: turnNow(here), ...(here.pendingResolved ? { byPending: true } : {}) } } : {}),
       // The dev harness's cart, as the basket the next action reads - on the storefront the widget reports it.
       ...(cart
         ? { cartId: cart.id, basket: cart.lines.map((line) => ({ lineId: line.lineId, productId: line.productId, title: line.title, variantTitle: line.variantTitle, quantity: line.quantity })) }

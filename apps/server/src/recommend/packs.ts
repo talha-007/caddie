@@ -171,6 +171,8 @@ async function packProduct(pack: NamedPack): Promise<Product | null> {
 export interface NamedPackInput {
   colour?: string;
   size?: string;
+  /** Whether a piece may be offered (tools/eligibility.ts). */
+  eligible?: (product: Product) => boolean;
 }
 
 /**
@@ -205,6 +207,7 @@ export async function recommendNamedPack(
           candidate.price.amount > 0 &&
           fitsSlot(candidate, slot) &&
           stockedInSize(candidate.variants, input.size) &&
+          (!input.eligible || input.eligible(candidate)) &&
           !used.has(candidate.id),
       );
       if (pick) break;

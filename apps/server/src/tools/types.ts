@@ -28,6 +28,12 @@ export interface ToolContext {
    */
   sizeForm?: SizeInput;
   /**
+   * The waiting action's resolver (tools/pending.ts) is running this tool:
+   * the customer's words have already been read against the record, the
+   * action is complete and theirs - no authorisation is re-derived from them.
+   */
+  pendingResolved?: boolean;
+  /**
    * Store-cart changes already decided earlier in this same reply. The widget
    * makes them only once the reply arrives, so a basket read in the meantime
    * is out of date - the Caddie told a customer their basket was "still empty"

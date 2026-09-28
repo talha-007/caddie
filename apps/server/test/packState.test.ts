@@ -8,6 +8,7 @@ import { rememberShopper } from '../src/shopper/remember.js';
 import { sessions } from '../src/session/store.js';
 import { runTool } from '../src/tools/index.js';
 import { packStatus, packStatusFacts, readPackChoices } from '../src/tools/packState.js';
+import { notePendingOffer } from '../src/tools/pending.js';
 
 /**
  * A Cool & Wet Ambassador Pack showed a red Warrior Jacket sold out in the
@@ -200,6 +201,8 @@ describe('adding the pack', () => {
   it('complete: the six exact variants go in', async () => {
     await rememberShopper(id, { usualSize: 'M' }, 'customer-words');
     await choose('34 waist, 32 leg');
+    // The belt's own size - never taken from the top size (V1 task 2).
+    await choose('S/M');
     const result = await say('Add this pack');
     // The pack goes in as one bundle - its pieces, each a variant.
     const ids = (result.actions ?? []).flatMap((action) => ('pieces' in action ? (action.pieces as Array<{ variantId: string }>).map((p) => p.variantId) : []));
@@ -221,6 +224,7 @@ describe('adding the pack', () => {
   it('a search since has taken the screen: the pack they saw goes in, not a fresh build', async () => {
     await rememberShopper(id, { usualSize: 'M' }, 'customer-words');
     await choose('34 waist, 32 leg');
+    await choose('S/M');
     await sessions.patch(id, { lastShown: { kind: 'products', items: [{ id: MIDLAYER.id, title: MIDLAYER.title }] } });
     const result = await say('Add the Cool & Wet pack', 'add_pack_to_cart', { pack: COOL_WET.title });
     const ids = (result.actions ?? []).flatMap((action) => ('pieces' in action ? (action.pieces as Array<{ variantId: string }>).map((p) => p.variantId) : []));
@@ -248,10 +252,13 @@ describe('adding the pack', () => {
   it('"yes" to "shall I add it?": added', async () => {
     await rememberShopper(id, { usualSize: 'M' }, 'customer-words');
     await choose('34 waist, 32 leg');
+    await choose('S/M');
     await sessions.append(id, [
       { id: 'u1', role: 'user', text: '34 waist, 32 leg', createdAt: new Date(Date.now() - 2000).toISOString() },
       { id: 'a1', role: 'assistant', text: 'Your pack is ready in M with 34/32 trousers. Shall I add it to your basket?', createdAt: new Date(Date.now() - 1000).toISOString() },
     ]);
+    // The offer is bound by code before it is asked (tools/pending.ts); the yes answers the record.
+    await notePendingOffer(id, 'Your pack is ready in M with 34/32 trousers. Shall I add it to your basket?');
     const result = await say('Yes');
     expect((result.actions ?? []).length).toBeGreaterThan(0);
   });
@@ -261,6 +268,7 @@ describe('changing the jacket', () => {
   it('only the jacket changes; every choice stands, and the new one is in stock in S', async () => {
     await rememberShopper(id, { usualSize: 'S' }, 'customer-words');
     await choose('waist 34 leg 34');
+    await choose('S/M');
     const before = (await sessions.getOrCreate(id)).packChoices;
     const result = await say('Change the jacket.', 'recommend_pack', { query: 'Ambassador Pack', swap: WARRIOR_RED.id });
     const items = result.attachment?.kind === 'pack' ? result.attachment.recommendation.items.map((p) => p.title) : [];

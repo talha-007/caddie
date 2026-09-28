@@ -14,7 +14,7 @@ import type {
   SizeInput,
   SizeRecommendation,
 } from '@caddie/shared';
-import { addFromCard, addPackFromCard, changeCartLine, openEventStream, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, syncBasket } from './api.js';
+import { addFromCard, addPackFromCard, changeCartLine, onSessionReplaced, openEventStream, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, syncBasket } from './api.js';
 import { announceToTheme, basketSync, onStorefront, readCart, runActions } from './themeCart.js';
 import { announceCart } from './events.js';
 import { sameId } from './variants.js';
@@ -124,19 +124,37 @@ const DUPLICATE_WINDOW_MS = 6000;
  * "New chat" starts again on purpose.
  */
 function useSessionId(): string {
-  return useMemo(() => {
+  const [id, setId] = useState(() => {
     try {
       // Older builds stored the id JSON-encoded, quotes and all.
       const existing = sessionStorage.getItem(SESSION_KEY)?.replace(/"/g, '');
       if (existing) return existing;
-      const id = crypto.randomUUID();
-      sessionStorage.setItem(SESSION_KEY, id);
-      return id;
+      const fresh = crypto.randomUUID();
+      sessionStorage.setItem(SESSION_KEY, fresh);
+      return fresh;
     } catch {
       // Private mode: the basket lasts this page only, and the chat still works.
       return crypto.randomUUID();
     }
-  }, []);
+  });
+  /*
+   * A session lost to a claim reply that never arrived is replaced (api.ts):
+   * everything - the event stream, the basket sync - moves to the new id, and
+   * the next page load keeps it.
+   */
+  useEffect(
+    () =>
+      onSessionReplaced((from, to) => {
+        setId((now) => (now === from ? to : now));
+        try {
+          sessionStorage.setItem(SESSION_KEY, to);
+        } catch {
+          // Private mode: the new id lasts this page.
+        }
+      }),
+    [],
+  );
+  return id;
 }
 
 

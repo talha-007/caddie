@@ -308,7 +308,8 @@ export function searchLocalScored(opts: LocalSearchOptions): SearchHit[] {
 
     // The kind of garment and the size are facts about the product, not words to score.
     if (opts.categories?.length && !isCategory(product, opts.categories)) continue;
-    if (opts.size && sizeStatus(product, opts.size) !== 'in-stock') continue;
+    // Only a size that applies to it rules it out: an M says nothing about a cap in one size (constraints.ts).
+    if (opts.size && ['sold-out', 'not-made', 'other-scale'].includes(sizeStatus(product, opts.size))) continue;
     /*
      * In their size, the price is that size's price: a polo from £38 can be
      * £44 in XL. With no size, the lowest price they could pay - of the

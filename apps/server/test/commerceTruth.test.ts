@@ -197,8 +197,11 @@ describe('size scales: what size choices a product really has', () => {
     expect(supportsSize(ELITE_NAVY, 'medium')).toBe('in-stock');
     expect(supportsSize(ELITE_NAVY, 'XL')).toBe('sold-out');
     expect(supportsSize(ELITE_NAVY, '3XL')).toBe('not-made');
-    expect(supportsSize(ELITE_NAVY, '34')).toBe('other-scale');
-    expect(supportsSize(BELT, 'L')).toBe('in-stock');
+    // V1 task 1: a waist says nothing about a polo, and a top size nothing about a belt in M/L - they are not applicable.
+    expect(supportsSize(ELITE_NAVY, '34')).toBe('not-applicable');
+    expect(supportsSize(BELT, 'L')).toBe('not-applicable');
+    // A combined size said as itself is the belt's own.
+    expect(supportsSize(BELT, 'L/XL')).not.toBe('not-applicable');
     expect(supportsSize(TROUSERS, '36')).toBe('sold-out');
     expect(availableSizes(ELITE_NAVY)).toEqual(['S', 'M', 'L', '2XL']);
   });

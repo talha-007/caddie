@@ -13,6 +13,7 @@ import { sessions } from '../src/session/store.js';
 import { runTool, sizesNeverGiven, trustedSize } from '../src/tools/index.js';
 import type { ToolContext } from '../src/tools/types.js';
 import { ownerHeaders } from './support/ownership.js';
+import { notePendingOffer } from '../src/tools/pending.js';
 
 /**
  * Phase 3B: one answer to "what is the customer shopping for right now?".
@@ -86,6 +87,8 @@ async function turn(text: string, during?: (ctx: ToolContext) => Promise<unknown
     { id: `u-${Math.random()}`, role: 'user', text, createdAt: new Date().toISOString() },
     { id: `a-${Math.random()}`, role: 'assistant', text: reply, createdAt: new Date().toISOString() },
   ]);
+  // An offer in the reply is bound by code, as converse binds every reply before it goes out (tools/pending.ts).
+  await notePendingOffer(id, reply);
   return result as Awaited<ReturnType<typeof runTool>> | undefined;
 }
 const tool = (name: string, args: Record<string, unknown>) => (ctx: ToolContext) => runTool(name, args, ctx);

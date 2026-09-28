@@ -134,6 +134,12 @@ export interface FillOptions {
    * "a belt instead of a cap" came back as a beanie.
    */
   onlyKind?: RegExp;
+  /**
+   * Whether a piece may be offered (tools/eligibility.ts - Commerce Truth).
+   * Candidates and kept pieces alike: a piece sold out in their size is never
+   * a pack piece, and a kept one that has sold out is chosen again.
+   */
+  eligible?: (product: Product) => boolean;
 }
 
 function inStock(product: Product): number {
@@ -142,7 +148,10 @@ function inStock(product: Product): number {
 
 /** One piece per step, or null where nothing in stock fits. */
 export function fillDeal(deal: DealRecipe, options: FillOptions = {}): Array<Product | null> {
-  const used = new Set<string>([...(options.exclude ?? []), ...[...(options.keep?.values() ?? [])].map((p) => p.id)]);
+  const offerable = (product: Product) => !options.eligible || options.eligible(product);
+  // A kept piece no longer to be had is not kept: its step is chosen again.
+  const keep = new Map([...(options.keep ?? new Map<number, Product>())].filter(([, product]) => offerable(product)));
+  const used = new Set<string>([...(options.exclude ?? []), ...[...keep.values()].map((p) => p.id)]);
   const colourScore = (product: Product) => (options.colour ? matchesColourText(product, options.colour) : 0);
   const needs = (options.weather ?? []).flatMap((kind) => WEATHER_NEEDS[kind]);
   /*
@@ -163,10 +172,10 @@ export function fillDeal(deal: DealRecipe, options: FillOptions = {}): Array<Pro
 
   // Every step's candidates, best first; kept steps have none - they do not move.
   const lists = deal.steps.map((step, index) => {
-    if (options.keep?.get(index)) return [] as Product[];
+    if (keep.get(index)) return [] as Product[];
     return [...step.productIds]
       .map((id) => productById(id))
-      .filter((product): product is Product => !!product && inStock(product) > 0 && !used.has(product.id))
+      .filter((product): product is Product => !!product && inStock(product) > 0 && !used.has(product.id) && offerable(product))
       .filter((product) => stockedInSize(product.variants, options.size))
       .filter((product) => !options.onlyKind || options.onlyKind.test(product.title))
       .sort(
@@ -184,7 +193,7 @@ export function fillDeal(deal: DealRecipe, options: FillOptions = {}): Array<Pro
 
   const taken = new Set(used);
   const picks: Array<Product | null> = deal.steps.map((_, index) => {
-    const kept = options.keep?.get(index);
+    const kept = keep.get(index);
     if (kept) return kept;
     const pick = lists[index]!.find((product) => !taken.has(product.id)) ?? null;
     if (pick) taken.add(pick.id);
@@ -205,7 +214,7 @@ export function fillDeal(deal: DealRecipe, options: FillOptions = {}): Array<Pro
   for (let round = 0; round < deal.steps.length * 3 && target && worth() < target; round += 1) {
     let best: { index: number; product: Product; gain: number } | null = null;
     picks.forEach((current, index) => {
-      if (!current || options.keep?.get(index)) return;
+      if (!current || keep.get(index)) return;
       for (const candidate of lists[index]!) {
         if (candidate.id === current.id || taken.has(candidate.id)) continue;
         const asGood =

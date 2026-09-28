@@ -116,11 +116,14 @@ describe('certification: the basket line the customer names, never one that mere
     expect(changes).toEqual([{ type: 'change', lineKey: 'socks', quantity: 0 }]);
   });
 
-  it('a pack piece: its whole pack comes out, nothing else', async () => {
+  it('a pack piece: asked first, then its whole pack comes out on their yes, nothing else (V1 task 3)', async () => {
     const piece = { ...polM, lineId: 'pack-polo', bundle: 'b1' };
     const piece2 = { ...jacM, lineId: 'pack-jacket', bundle: 'b1' };
     await basket([piece, piece2, { ...polM, lineId: 'loose-polo' }]);
-    const { changes } = await ask('remove the jacket', { lineId: 'loose-polo', quantity: 0 });
+    const asked = await ask('remove the jacket', { lineId: 'loose-polo', quantity: 0 });
+    expect(asked.changes).toEqual([]);
+    expect(asked.result.speech).toMatch(/whole pack out/);
+    const { changes } = await ask('yes', { lineId: 'loose-polo', quantity: 0 });
     expect(changes.map((change) => change.lineKey).sort()).toEqual(['pack-jacket', 'pack-polo']);
   });
 });

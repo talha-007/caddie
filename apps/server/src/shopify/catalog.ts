@@ -200,7 +200,7 @@ export async function searchProducts(opts: SearchOptions): Promise<Product[]> {
     .filter((product) => inRange(product, opts.range ?? asked, opts.known))
     .filter((product) => !opts.categories?.length || isCategory(product, opts.categories))
     // A result without variants cannot be ruled out on size here; the basket checks it.
-    .filter((product) => !opts.size || product.variants.length === 0 || sizeStatus(product, opts.size) === 'in-stock')
+    .filter((product) => !opts.size || product.variants.length === 0 || !['sold-out', 'not-made', 'other-scale'].includes(sizeStatus(product, opts.size)))
     .slice(0, wanted);
 }
 

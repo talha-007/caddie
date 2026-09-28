@@ -9,6 +9,7 @@ import { rememberShopper } from '../src/shopper/remember.js';
 import { sessions } from '../src/session/store.js';
 import { quantityAsked } from '../src/tools/cartAuthorization.js';
 import { runTool } from '../src/tools/index.js';
+import { notePendingOffer } from '../src/tools/pending.js';
 
 /**
  * "Add the One Pair Tour Ankle Socks to my basket" put LADIES TOUR ANKLE
@@ -79,6 +80,8 @@ async function said(text: string) {
 }
 async function caddie(text: string) {
   await sessions.append(id, [{ id: `a-${Math.random()}`, role: 'assistant', text, createdAt: new Date().toISOString() }]);
+  // The offer in it is bound by code, as converse binds every reply before it goes out (tools/pending.ts).
+  await notePendingOffer(id, text);
 }
 async function onScreen(products: Product[]) {
   await sessions.patch(id, { lastShown: { kind: 'products', items: products.map((p) => ({ id: p.id, title: p.title })) } });
