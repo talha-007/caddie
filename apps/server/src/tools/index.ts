@@ -5,6 +5,7 @@ import { FEATURE_LABEL, WEATHER_NEEDS, attributesOf, featuresAsked, hasFeature, 
 import { inRange, parseRange, rangeOf, type Range } from '../catalog/audience.js';
 import { distinctiveWords, lookupProductName, unknownNameIn, type Existence } from '../catalog/lookup.js';
 import { normaliseQuery } from '../catalog/taxonomy.js';
+import { BROADENS, NEED_LABEL, needsSaid, suitsNeed } from '../catalog/suitability.js';
 import { identityOf, nameWords } from '../catalog/identity.js';
 import { categoriesAsked, categoriesOf, isCategory, sizeInRequest, sizeStatus, withoutSize, type Category } from '../catalog/constraints.js';
 import {
@@ -30,11 +31,11 @@ import { searchLocalScored } from '../catalog/search.js';
 import { nextStep } from '../recommend/nextStep.js';
 import { hasSignals, rankFacts, rankProducts, weatherHotOnly } from '../recommend/rank.js';
 import { describeProfile, readIntent, type Budget } from '../shopper/profile.js';
-import { acceptedRecommendation, currentRange, describeShopper, logFact, shopperView, trustedShopperFacts, type SizeRecommendationRecord } from '../shopper/facts.js';
+import { acceptedRecommendation, currentRange, currentShoppingIntent, describeShopper, logFact, shopperView, trustedShopperFacts, type SizeRecommendationRecord } from '../shopper/facts.js';
 import { rankRequestFor, rememberMeasurements, rememberShopper, shopperSizes } from '../shopper/remember.js';
 import { aboutPackPiece, customerTurn, noteShoppingConstraints, requestedKinds, setActivePack, setReplacement } from '../session/focus.js';
 import { bestPicks, kindsNamed } from '../recommend/bestPicks.js';
-import { answerAbout, attributesAsked, describeStock, sayAttributes, verifiedFacts } from '../recommend/productFacts.js';
+import { answerAbout, attributeFactLine, attributesAsked, describeStock, sayAttributes, verifiedFacts } from '../recommend/productFacts.js';
 import { resolveProduct } from '../session/screen.js';
 import { describeFocus, designOf, focusProduct, focusQuery, inFocus, isFollowUp } from '../session/focus.js';
 import { describeIdentity, designMembers, identityProducts, resolveCustomerProductIdentity, type CustomerIdentity, type NamedDesign } from '../catalog/productIdentity.js';
@@ -820,8 +821,31 @@ const searchTool = defineTool({
     // The size asked for now is the size ranked on, over the one in their profile.
     if (size) request.size = size;
     const ceiling = intent.maxPrice?.value ?? priceCeiling(request.budget);
-    // Features this request needs - not ones remembered from an earlier search.
-    const mustDo = [...new Set([...intent.features.value, ...(turn.features?.required ?? [])])];
+    /*
+     * What this mission requires (session/focus.ts constraints): a feature or
+     * weather asked for outright - "waterproof jackets", "caps for cold
+     * weather" - holds through "show me more", "cheaper" and "different
+     * colours", until they let it go ("show them anyway", "it doesn't have to
+     * be waterproof") or start on another kind of garment. Read from the
+     * session as it stands now, this turn's words already noted.
+     */
+    const broadened = !!ctx.utterance && BROADENS.test(ctx.utterance);
+    const mission = currentShoppingIntent(await sessions.getOrCreate(ctx.session.id), ctx.utterance);
+    const missionFeatures = !broadened && mission.scopes.features === 'shopping-session' ? (mission.features?.required ?? []) : [];
+    // Features this request needs - this turn's, and the mission's; never ones remembered about the customer.
+    const mustDo = [...new Set([...intent.features.value, ...(turn.features?.required ?? []), ...missionFeatures])];
+    /*
+     * The weather asked for outright - "caps for cold weather", "something
+     * breathable for summer" - is a rule: a product is shown as meeting it
+     * only when its own description states what that weather calls for
+     * (catalog/suitability.ts). Ranked, a cap described as lightweight and
+     * breathable led the cold-weather caps and was called good for cooler
+     * weather (V1 task 4). Said this turn, or held by the mission; weather
+     * remembered about the customer only ranks.
+     */
+    const saidNeeds = !broadened && ctx.utterance ? needsSaid(ctx.utterance) : { needs: [], hard: false };
+    const missionNeeds = !broadened && mission.scopes.weather === 'shopping-session' ? (mission.weather ?? []) : [];
+    const hardNeeds = saidNeeds.hard ? saidNeeds.needs : saidNeeds.needs.length ? [] : missionNeeds;
     /*
      * The day this request describes, from this turn only: "for warm weather",
      * "somewhere hot", or asking for what heat needs. Lightweight alone is not
@@ -999,6 +1023,7 @@ const searchTool = defineTool({
       }
       if (ceiling !== undefined && priceFor(product, size).amount > ceiling) out.push(`over ${money(ceiling, currency)}${size ? ` in ${size}` : ''}`);
       for (const feature of mustDo) if (!hasFeature(product, feature)) out.push(`${FEATURE_LABEL[feature]} not stated in its description`);
+      for (const need of hardNeeds) if (suitsNeed(product, need).verdict !== 'yes') out.push(`${NEED_LABEL[need]}: nothing in its description supports it`);
       return [...new Set(out)];
     };
     const meetsRules = (product: Product) => failures(product).length === 0;
@@ -1293,6 +1318,7 @@ const searchTool = defineTool({
       if (size) bits.push(`${size} in stock at ${money(priceFor(product, size).amount, currency)}`);
       if (ceiling !== undefined) bits.push(`within ${money(ceiling, currency)}`);
       for (const feature of mustDo) bits.push(FEATURE_LABEL[feature]);
+      for (const need of hardNeeds) bits.push(`for ${NEED_LABEL[need]} its description states ${suitsNeed(product, need).evidence.map((feature) => FEATURE_LABEL[feature]).join(' and ')}`);
       // They care about fit, and this one's description states none: say so, rather than leave it to be guessed.
       if (request.fit && !attributesOf(product).fit) bits.push('fit not stated');
       return bits.join(', ');
@@ -1341,6 +1367,25 @@ const searchTool = defineTool({
       return {
         speech: `The ${titleCaseWords(existence?.kind === 'exact-family' ? garmentName(subject.title) : subject.title)} is ${why} right now. Shall I find you something similar that is available?`,
         facts: `${subject.title} is the product they named, but it is ${why} - informational only: say so, never show or offer it as something to buy. Offer available alternatives.${existenceFacts ? `\n${existenceFacts}` : ''}`,
+      };
+    }
+
+    if (products.length === 0 && hardNeeds.length) {
+      /*
+       * Nothing found states what the weather asked for calls for. Said as
+       * that, with what was found and what each does state in the facts,
+       * informational only: no card, because a card is a recommendation, and
+       * these do not meet the requirement. The offer is to show them anyway.
+       */
+      const needLabels = hardNeeds.map((need) => NEED_LABEL[need]).join(' and ');
+      const closest = found.filter((product) => failures(product).every((failure) => hardNeeds.some((need) => failure.startsWith(NEED_LABEL[need])))).slice(0, 6);
+      const kind = categories.length ? `${categories.join(' or ')}s` : 'options';
+      log.info('search.need_unmet', { sessionId: ctx.session.id, needs: hardNeeds, kind, closest: closest.length });
+      return {
+        speech: `I can't confirm any ${kind} are designed for ${needLabels} from the product information I have. Would you like to see the ${kind} anyway?`,
+        facts:
+          `Nothing found states what ${needLabels} calls for. ${closest.length ? `Found, but none of their descriptions supports it - informational only, never present any as suited to ${needLabels}, never show them as a match:\n${closest.map((product) => `- ${product.title} [${product.id}]${verifiedLine(product) || ' | description states no technical features'}`).join('\n')}\n` : ''}` +
+          `Say plainly that nothing can be confirmed for ${needLabels}; offer to show the ${kind} without that requirement (search again if they say yes). Never say any of them is warm, waterproof, breathable or suited to any weather unless its own line above states it.${existenceFacts ? `\n${existenceFacts}` : ''}`,
       };
     }
 
@@ -3072,7 +3117,9 @@ async function showDeal(
       if (!(await whyNotBuyable(stand, standPieces))) {
         const shown = await showDeal(stand, standPieces, ctx, currency, query, fill);
         const asked = titleCaseWords(deal.conditionTitle ?? deal.title);
-        const suited = deal.condition === 'coolwet' || deal.condition === 'mixed' ? ", with pieces picked for wetter, cooler rounds where I could" : '';
+        // Said only when a piece's own description backs it: nothing picked states anything for rain or cold, nothing is said (V1 task 4).
+        const backed = standPieces.some((piece) => piece && (suitsNeed(piece, 'wet').verdict === 'yes' || suitsNeed(piece, 'cold').verdict === 'yes'));
+        const suited = (deal.condition === 'coolwet' || deal.condition === 'mixed') && backed ? ", with pieces picked for wetter, cooler rounds where I could" : '';
         return {
           ...shown,
           speech: `The ${asked} version isn't available just yet, so here's the ${titleCaseWords(stand.conditionTitle ?? 'Ambassador')} pack at £${stand.prices.GBP}${suited}.`,
@@ -3141,8 +3188,9 @@ async function showDeal(
   });
   // The pack they are building now: a bare "34" is its waist (session/focus.ts).
   await setActivePack(ctx.session.id, deal.handle);
+  // With what each piece's own description states: a feature said of a piece is only ever one listed here (V1 task 4).
   const lines = deal.steps
-    .map((step, i) => `- ${step.title}: ${pieces[i] ? `${pieces[i]!.title} [${pieces[i]!.id}]` : 'none picked'}`)
+    .map((step, i) => `- ${step.title}: ${pieces[i] ? `${pieces[i]!.title} [${pieces[i]!.id}]${verifiedLine(pieces[i]!) || ' | description states no technical features'}` : 'none picked'}`)
     .join('\n');
   /*
    * Where the pack stands: what they have chosen, what is still open, and the
@@ -4804,9 +4852,7 @@ const productInfoTool = defineTool({
           byName?.kind === 'exact-family' ? titleCaseWords(byName.familyName) : byName?.kind === 'exact-product' ? titleCaseWords(family[0]!.title) : titleCaseWords(garmentName(family[0]!.title));
         return {
           speech: sayAttributes(design, answers[0]!),
-          facts: `About: the ${design} design - every colourway shares this description (${family.map((member) => `${member.title} [${member.id}]`).join(', ')}).\n${verifiedFacts(family[0]!)}\nAsked about: ${answers[0]!
-            .map((answer) => `${answer.asked} - ${answer.state === 'yes' ? 'yes, its description states it' : answer.state === 'no' ? 'no - its description says it is not' : answer.state === 'other' ? `its description says ${answer.instead}${answer.unsaid ? ` - ${answer.asked} itself is not stated (never say no)` : ' instead'}` : 'not stated (never say no)'}`)
-            .join('; ')}. Answer this first; colour does not change it, so do not ask which colour.`,
+          facts: `About: the ${design} design - every colourway shares this description (${family.map((member) => `${member.title} [${member.id}]`).join(', ')}).\n${verifiedFacts(family[0]!)}\nAsked about: ${answers[0]!.map(attributeFactLine).join('; ')}. Answer this first; colour does not change it, so do not ask which colour.`,
         };
       }
       if (member) {

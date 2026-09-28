@@ -1,7 +1,8 @@
 import type { ShopperSizes } from '@caddie/shared';
 import type { Feature } from '../catalog/attributes.js';
 import type { RankRequest } from '../recommend/rank.js';
-import { constraintsIn, noteShoppingConstraints } from '../session/focus.js';
+import { constraintsIn, dropShoppingConstraints, noteShoppingConstraints } from '../session/focus.js';
+import { BROADENS } from '../catalog/suitability.js';
 import { sessions, type CaddieSession } from '../session/store.js';
 import { isTrustedSource, logFact, MEASUREMENT_FIELDS, shopperView, trustedShopperFacts, type Measurements } from './facts.js';
 import { DURABLE_FIELDS, durablePart, mergeProfile, readIntent, type DurableField, type FactSource, type Intent, type ShopperProfile } from './profile.js';
@@ -88,6 +89,8 @@ export async function noteCustomerWords(sessionId: string, text: string): Promis
   const intent = readIntent(text);
   const durable = durablePart(intent, text);
   if (Object.keys(durable).length) await rememberShopper(sessionId, durable, 'customer-words');
+  // "Show them anyway", "it doesn't have to be waterproof": the requirement goes, before anything this message asks for is noted.
+  if (BROADENS.test(text)) await dropShoppingConstraints(sessionId, ['weather', 'features']);
   const constraints = constraintsIn(text);
   if (Object.keys(constraints).length) await noteShoppingConstraints(sessionId, constraints, 'customer-words');
   return { intent, durable };

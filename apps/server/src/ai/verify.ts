@@ -5,6 +5,7 @@ export { shapesOf, shapesSaid, strongerOf, strongerSaid } from '../catalog/attri
 import { colourMatch, isColourWord, parseColours } from '../catalog/colour.js';
 import { garmentName } from '../catalog/colourways.js';
 import { isBuyable, sizeScale, supportsSize } from '../catalog/commerce.js';
+import { NEED_LABEL, suitsNeed, type Need } from '../catalog/suitability.js';
 import { parseRange, rangeOf } from '../catalog/audience.js';
 import { categoriesAsked, isCategory } from '../catalog/constraints.js';
 import { normaliseSize } from '../recommend/sizeWords.js';
@@ -254,7 +255,18 @@ export function salesWording(reply: string, cards: Product[]): Violation[] {
   for (const match of reply.matchAll(JARGON)) found.push({ kind: 'wording', claim: match[0] });
   for (const match of reply.matchAll(OVERCLAIM)) found.push({ kind: 'wording', claim: match[0] });
   // "Perfect for warm weather" is already caught above.
-  for (const match of reply.matchAll(WEATHER_VERDICT)) if (!/\b(?:perfect|ideal)\b/i.test(match[0])) found.push({ kind: 'wording', claim: match[0].replace(/^,?\s*/, '') });
+  for (const sentence of reply.split(/(?<=[.!?])\s+/)) {
+    const plain = normalise(sentence.replace(DEAL_NAMES, ' '));
+    // "I can't confirm any of these are designed for cold weather" is the truth, not a verdict.
+    if (NEGATED.test(plain)) continue;
+    for (const match of sentence.matchAll(WEATHER_VERDICT)) {
+      if (/\b(?:perfect|ideal)\b/i.test(match[0])) continue;
+      // A verdict a card's own description backs - "good for cold weather" of a thermal cap - is a fact said plainly (V1 task 4).
+      const needs = needsClaimed(normalise(match[0]));
+      if (needs.length && needs.every((need) => cards.some((product) => suitsNeed(product, need).verdict === 'yes'))) continue;
+      found.push({ kind: 'wording', claim: match[0].replace(/^,?\s*/, '') });
+    }
+  }
   if (cards.length) {
     const onCards = new Set(cards.flatMap((product) => normalise(product.title).trim().split(' ')).filter((word) => word.length > 2 && !KIND_WORDS.has(word)));
     for (const match of reply.matchAll(SHOW_OFFER)) {
@@ -278,12 +290,41 @@ function plainWording(reply: string): string {
     .replace(/\s+([.,!?])/g, '$1');
 }
 
-const NEGATED = /\b(not|no|isn'?t|doesn'?t|don'?t|without|nor|never|not stated|rather than|can'?t|cannot|couldn'?t|whether)\b/;
+const NEGATED = /\b(not|no|none|neither|nothing|isn'?t|doesn'?t|don'?t|won'?t|wouldn'?t|shouldn'?t|without|nor|never|not stated|rather than|can'?t|cannot|couldn'?t|whether|unable|unlikely)\b/;
+/*
+ * A product associated with weather is a claim that it suits it - however it
+ * is put. "Good for cooler weather", "a solid choice when the temperature
+ * drops", "a sensible winter option", "should keep you dry", "built for
+ * rainy days": the verbs vary without end, the weather does not. So a
+ * positive clause about a product that names a kind of weather is held to
+ * what that product's description states for it (catalog/suitability.ts).
+ * A negated clause ("I can't confirm this is suitable for winter"), a
+ * question, or a clause about what the customer wants claims nothing - the
+ * caller has already set those aside. Read on normalised text.
+ */
+const NEED_CONCEPTS: Array<[Need, RegExp]> = [
+  [
+    'cold',
+    /\b(?:cold|colder|coldest|chilly|chill|winter|wintry|frost|frosty|freezing|icy|cooler (?:days?|mornings?|evenings?|weather|rounds?|conditions|months|temperatures?)|cool (?:days?|mornings?|evenings?|weather|rounds?|conditions|months)|temperatures? (?:drops?|dropping|falls?|falling|dips?)|when it (?:gets|turns) (?:cold|colder|chilly)|keeps? (?:you|me|them) (?:nice and |extra |really )?warm|stay(?:s|ing)? warm|warm enough|warmth|early (?:mornings?|starts?))\b/,
+  ],
+  ['wet', /\b(?:rain|rainy|raining|rains|wet|showers?|showery|drizzle|drizzly|downpours?|damp|soggy|keeps? (?:you|me|them) dry|stay(?:s|ing)? dry|dry in the)\b/],
+  [
+    'hot',
+    /\b(?:hot(?! pink)|hotter|heat|heatwave|summer|summery|sunny|sunshine|humid|scorching|tropical|warm (?:weather|days?|rounds?|conditions|months|climate|afternoons?)|warmer (?:weather|days?|rounds?|conditions|months|climate)|temperatures? (?:rises?|rising|climbs?|climbing)|when it (?:gets|turns) (?:hot|warm|warmer)|keeps? (?:you|me|them) cool|stay(?:s|ing)? cool|cooling)\b/,
+  ],
+  ['windy', /\b(?:wind|winds|windy|breezy|breeze|gusty|gusts|blustery|blocks? (?:the |out the )?wind|keeps? (?:the )?wind (?:out|off))\b/],
+];
+/** The Ambassador Pack conditions are names, not claims: "the Warm Rounds pack" says nothing about warmth. */
+const DEAL_NAMES = /\b(?:warm rounds|mixed conditions|cool (?:& |and |&amp; )?wet)\b/gi;
+/** The weather a clause associates the product with, if any. */
+export function needsClaimed(text: string): Need[] {
+  return NEED_CONCEPTS.filter(([, pattern]) => pattern.test(text)).map(([need]) => need);
+}
 /** A clause about what the customer wants, not about the product: "you prefer a relaxed fit". */
 const THEIR_WANT = /\b(you|you'?ve|you'?d)\s+(prefer|like|want|wanted|asked|said|mentioned|need)\b/;
 const RANGE_WORDS = /\b(mens|men s|ladies|womens|kids)\b/g;
 /** Talk of other products, not the one in hand. */
-const OTHERS = /\b(options?|alternatives?|others|other|instead|another|something else|some)\b/;
+const OTHERS = /\b(other|others|another|alternatives?|instead|something else|some (?:other|more)|(?:other|more) options?)\b/;
 
 
 /** The products on the card, and any whose full title the tools named this turn. */
@@ -315,11 +356,14 @@ export function unsupportedAttributes(reply: string, products: Product[], lead?:
   const found: Violation[] = [];
   let subject: Product[] = lead ? [lead] : [];
   for (const clause of clauses) {
-    // "It has no sleeves" is a claim of sleeveless, not a negation.
-    const text = sayShape(normalise(clause));
+    // "It has no sleeves" is a claim of sleeveless, not a negation. A pack's condition name is a name.
+    const plain = clause.replace(DEAL_NAMES, ' ');
+    const text = sayShape(normalise(plain));
     const named = keys.filter((entry) => text.includes(entry.key)).map((entry) => entry.product);
+    // A product's own name is not a claim about it: "the Tex Rain Jacket is £60" says nothing of rain. The names in hand come out before the words are read.
+    const unnamed = keys.reduce((rest, entry) => rest.replace(new RegExp(entry.key.trim().replace(/\s+/g, '\\s+'), 'gi'), ' '), plain);
     if (named.length) subject = named;
-    if (subject.length === 0 || NEGATED.test(text)) continue;
+    if (subject.length === 0) continue;
     /*
      * Naming no product, a clause about the customer ("you prefer a relaxed
      * fit"), an offer, or other products ("would you like waterproof gilets
@@ -327,6 +371,23 @@ export function unsupportedAttributes(reply: string, products: Product[], lead?:
      * is always checked: "would you like the insulated Arvid Gilet?" is a claim.
      */
     if (named.length === 0 && (THEIR_WANT.test(text) || /\?\s*$/.test(clause.trim()) || OTHERS.test(text))) continue;
+    /*
+     * A weather named beside the product is a claim it suits it, however it
+     * is put: only of one whose description states what that weather calls
+     * for. Judged by the segment, not the clause: "without warmth features,
+     * suitable for sun on a summer day" hides a conclusion about heat behind
+     * a negation about warmth (live replay, V1 task 4). A segment that
+     * negates claims nothing.
+     */
+    // Split before normalising: normalising takes the commas out.
+    const segments = unnamed
+      .split(/\s*(?:,|;|\bso\b|\bbut\b|\bthough\b|\balthough\b|\bwhile\b|\bwhereas\b)\s*/i)
+      .map((segment) => normalise(segment))
+      .filter((segment) => segment.trim() && !NEGATED.test(segment) && !THEIR_WANT.test(segment));
+    for (const need of new Set(segments.flatMap((segment) => needsClaimed(` ${segment} `)))) {
+      if (!subject.some((product) => suitsNeed(product, need).verdict === 'yes')) found.push({ kind: 'attribute', claim: `suited to ${NEED_LABEL[need]}` });
+    }
+    if (NEGATED.test(text)) continue;
     const own = (product: Product) => `${product.title} ${product.productType ?? ''} ${product.description ?? ''}`.toLowerCase();
 
     for (const [word, pattern] of STRONGER) {
@@ -340,12 +401,13 @@ export function unsupportedAttributes(reply: string, products: Product[], lead?:
     for (const shape of SHAPES) {
       if (shape.said.test(text) && !subject.every((product) => shape.shown(shapeText(product)))) found.push({ kind: 'attribute', claim: shape.label });
     }
-    const claimed = new Set([...featuresStatedIn(clause), ...featuresAsked(clause)].filter((feature) => !SHAPE_FEATURES.has(feature)));
+    const claimed = new Set([...featuresStatedIn(unnamed), ...featuresAsked(unnamed)].filter((feature) => !SHAPE_FEATURES.has(feature)));
     for (const feature of claimed) {
       // "Warm" said as "insulated" is judged above, by the stronger word.
       if (feature === 'warm' && STRONGER.some(([, pattern]) => pattern.test(text))) continue;
       if (!subject.some((product) => hasFeature(product, feature))) found.push({ kind: 'attribute', claim: FEATURE_LABEL[feature] });
     }
+    // A weather named beside a product is a claim it suits it: only of one whose description states what that weather calls for.
     const fit = fitStatedIn(clause);
     if (fit && !subject.some((product) => attributesOf(product).fit === fit)) found.push({ kind: 'attribute', claim: `${fit} fit` });
   }
@@ -549,6 +611,7 @@ export function withoutClaims(reply: string, violations: Violation[]): string {
         ...(fitStatedIn(sentence) ? [`${fitStatedIn(sentence)} fit`] : []),
         ...shapesSaid(sentence),
         ...STRONGER.filter(([, pattern]) => pattern.test(normalise(sentence))).map(([word]) => word),
+        ...needsClaimed(normalise(sentence.replace(DEAL_NAMES, ' '))).map((need) => `suited to ${NEED_LABEL[need]}`),
       ].map((label) => label.toLowerCase()),
     );
   const bad = (sentence: string) =>

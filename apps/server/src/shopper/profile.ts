@@ -1,6 +1,7 @@
 import { formatMoney } from '../catalog/commerce.js';
 import { parseRange, type Range } from '../catalog/audience.js';
 import { featuresAsked, type Feature, type Weather } from '../catalog/attributes.js';
+import { needsSaid } from '../catalog/suitability.js';
 import { parseColours } from '../catalog/colour.js';
 import { normaliseSize } from '../recommend/sizeWords.js';
 
@@ -142,8 +143,10 @@ function budgetPer(text: string): Budget['per'] {
   return new Set(garments.map((g) => g.toLowerCase().replace(/s$/, ''))).size === 1 ? 'item' : 'total';
 }
 
-const PREFER = /\b(prefer|preferably|ideally|maybe|perhaps|possibly|or something|if possible|if you have|would be nice|i like|quite like|really like|love|keen on|lean(ing)? towards|open to|mostly|usually wear|tend to wear|fan of)\b/i;
+const PREFER = /\b(prefer|preferably|ideally|maybe|perhaps|possibly|or something|if possible|if you have|would be nice|i like|quite like|really like|love|keen on|lean(ing)? towards|open to|mostly|usually wear|tend to wear|fan of|not necessarily|(?:doesn'?t|does not|don'?t|need not|needn'?t) (?:have|need) to be)\b/i;
 const REQUIRE = /\b(only|must|has to|have to|needs? to be|got to be|nothing but|has got to|essential|definitely|strictly|exclusively)\b/i;
+/** "It doesn't have to be waterproof": a requirement let go of - a preference at most, whatever "have to" says (V1 task 4). */
+const LET_GO = /\b(?:doesn'?t|does not|don'?t|need not|needn'?t) (?:have|need) to be\b|\bnot necessarily\b/i;
 
 /** "anything but black", "not black", "no orange": colours to keep away from. */
 function avoidedColours(text: string): { avoid: string[]; rest: string } {
@@ -170,12 +173,6 @@ const USUAL_SIZE = /\b(?:i'?m|i am|usually|normally|i wear|i take|typically|alwa
 const USUAL_NAMED = /\b(?:my\s+)?(?:usual|normal|regular|typical|standard)\s+(?:\w+\s+)?size(?:\s+is|'s|\s*=|\s*:)?\s+(?:a\s+|an\s+)?(xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|small|medium|large|x-?large|extra large|extra small)\b|\b(?:generally|mostly|normally|usually|typically)\s+wear\s+(?:a\s+|an\s+|size\s+)?(xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|small|medium|large|x-?large|extra large|extra small)\b/i;
 const USUAL_UK = /\b(?:i'?m|i am|usually|normally|i wear|i take|typically)\s+(?:a\s+)?(?:size\s+|uk\s+)(\d{1,2})\b(?!\s*(?:cm|in\b|inch|"|waist|chest))/i;
 
-const WEATHER_WORDS: Array<[Weather, RegExp]> = [
-  ['wet', /\b(rain|rainy|raining|wet|showers?|drizzle|downpour|damp|soggy|waterproof)\b/i],
-  ['cold', /\b(cold|chilly|freezing|winter|frosty?|icy|cool (mornings?|evenings?)|early (mornings?|starts?))\b/i],
-  ['hot', /\b(hot|heat|heatwave|warm (weather|days?|climate)|sunny|sunshine|summer|humid|scorching|tropical)\b/i],
-  ['windy', /\b(wind|windy|breezy|gusty|links golf|coastal)\b/i],
-];
 
 const JUST_THIS = /\b(?:just|only)\s+(?:the|this|that|a|one|my)\s+([a-z]+)(?:\s+(?:please|thanks|for now|today))?\s*[.!]?\s*$|\b(?:that'?s all|that is all|that'?s everything|nothing else|no(?:thing)? more|i'?m done|i'?m good thanks)\b/i;
 const MORE_WANTED = /\b(what else|anything else|goes with|go with|match(es|ing)? (it|this|that)|complete the look|full look|outfit|pack|bundle|also|as well)\b/i;
@@ -204,7 +201,7 @@ export function readIntent(text: string): Intent {
   const colours = parseColours(rest).colours.map((colour) => colour.word);
   if (colours.length) {
     // "Navy or black" offered as options, or said with a softener, is a preference.
-    const soft = PREFER.test(rest) && !REQUIRE.test(rest);
+    const soft = (PREFER.test(rest) && !REQUIRE.test(rest)) || LET_GO.test(rest);
     out.colours = { words: colours, strength: soft ? 'preferred' : 'required' };
     out.coloursStanding = PREFER.test(rest) || REQUIRE.test(rest);
   }
@@ -234,12 +231,13 @@ export function readIntent(text: string): Intent {
 
   const asked = featuresAsked(lower);
   if (asked.length) {
-    const soft = PREFER.test(lower) && !REQUIRE.test(lower);
+    const soft = (PREFER.test(lower) && !REQUIRE.test(lower)) || LET_GO.test(lower);
     out.features = soft ? { required: [], preferred: asked } : { required: asked, preferred: [] };
     out.featuresStanding = PREFER.test(lower) || REQUIRE.test(lower) || /\b(need|needs|want)\b/.test(lower);
   }
 
-  const weather = WEATHER_WORDS.filter(([, pattern]) => pattern.test(lower)).map(([kind]) => kind);
+  // The weather their words name, read by the one reader search gates on and product questions answer from (catalog/suitability.ts).
+  const weather = needsSaid(lower).needs;
   if (weather.length) out.weather = weather;
 
   const just = JUST_THIS.exec(lower);

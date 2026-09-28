@@ -6,6 +6,7 @@ import { resolveCustomerProductIdentity } from '../catalog/productIdentity.js';
 import { productById } from '../catalog/sync.js';
 import { log } from '../lib/logger.js';
 import { designTitle } from '../catalog/commerce.js';
+import { needsSaid } from '../catalog/suitability.js';
 import { logFact, trustedShopperFacts } from '../shopper/facts.js';
 import { durablePart, mergeProfile, readIntent, standingPart, type FactSource, type ShopperProfile } from '../shopper/profile.js';
 import { resolveProduct } from './screen.js';
@@ -542,7 +543,29 @@ export function newMission(prior: ShoppingFocus, next: ShoppingFocus, change: Fo
 export function constraintsIn(text: string): ShoppingConstraints {
   const intent = readIntent(text);
   const held = { ...standingPart(intent), ...durablePart(intent, text) } as Partial<ShopperProfile>;
+  /*
+   * A need asked for outright - "waterproof jackets", "caps for cold
+   * weather" - holds for the mission: "show me more", "cheaper", "different
+   * colours" are still waterproof (V1 task 4). Softened ("ideally"), or let
+   * go ("it doesn't have to be waterproof"), it only ranks this once.
+   */
+  const need = needsSaid(text);
+  if (!need.hard) delete held.weather;
+  if (intent.features?.required?.length && !intent.featuresStanding) held.features = intent.features;
   return Object.fromEntries(CONSTRAINT_FIELDS.filter((key) => key !== 'liked' && key !== 'rejected' && held[key] !== undefined).map((key) => [key, held[key]])) as ShoppingConstraints;
+}
+
+/** A requirement the customer has let go of ("show them anyway"): gone from the mission, by their words only. */
+export async function dropShoppingConstraints(sessionId: string, fields: Array<(typeof CONSTRAINT_FIELDS)[number]>): Promise<void> {
+  const session = await sessions.getOrCreate(sessionId);
+  const prior = session.activeShoppingContext;
+  if (!prior?.constraints) return;
+  const dropped = fields.filter((field) => prior.constraints?.[field] !== undefined);
+  if (!dropped.length) return;
+  const constraints = Object.fromEntries(Object.entries(prior.constraints).filter(([key]) => !dropped.includes(key as (typeof CONSTRAINT_FIELDS)[number]))) as ShoppingConstraints;
+  const { constraints: _old, ...rest } = prior;
+  await sessions.patch(sessionId, { activeShoppingContext: Object.keys(constraints).length ? { ...rest, constraints } : rest });
+  log.info('focus.constraints_dropped', { sessionId, dropped });
 }
 
 /**

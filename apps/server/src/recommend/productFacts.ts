@@ -5,7 +5,8 @@ import { colourwayName, otherColourways } from '../catalog/colourways.js';
 import { matchesColourText, parseColours } from '../catalog/colour.js';
 import { normaliseSize, optionValueMatches } from './sizeWords.js';
 import { FEATURE_LABEL, attributesOf, featuresAsked, featuresStatedIn, fitStatedIn, hasFeature, type Feature, type ProductFit } from '../catalog/attributes.js';
-import { shapesOf, shapesSaid, strongerOf, strongerSaid } from '../catalog/attributes.js';
+import { WEATHER_NEEDS, shapesOf, shapesSaid, strongerOf, strongerSaid } from '../catalog/attributes.js';
+import { NEED_EVIDENCE_WORDS, NEED_LABEL, needsSaid, suitsNeed } from '../catalog/suitability.js';
 
 /**
  * Everything a customer can ask about one product - which sizes, which
@@ -187,6 +188,21 @@ interface AttributeAnswer {
    * resistant is not waterproof, a slim cut is not a relaxed one.
    */
   unsaid?: boolean;
+  /** A weather need ("good for winter?") rather than a feature: answered from what its description states for it (catalog/suitability.ts). */
+  need?: boolean;
+}
+
+/** One asked-about attribute as a line of facts, the same words wherever it is written. */
+export function attributeFactLine(answer: AttributeAnswer): string {
+  if (answer.need) {
+    if (answer.state === 'yes') return `${answer.asked} - supported: its description states ${answer.instead}`;
+    if (answer.state === 'no') return `${answer.asked} - its description says it is not ${answer.instead}`;
+    return `${answer.asked} - not supported: its description states nothing for it (never say it is, never say no - say the description doesn't state it)`;
+  }
+  if (answer.state === 'yes') return `${answer.asked} - yes, its description states it`;
+  if (answer.state === 'no') return `${answer.asked} - no, its description says it is not`;
+  if (answer.state === 'other') return `${answer.asked} - its description says ${answer.instead}${answer.unsaid ? ` - ${answer.asked} itself is not stated (never say no)` : ' instead'}`;
+  return `${answer.asked} - not stated (never say no)`;
 }
 
 const FIT_WORDS: Record<ProductFit, string> = { athletic: 'an athletic cut', slim: 'a slim cut', tailored: 'a tailored cut', regular: 'a regular cut', relaxed: 'a relaxed cut' };
@@ -220,6 +236,21 @@ export function attributesAsked(product: Product, question: string): AttributeAn
     else answers.push({ asked: label, state: state === 'no' ? 'no' : 'unstated' });
   }
 
+  /*
+   * "Is this good for winter?", "will it do in the rain?": the weather named,
+   * answered from what its description states for it - and never as a no
+   * when it states nothing. A feature of that weather asked by name ("is it
+   * waterproof?", "will it keep me warm?") is answered above, once.
+   */
+  for (const need of needsSaid(question).needs) {
+    if (WEATHER_NEEDS[need].some((feature) => features.has(feature)) || (need === 'cold' && stronger.length)) continue;
+    const suits = suitsNeed(product, need);
+    const label = NEED_LABEL[need];
+    if (suits.verdict === 'yes') answers.push({ asked: label, state: 'yes', instead: suits.evidence.map((feature) => FEATURE_LABEL[feature]).join(' and '), need: true });
+    else if (suits.verdict === 'no') answers.push({ asked: label, state: 'no', instead: suits.against.map((feature) => FEATURE_LABEL[feature]).join(' or '), need: true });
+    else answers.push({ asked: label, state: 'unstated', need: true });
+  }
+
   const fitAsked = fitStatedIn(question) ?? (/\b(relaxed|loose|roomy)\b/i.test(question) ? 'relaxed' : /\bslim\b/i.test(question) ? 'slim' : undefined);
   if (fitAsked) {
     if (fit === fitAsked) answers.push({ asked: `${fitAsked} fit`, state: 'yes' });
@@ -237,6 +268,12 @@ export function sayAttributes(name: string, answers: AttributeAnswer[]): string 
   return answers
     .map((answer, index) => {
       const subject = index === 0 ? `the ${name}` : 'it';
+      // The weather: what its description states for it, or that it states nothing - never "good for" on our say-so.
+      if (answer.need) {
+        if (answer.state === 'yes') return `${subject} is described as ${answer.instead}, which is what ${answer.asked} calls for`;
+        if (answer.state === 'no') return `${subject}'s description says it isn't ${answer.instead}`;
+        return `${subject}'s description doesn't state anything for ${answer.asked} - nothing about ${NEED_EVIDENCE_WORDS[answer.asked === NEED_LABEL.wet ? 'wet' : answer.asked === NEED_LABEL.cold ? 'cold' : answer.asked === NEED_LABEL.hot ? 'hot' : 'windy']}`;
+      }
       if (answer.state === 'yes') return `${index === 0 ? 'Yes - ' : ''}${subject} is described as ${answer.asked}`;
       // Warm, or thermal, is not evidence either way for insulated: what it does state, and that the rest is not stated.
       if (answer.state === 'other' && answer.unsaid) return `${subject}'s description says ${answer.instead}, but doesn't state that it's ${answer.asked}`;
@@ -264,9 +301,7 @@ export function answerAbout(product: Product, question: string): Answer {
   if (attributes.length) {
     return {
       speech: sayAttributes(titleCase(name), attributes),
-      facts: `${facts}\nAsked about: ${attributes
-        .map((answer) => `${answer.asked} - ${answer.state === 'yes' ? 'yes, its description states it' : answer.state === 'other' ? `its description says ${answer.instead}${answer.unsaid ? ` - ${answer.asked} itself is not stated (never say no)` : ' instead'}` : 'not stated (never say no)'}`)
-        .join('; ')}. Answer this first, before any other question.`,
+      facts: `${facts}\nAsked about: ${attributes.map(attributeFactLine).join('; ')}. Answer this first, before any other question.`,
     };
   }
 

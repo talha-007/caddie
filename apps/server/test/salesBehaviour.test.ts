@@ -99,9 +99,11 @@ describe('internal wording never reaches the customer', () => {
     expect(wording('The Garden Polo is perfect for warm weather.').length).toBeGreaterThan(0);
   });
 
-  it('a weather verdict no description gives is caught; the features it rests on are not', () => {
-    expect(wording('The Garden Polo is lightweight and breathable, making it suitable for warm weather.').length).toBeGreaterThan(0);
-    expect(wording("It's great for summer rounds.").length).toBeGreaterThan(0);
+  it('a weather verdict its description backs stands; one no description gives is caught (V1 task 4)', () => {
+    // Breathable is stated, and is what heat calls for: the verdict is backed. Lightweight is not stated - an attribute claim, caught as one.
+    expect(wording('The Garden Polo is breathable, making it suitable for warm weather.')).toEqual([]);
+    expect(verifyReply('The Garden Polo is lightweight and breathable, making it suitable for warm weather.', facts, card('GARDEN POLO - NAVY')).map((v) => v.claim)).toContain('lightweight');
+    expect(wording("It's great for winter rounds.").length).toBeGreaterThan(0);
     expect(wording("It's lightweight and breathable, which lines up well with what you asked for.")).toEqual([]);
     expect(withoutClaims('The Garden Polo is lightweight and breathable, making it suitable for warm weather. What size do you need?', [{ kind: 'wording', claim: 'suitable for warm weather' }])).toBe(
       'The Garden Polo is lightweight and breathable. What size do you need?',

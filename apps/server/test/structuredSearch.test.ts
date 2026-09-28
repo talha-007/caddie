@@ -220,7 +220,8 @@ describe('a size is a rule only when the customer gave it', () => {
 
   it('a size the model invented is set aside: no size rule, no size facts', async () => {
     // The model added M to a request that named no size; the search still runs, across every size.
-    const { result, products } = await search({ query: 'gilet', size: 'M' }, 'I want a gilet for a cold morning');
+    // (Not "for a cold morning": weather asked for is a rule now, and these gilets state nothing for it - V1 task 4.)
+    const { result, products } = await search({ query: 'gilet', size: 'M' }, 'I want a gilet');
     expect(provenance()).toEqual({ requestedSize: 'M', trustedSize: null, sizeSource: 'none', ignoredModelSize: true });
     expect(products.length).toBeGreaterThan(0);
     expect(products.every((p) => categoriesOf(p).has('gilet'))).toBe(true);
