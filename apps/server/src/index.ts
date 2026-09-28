@@ -42,7 +42,17 @@ export function createApp() {
        * dev just means someone loses an afternoon to a CORS error on a phone.
        * CORS_ORIGINS still applies in production, where it matters.
        */
-      origin: env.isProd ? (env.corsOrigins.includes('*') ? true : env.corsOrigins) : true,
+      origin: env.isProd
+  ? (origin, callback) => {
+      const allowed =
+        !origin ||
+        env.corsOrigins.includes('*') ||
+        env.corsOrigins.includes(origin) ||
+        /^https:\/\/[a-z0-9-]+\.shopifypreview\.com$/.test(origin);
+
+      callback(null, allowed);
+    }
+  : true,
       credentials: false,
     }),
   );
