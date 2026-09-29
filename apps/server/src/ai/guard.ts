@@ -63,9 +63,13 @@ const MAX_LENGTH = 600;
  * Length was tried as the signal first and is a bad one: "write me an essay"
  * is seventeen characters. What someone is talking about separates them, not
  * how much they type.
+ *
+ * The basket verbs are here because "Remove it." and "Remove them all."
+ * - a customer with a pack in the basket - were refused as off-topic (live,
+ * pack removal): no garment word, and the classifier saw only a bare verb.
  */
 const SHOP_WORDS =
-  /\b(polo|shirt|tee|hoodie|midlayer|mid-layer|gilet|jacket|short|trouser|jogger|chino|sock|beanie|cap|hat|belt|bag|kit|outfit|pack|bundle|wear|fit|fits|size|sizes|sizing|small|medium|large|xl|chest|waist|hip|height|weight|colou?r|navy|black|white|grey|gray|green|blue|red|sage|pink|price|cost|cheap|cheaper|budget|spend|£|\$|stock|available|basket|cart|checkout|buy|order|deliver|return|refund|golf|course|round|tee time|druids|mens?|womens?|ladies|ambassador|prestige|rainsuit)\b/i;
+  /\b(polo|shirt|tee|hoodie|midlayer|mid-layer|gilet|jacket|short|trouser|jogger|chino|sock|beanie|cap|hat|belt|bag|kit|outfit|pack|bundle|wear|fit|fits|size|sizes|sizing|small|medium|large|xl|chest|waist|hip|height|weight|colou?r|navy|black|white|grey|gray|green|blue|red|sage|pink|price|cost|cheap|cheaper|budget|spend|£|\$|stock|available|basket|cart|checkout|buy|order|deliver|return|refund|golf|course|round|tee time|druids|mens?|womens?|ladies|ambassador|prestige|rainsuit|remove|delete|swap|replace|get rid of|take (it|them|that|those|this|these|everything|all)( all)? out|them all|everything)\b/i;
 
 /**
  * The store's own names - the deals and the garments.

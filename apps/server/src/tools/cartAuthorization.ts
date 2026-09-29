@@ -3,9 +3,10 @@ import { sizeInRequest } from '../catalog/constraints.js';
 import { identityProducts, resolveCustomerProductIdentity, type CustomerIdentity } from '../catalog/productIdentity.js';
 import { singular } from '../catalog/identity.js';
 import { chooseDeal, namesADeal } from '../recommend/deals.js';
-import { normaliseSize } from '../recommend/sizeWords.js';
+import { foldNonAscii, normaliseSize } from '../recommend/sizeWords.js';
 import { currentPack, livePending } from '../session/shoppingSession.js';
 import { readReply } from './answers.js';
+import { modelReadingFor, notEnglish } from '../ai/readTurn.js';
 import type { ToolContext } from './types.js';
 
 /**
@@ -71,7 +72,7 @@ const ASKS_FOR_QUANTITY =
 /** "M", "medium please", "in XL", "size 10", "34 waist" - a size and nothing else. */
 function sizeAnswer(text: string): boolean {
   if (sizeInRequest(text)) return true;
-  const rest = text
+  const rest = foldNonAscii(text)
     .toLowerCase()
     .replace(/[^a-z0-9\s/-]/g, ' ')
     .split(/\s+/)
@@ -143,7 +144,9 @@ export function offeredAction(ctx: ToolContext): OfferedAction | null {
 
 /** Their words ask for something to go in the basket - and do not refuse it. */
 export function asksToAdd(said: string): boolean {
-  return ASKS_TO_ADD.test(said) && !REFUSES.test(said);
+  if (ASKS_TO_ADD.test(said) && !REFUSES.test(said)) return true;
+  // "Sí, añádelo": the model's reading (ai/readTurn.ts), for words the English patterns cannot read. Never over an English refusal.
+  return notEnglish(said) && !REFUSES.test(said) && !!modelReadingFor(said)?.asksToAdd;
 }
 
 export function cartAuthorization(ctx: ToolContext, opts: { replaces?: string } = {}): CartAuthorization {
@@ -155,7 +158,8 @@ export function cartAuthorization(ctx: ToolContext, opts: { replaces?: string } 
   if (!said || REFUSES.test(said)) return { authorized: false, source: 'none' };
   const reply = readReply(said);
   if (reply.declines) return { authorized: false, source: 'none' };
-  if (ASKS_TO_ADD.test(said) || (opts.replaces && ASKS_TO_SWAP.test(said))) return { authorized: true, source: 'utterance' };
+  // Through asksToAdd, which reads "añádelo" as well as "add it" (ai/readTurn.ts): an add asked for in Spanish was refused as not authorised.
+  if (asksToAdd(said) || (opts.replaces && ASKS_TO_SWAP.test(said))) return { authorized: true, source: 'utterance' };
 
   /*
    * A yes, read by clause - "yeah, I think that will be fine, and can we do a
@@ -201,15 +205,66 @@ export function lineChangeAuthorization(ctx: ToolContext): 'customer-utterance' 
   if (reply.declines) return null;
   // A size change is a replacement (add_to_cart with replaces), never a quantity change.
   if (sizeChangeAsked(said) && !ASKS_TO_REMOVE.test(said)) return null;
-  if (ASKS_TO_REMOVE.test(said) || ASKS_FOR_QUANTITY.test(said)) return 'customer-utterance';
   const pending = livePending(ctx.session);
+  // Their yes to the removal just asked about - "please remove it" included - before the words are read as a new request.
+  if (pending?.type === 'update-line' && pending.awaiting === 'confirmation' && (reply.affirms || (pending.quantity === 0 && confirmsRemoval(said)))) return 'customer-confirmation';
+  if (ASKS_TO_REMOVE.test(said) || ASKS_FOR_QUANTITY.test(said)) return 'customer-utterance';
   if (pending?.type === 'update-line' && reply.affirms) return 'customer-confirmation';
   return null;
 }
 
 /** Their words take the item out, rather than change how many. */
 export function asksToRemove(said: string): boolean {
-  return ASKS_TO_REMOVE.test(said);
+  return ASKS_TO_REMOVE.test(said) || (notEnglish(said) && !!modelReadingFor(said)?.asksToRemove);
+}
+
+/** Their words take something out, said outright - not "I don't want it", which may be about an offer. */
+const REMOVES_OUTRIGHT = /\b(remove|delete|take (it|them|that|those|this|these|everything|all|the\b[^.?!]{0,40}) out|take out|get rid of|(empty|clear|clear out|wipe) (my |the )?(basket|cart|bag))\b/i;
+
+/**
+ * How much of the basket their words take out, when they name no product,
+ * kind, size or colour: everything, the pack, or "them" - which is everything
+ * there when nothing else says otherwise. "Remove them all" and "remove
+ * these items from my basket" were each answered "which item do you mean?"
+ * six times over, because a removal could only ever resolve to one line.
+ */
+export type RemovalScope = 'all' | 'pack' | 'plural';
+const REMOVES_ALL = /\b(everything|every item|every single item|all of (it|them|these|those|the items)|them all|all (the |of the |my )?(items|things|lines|of it)|the (whole|entire|full) (basket|cart|bag|lot|order)|(empty|clear|clear out|wipe) (my |the )?(basket|cart|bag)|all)\b/i;
+const REMOVES_PACK = /\b(the |this |that |my |whole |entire |full )*(pack|bundle)\b/i;
+const REMOVES_PLURAL = /\b(them|these|those|they|both|the items|the lot)\b/i;
+export function removalScope(said: string): RemovalScope | null {
+  if (!ASKS_TO_REMOVE.test(said)) return null;
+  if (REMOVES_ALL.test(said)) return 'all';
+  if (REMOVES_PACK.test(said)) return 'pack';
+  if (REMOVES_PLURAL.test(said)) return 'plural';
+  return null;
+}
+
+/**
+ * "Please remove it", "yes, take them out", "remove the pack" to the
+ * removal just asked about: their yes, in the words of the thing they asked
+ * for. Read as a fresh request, "please remove it" resolved "it" against six
+ * pack lines and asked which - again (live, pack removal).
+ */
+const CONFIRM_WORDS = new Set([
+  'yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'please', 'go', 'ahead', 'do', 'it', 'that', 'them', 'those', 'these', 'this', 'all', 'everything', 'both', 'the', 'whole', 'entire', 'full',
+  'pack', 'bundle', 'items', 'item', 'lot', 'remove', 'delete', 'take', 'out', 'get', 'rid', 'of', 'drop', 'empty', 'clear', 'wipe', 'from', 'in', 'my', 'basket', 'cart', 'bag', 'now', 'then', 'just', 'thanks', 'thank', 'you', 'and', 'so', 'fine', 'right', 'correct', 'confirm', 'confirmed', 'caddy', 'caddie',
+]);
+export function confirmsRemoval(said: string): boolean {
+  if (!ASKS_TO_REMOVE.test(said) || readReply(said).declines) return false;
+  const words = said.toLowerCase().replace(/[^a-z' ]/g, ' ').split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.every((word) => CONFIRM_WORDS.has(word));
+}
+
+/** A removal said outright, and nothing else asked - what code can settle before the model runs. */
+export function removalOnly(said: string): boolean {
+  if (!REMOVES_OUTRIGHT.test(said)) return false;
+  return !asksToAdd(said) && !/\b(show|find|see|instead|else|other|another|swap|replace|change|add|also|then|but)\b/i.test(said);
+}
+
+/** A removal said outright and about the basket as a whole, a pack, "them", or "from my basket". */
+export function removalOfBasket(said: string): boolean {
+  return removalOnly(said) && (removalScope(said) !== null || /\b(from|in|out of) (my|the) (basket|cart|bag)\b/i.test(said));
 }
 
 /** Their words name a product, and it is none of these. */

@@ -1,6 +1,7 @@
 import { parseColours, type ColourRequest } from '../catalog/colour.js';
 import { sizeInRequest } from '../catalog/constraints.js';
 import { normaliseSize } from '../recommend/sizeWords.js';
+import { modelReadingFor, notEnglish } from '../ai/readTurn.js';
 
 /**
  * What one customer message says to a question the Caddie asked in order
@@ -69,7 +70,8 @@ function affirmClause(clause: string): boolean {
 function sizeIn(clause: string): string | undefined {
   const asked = sizeInRequest(clause);
   if (asked && !/^\d{2}$/.test(asked)) return asked;
-  const words = clause.toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9\s/-]/g, ' ').split(/\s+/).filter(Boolean);
+  // Letters of any script stay letters: stripping the accent from "sí" once left an "s", and a Spanish yes was read as size S.
+  const words = clause.toLowerCase().replace(/['’]/g, '').replace(/[^\p{L}0-9\s/-]/gu, ' ').split(/\s+/).filter(Boolean);
   const skip = new Set(['a', 'an', 'i', 'in', 'is', 'it', 'the', 'my', 'me', 'so', 'go', 'with', 'ill', 'take', 'have', 'use', 'that', 'one', 'please', 'then', 'size', 'yes', 'ok', 'and']);
   const found: string[] = [];
   for (let i = 0; i < words.length; i += 1) {
@@ -77,13 +79,21 @@ function sizeIn(clause: string): string | undefined {
     const one = skip.has(words[i]!) ? undefined : normaliseSize(words[i]!);
     const size = pair && pair !== one ? pair : one;
     if (size && !/^\d+$/.test(size)) {
-      // "large" as a word: only when the clause is about size, or is little else.
-      if (/^(small|medium|large)$/.test(words[i]!) && !/\b(size|fit|wear|go with|take|ill)\b/.test(clause.toLowerCase()) && words.length > 3) continue;
+      /*
+       * "large" as a word: only when the clause is about size, or is little
+       * else. "That is also medium." and "I think medium will be fine" were
+       * read as no size at all, and the customer was asked a fourth time
+       * (admin log, pack conversation): the words that make a clause an
+       * answer about size are the everyday ones.
+       */
+      if (/^(small|medium|large)$/.test(words[i]!) && !/\b(size|sizes|fit|fits|wear|go with|take|ill|also|fine|perfect|select|choose|pick|prefer|that is|thats|it is|its|will be|would be|works|good|okay|ok|please|same|then|too)\b/.test(clause.toLowerCase().replace(/'/g, '')) && words.length > 3) continue;
       found.push(size.toUpperCase());
       if (pair && pair !== one) i += 1;
     }
   }
-  return found.length === 1 ? found[0] : asked;
+  // "Medium will be fine, select medium" is one size said twice, not two sizes.
+  const distinct = [...new Set(found)];
+  return distinct.length === 1 ? distinct[0] : asked;
 }
 
 export function readReply(said: string): ReadReply {
@@ -113,8 +123,8 @@ export function readReply(said: string): ReadReply {
     const rest = parseColours(stripped).rest.replace(/\b(xxs|xs|s|m|l|xl|[2-5]xl|small|medium|large|extra large|\d{1,2})\b/gi, ' ').replace(/[^a-z]+/gi, ' ').trim();
     return rest.length === 0;
   };
-  const remainder = clauses.filter((clause) => !answered(clause)).join('. ');
-  return {
+  let remainder = clauses.filter((clause) => !answered(clause)).join('. ');
+  const read = {
     affirms,
     declines,
     colours,
@@ -123,6 +133,29 @@ export function readReply(said: string): ReadReply {
     ...(leg ? { leg: (leg[1] ?? leg[2])! } : {}),
     sizeReference,
     ...(quantity !== undefined && Number.isFinite(quantity) ? { quantity } : {}),
-    remainder,
   };
+  /*
+   * The model's reading of the same words (ai/readTurn.ts), for what the
+   * patterns above could not read: a yes in Spanish, "medium" in a phrasing
+   * they do not know, a waist in Urdu. Only the fields left empty are taken,
+   * and only values the code recognises. A short message the model read as
+   * an answer leaves nothing for the conversation model to answer.
+   */
+  const model = modelReadingFor(said);
+  if (model) {
+    let took = false;
+    // A yes or a no from the model only for words in another language: "add to cart both of these" to "which colour?" was read as a no, and the add was cancelled (harness, 29 Sep).
+    if (!read.affirms && !read.declines && (model.affirms || model.declines) && notEnglish(said)) {
+      read.affirms = model.affirms;
+      read.declines = model.declines && !model.affirms;
+      took = true;
+    }
+    if (!read.size && model.size) { read.size = model.size; took = true; }
+    if (!read.waist && model.waist) { read.waist = model.waist; took = true; }
+    if (!read.leg && model.leg) { read.leg = model.leg; took = true; }
+    if (read.quantity === undefined && model.quantity !== undefined) { read.quantity = model.quantity; took = true; }
+    if (!read.colours.length && model.colours.length) { read.colours = parseColours(model.colours.join(' ')).colours; took = true; }
+    if (took && said.trim().split(/\s+/).length <= 8) remainder = '';
+  }
+  return { ...read, remainder };
 }

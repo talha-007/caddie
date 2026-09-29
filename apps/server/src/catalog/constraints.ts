@@ -1,5 +1,5 @@
 import type { Product, ProductOption } from '@caddie/shared';
-import { normaliseSize } from '../recommend/sizeWords.js';
+import { foldNonAscii, normaliseSize } from '../recommend/sizeWords.js';
 import { normaliseQuery } from './taxonomy.js';
 
 /**
@@ -134,7 +134,7 @@ const LETTER = '(xxs|xs|xl|xxl|xxxl|[2-5]xl|x-?large|extra large|extra small|sma
  * only be a size - after "in" or "size", or right before a garment.
  */
 export function sizeInRequest(text: string): string | undefined {
-  const lower = ` ${text.toLowerCase().replace(/[’']/g, '')} `;
+  const lower = ` ${foldNonAscii(text.toLowerCase().replace(/[’']/g, ''))} `;
   const waist = /\b(\d{2})\s?(?:"|in|inch|inches)?\s?waist\b|\bwaist\s?(?:size\s?)?(?:of\s|is\s)?(\d{2})\b/.exec(lower);
   if (waist) return waist[1] ?? waist[2];
   const numbered = /\b(?:size|uk)\s+(\d{1,2})\b(?!\s?(?:cm|mm|kg|inch|in\b|"))/.exec(lower);

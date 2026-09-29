@@ -180,11 +180,11 @@ describe('which question comes first', () => {
     });
     const pieces = [TEX_BLACK, MIDLAYER, POLO, TROUSERS, BELT, SOCKS];
     const at = async () => packStatus(await sessions.getOrCreate(id), COOL_WET.handle, pieces).next;
-    expect(await at()).toBe('What top size do you wear?');
+    expect(await at()).toBe('Choose the sizes on the pack card and tap Add - it goes in as one pack.');
     await rememberShopper(id, { usualSize: 'S' }, 'customer-words');
-    expect(await at()).toBe('What waist size do you need for the trousers?');
+    expect(await at()).toBe('Choose the sizes on the pack card and tap Add - it goes in as one pack.');
     await choose('waist 34');
-    expect(await at()).toBe('Which leg length for the trousers: 30, 32 or 34?');
+    expect(await at()).toBe('Choose the sizes on the pack card and tap Add - it goes in as one pack.');
   });
 });
 
@@ -194,7 +194,7 @@ describe('adding the pack', () => {
     await choose('waist 34');
     const result = await say('Add this pack');
     expect(result.actions ?? []).toEqual([]);
-    expect(result.speech).toBe('Which leg length for the trousers: 30, 32 or 34?');
+    expect(result.speech).toBe('Choose the sizes on the pack card and tap Add - it goes in as one pack.');
     expect(result.facts).toMatch(/^Nothing was added/);
   });
 

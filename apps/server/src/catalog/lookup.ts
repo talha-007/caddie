@@ -1,3 +1,4 @@
+import { isPlaceholder } from './sellable.js';
 import type { Product } from '@caddie/shared';
 import { env } from '../env.js';
 import { parseRange } from './audience.js';
@@ -88,8 +89,9 @@ export function distinctiveWords(name: string): string[] {
 }
 
 function brandProducts(): Product[] {
+  // The brand tag, and never a £0 placeholder (catalog/sellable.ts).
   const tag = env.shopify.brandTag?.toLowerCase();
-  const all = allProducts();
+  const all = allProducts().filter((product) => !isPlaceholder(product));
   return tag ? all.filter((product) => product.tags.some((value) => value.toLowerCase() === tag)) : all;
 }
 

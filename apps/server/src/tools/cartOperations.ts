@@ -111,12 +111,49 @@ export function dispatch(session: CaddieSession, planned: PlannedOperation, acti
   return { actions: stamped, record };
 }
 
-/** The operations the session keeps: the latest few, so a report for an old one is still answered. */
-export function keepOperations(existing: Record<string, CartOperationRecord> | undefined, record: CartOperationRecord): Record<string, CartOperationRecord> {
-  const all = { ...(existing ?? {}), [record.id]: record };
+/**
+ * Several lines out together, one operation each. The widget runs one action
+ * per operation id and skips a repeat of the id as already done - six changes
+ * under one id took one line out and left five (live, 29 Sep). Each line
+ * gets its own record and expectation; the batch is confirmed once, when the
+ * last of them settles (settleOutcome).
+ */
+export function dispatchBatch(session: CaddieSession, planned: PlannedOperation[], title: string, actions: CartAction[], meta: { source: string; turn: number; mission?: number; productId?: string }): { actions: CartAction[]; records: CartOperationRecord[] } {
+  const batchId = `batch-${randomUUID()}`;
+  const createdAt = Date.now();
+  const records: CartOperationRecord[] = [];
+  const stamped = actions.map((action, i) => {
+    const plan = planned[i];
+    if (!plan || (action.type !== 'add' && action.type !== 'change')) return action;
+    const id = `op-${randomUUID()}`;
+    records.push({
+      id,
+      kind: plan.kind,
+      status: 'dispatched',
+      ...(meta.productId ? { productId: meta.productId } : {}),
+      quantity: plan.wording.quantity,
+      expect: plan.expect,
+      before: quantitiesOf(session.basket),
+      ...(session.cartToken ? { cartToken: session.cartToken } : {}),
+      onApplied: plan.onApplied,
+      wording: plan.wording,
+      source: meta.source,
+      turn: meta.turn,
+      ...(meta.mission !== undefined ? { mission: meta.mission } : {}),
+      createdAt,
+      batch: { id: batchId, size: actions.length, title },
+    });
+    return { ...action, operationId: id, expect: plan.expect };
+  });
+  return { actions: stamped, records };
+}
+
+/** The operations the session keeps: the latest few, so a report for an old one is still answered. Enough for a whole pack out plus history. */
+export function keepOperations(existing: Record<string, CartOperationRecord> | undefined, ...records: CartOperationRecord[]): Record<string, CartOperationRecord> {
+  const all = { ...(existing ?? {}), ...Object.fromEntries(records.map((record) => [record.id, record])) };
   const ids = Object.values(all)
     .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, 12)
+    .slice(0, 24)
     .map((entry) => entry.id);
   return Object.fromEntries(ids.map((id) => [id, all[id]!]));
 }
@@ -293,6 +330,29 @@ export async function settleOutcome(sessionId: string, report: CartOutcomeReport
     cartOperations: { ...session.cartOperations, [record.id]: resolved },
     ...(basket ? { basket } : {}),
   };
+  /*
+   * One line of a batch: settled quietly, unless it is the last. Then the
+   * batch is confirmed once - "Removed the whole pack from your basket" -
+   * or what is still in is named, and the waiting record ends with it.
+   */
+  if (record.batch) {
+    const siblings = Object.values(patch.cartOperations!).filter((entry) => entry.batch?.id === record.batch!.id);
+    const settled = siblings.length >= record.batch.size && siblings.every((entry) => entry.status !== 'dispatched' && entry.status !== 'uncertain');
+    if (!settled) {
+      await sessions.patch(sessionId, patch);
+      return { status: verdict, text: '' };
+    }
+    const stillIn = siblings.filter((entry) => entry.status !== 'applied');
+    const summary = stillIn.length
+      ? `I took out ${siblings.length - stillIn.length} of the ${record.batch.size} - the ${stillIn.map((entry) => entry.wording.title).join(', ')} ${stillIn.length === 1 ? 'is' : 'are'} still in your basket.`
+      : `Removed the ${record.batch.title} from your basket.`;
+    patch.cartOperations![record.id] = { ...resolved, text: summary };
+    if (session.pendingAction?.awaiting === 'outcome' && siblings.some((entry) => entry.id === session.pendingAction?.dispatched)) patch.pendingAction = undefined;
+    await sessions.patch(sessionId, patch);
+    await sessions.append(sessionId, [{ id: `op-${record.batch.id}`, role: 'assistant', text: summary, createdAt: new Date().toISOString() }]);
+    log.info('cart.batch_settled', { sessionId, batch: record.batch.id, size: record.batch.size, stillIn: stillIn.length });
+    return { status: verdict, text: summary };
+  }
   if (verdict === 'applied') {
     if (pendingIsThis) patch.pendingAction = undefined;
     if (record.onApplied.lastAdded && record.productId && newest) patch.lastAdded = { productId: record.productId, turn: customerTurns(session), byOperation: true };

@@ -186,8 +186,15 @@ export function unsupportedBasketClaims(reply: string, context: VerifyContext): 
  * short sentences and one question; more only when the customer asks for it.
  */
 const DETAIL_ASKED = /\b(tell me more|more about|more detail|what'?s (included|in it|in the)|what is (included|in)|what does it (include|come with)|compare|explain|details?|describe|everything about|list)\b/i;
-const MAX_SENTENCES = 2;
-const MAX_WORDS = 45;
+/*
+ * Three and fifty-five, not two and forty-five: a three-sentence, 26-word
+ * answer to "show me the cheapest jackets" was sent back for length, and
+ * the rewrite that followed was cut mid-sentence ("lightweight-.") - a
+ * second model call and a worse reply, for a sentence nobody would mind
+ * hearing (harness replay of the 28 Sep rain-jacket conversation).
+ */
+const MAX_SENTENCES = 3;
+const MAX_WORDS = 55;
 
 export function replyShape(reply: string, said: string, cards: Product[] = []): Violation[] {
   if (DETAIL_ASKED.test(said)) return [];
@@ -196,6 +203,8 @@ export function replyShape(reply: string, said: string, cards: Product[] = []): 
   const words = reply.split(/\s+/).filter(Boolean).length;
   if (sentences.length > MAX_SENTENCES || words > MAX_WORDS) found.push({ kind: 'length', claim: `${sentences.length} sentences, ${words} words` });
   if ((reply.match(/\?/g) ?? []).length > 1) found.push({ kind: 'length', claim: 'more than one question' });
+  // "In black, navy, red, white, blue, grey, sage, pink, coral, lavender, green and jade": the colourways are on the cards.
+  if (new Set(parseColours(reply).colours.map((colour) => colour.word)).size >= 5) found.push({ kind: 'length', claim: 'lists the colours' });
   // Three or more of the cards named: reading the screen aloud.
   const text = normalise(reply);
   const named = new Set(cards.map((product) => designKey(product)).filter((key) => key.trim().length > 2 && text.includes(key)));
@@ -672,5 +681,6 @@ export function withoutClaims(reply: string, violations: Violation[]): string {
         ? false
         : violation.kind === 'attribute' ? attributesSaid(sentence).has(violation.claim.toLowerCase()) : sentence.toLowerCase().includes(violation.claim.toLowerCase()),
     );
-  return sentences.filter((sentence) => !bad(sentence)).join(' ').trim();
+  // A clause cut after a dash leaves "breathable—." behind: tidied to a full stop.
+  return sentences.filter((sentence) => !bad(sentence)).join(' ').replace(/\s*[—–-]+\s*\./g, '.').trim();
 }

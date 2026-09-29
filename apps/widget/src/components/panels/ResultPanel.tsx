@@ -19,7 +19,8 @@ export function ResultPanel({ attachment, latest }: { attachment: CaddieAttachme
 
   switch (attachment.kind) {
     case 'products':
-      return <ProductGrid products={attachment.products} addable />;
+      // No Add on a result card: the size is chosen on the product page (View product), where the theme adds it (Talha, 29 Sep).
+      return <ProductGrid products={attachment.products} />;
     case 'size':
       return <SizePanel recommendation={attachment.recommendation} latest={latest} />;
     case 'pack':

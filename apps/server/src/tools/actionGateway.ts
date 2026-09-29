@@ -1,9 +1,9 @@
-import type { Cart, CartAction } from '@caddie/shared';
+import type { Cart, CartAction, Product } from '@caddie/shared';
 import { log } from '../lib/logger.js';
 import { sessions, type PendingAction } from '../session/store.js';
 import { currentMission } from '../session/shoppingSession.js';
 import { cartAuthorization, lineChangeAuthorization, offeredAction, turnNow } from './cartAuthorization.js';
-import { STILL_UPDATING, UNCERTAIN_HELD, UPDATING, dispatch, expireDispatched, keepOperations, unsettledOperation, type PlannedOperation } from './cartOperations.js';
+import { STILL_UPDATING, UNCERTAIN_HELD, UPDATING, dispatch, dispatchBatch, expireDispatched, keepOperations, unsettledOperation, type PlannedOperation } from './cartOperations.js';
 import { CART_OPS_CONTRACT } from '@caddie/shared';
 import type { ToolContext } from './types.js';
 
@@ -80,6 +80,8 @@ export type ActionPlan =
        * step 4 to that report.
        */
       operation?: PlannedOperation;
+      /** Several lines changed together: one operation per action, in the same order, confirmed once as a batch. */
+      operations?: { items: PlannedOperation[]; title: string };
       productId?: string;
       variantId?: string;
       quantity?: number;
@@ -94,6 +96,8 @@ export type ActionPlan =
       facts: string;
       /** When the answer to `speech` should finish this action next turn. */
       pending?: Omit<PendingAction, 'turn'>;
+      /** The choice the question is about, shown - "which do you mean?" with the candidates on screen, so the answer can be a tap. */
+      cards?: Product[];
     };
 
 export interface ActionOutcome {
@@ -112,6 +116,8 @@ export interface ActionOutcome {
   variantId?: string;
   quantity?: number;
   charge?: number;
+  /** A refusal's choice, to be shown. */
+  cards?: Product[];
 }
 
 type Planner = (ctx: ToolContext, action: CommerceAction, source: ActionSource) => Promise<ActionPlan>;
@@ -183,7 +189,8 @@ export async function executeCommerceAction(ctx: ToolContext, action: CommerceAc
      * Held for OUTCOME_TIMEOUT_MS at most (expireDispatched).
      */
     const unsettled = unsettledOperation(here.session);
-    if (unsettled) {
+    // A change still unconfirmed from an earlier turn holds new ones; the adds of this same turn ("add everything") go out together, each its own operation.
+    if (unsettled && unsettled.turn !== turnNow(here)) {
       log.info('gateway.held_for_outcome', { sessionId: ctx.session.id, action: action.type, operationId: unsettled.id, status: unsettled.status });
       return {
         ok: false,
@@ -210,6 +217,17 @@ export async function executeCommerceAction(ctx: ToolContext, action: CommerceAc
     if (!planner) throw new Error(`No planner registered for ${action.type}`);
     const plan = await planner(here, action, source);
 
+    /*
+     * The same variant dispatched twice in one turn: the waiting record's add
+     * and the model's own add_to_cart for the same card both went out, and a
+     * customer who said "the second one in XL" got two (journey test, 29
+     * Sep). The second is not sent - it is already going in.
+     */
+    if (plan.ok && plan.variantId && Object.values(here.session.cartOperations ?? {}).some((record) => record.status === 'dispatched' && record.turn === turnNow(here) && record.variantId === String(plan.variantId).split('/').pop())) {
+      log.info('gateway.duplicate_in_turn', { sessionId: ctx.session.id, variantId: plan.variantId });
+      return { ok: false, action: action.type, source, reason: 'wrong-action', speech: "It's already going into your basket.", facts: 'That exact item was sent to the basket a moment ago this turn; nothing is sent twice. Say it is going in.' };
+    }
+
     if (!plan.ok) {
       log.info('gateway.refused', { sessionId: ctx.session.id, action: action.type, source, reason: plan.reason });
       /*
@@ -233,6 +251,7 @@ export async function executeCommerceAction(ctx: ToolContext, action: CommerceAc
         reason: plan.reason,
         speech: plan.speech,
         facts: `Nothing was ${action.type === 'update-line' ? 'changed' : 'added'} (${plan.reason}) - the basket is unchanged. ${plan.facts} Never say it was ${action.type === 'update-line' ? 'changed' : 'added'}.`,
+        ...(plan.cards?.length ? { cards: plan.cards } : {}),
       };
     }
 
@@ -243,7 +262,7 @@ export async function executeCommerceAction(ctx: ToolContext, action: CommerceAc
      * customer's authorisation is held on the record until then, and
      * nothing is said to be added.
      */
-    if (plan.operation && here.session.cartMode === 'theme' && plan.actions?.length) {
+    if ((plan.operation || plan.operations) && here.session.cartMode === 'theme' && plan.actions?.length) {
       /*
        * A widget that cannot report on the change (no x-caddie-widget, or an
        * older contract) is not handed one: it would carry it out and never
@@ -260,17 +279,22 @@ export async function executeCommerceAction(ctx: ToolContext, action: CommerceAc
           facts: 'The page is running an older widget that cannot confirm basket changes; nothing was changed. Tell them to refresh, or to use the product page. Never say it was added.',
         };
       }
-      const { actions, record } = dispatch(here.session, plan.operation, plan.actions, {
+      const meta = {
         source,
         turn: turnNow(here),
         mission: currentMission(here.session),
         ...(plan.productId ? { productId: plan.productId } : {}),
         ...(plan.variantId ? { variantId: plan.variantId } : {}),
-      });
+      };
+      const sent = plan.operations
+        ? dispatchBatch(here.session, plan.operations.items, plan.operations.title, plan.actions, meta)
+        : (() => { const one = dispatch(here.session, plan.operation!, plan.actions, meta); return { actions: one.actions, records: [one.record] }; })();
+      const { actions } = sent;
+      const record = sent.records[0]!;
       await sessions.patch(ctx.session.id, {
-        cartOperations: keepOperations(here.session.cartOperations, record),
+        cartOperations: keepOperations(here.session.cartOperations, ...sent.records),
         pendingAction: {
-          type: plan.operation.kind,
+          type: record.kind,
           productIds: plan.productId ? [plan.productId] : [],
           ...(plan.quantity !== undefined ? { quantity: plan.quantity } : {}),
           awaiting: 'outcome',
@@ -281,7 +305,7 @@ export async function executeCommerceAction(ctx: ToolContext, action: CommerceAc
           mission: currentMission(here.session),
         },
       });
-      log.info('gateway.dispatched', { sessionId: ctx.session.id, action: action.type, source, operationId: record.id, productId: plan.productId ?? null, variantId: plan.variantId ?? null, quantity: plan.quantity ?? null });
+      log.info('gateway.dispatched', { sessionId: ctx.session.id, action: action.type, source, operationId: record.id, operations: sent.records.length, productId: plan.productId ?? null, variantId: plan.variantId ?? null, quantity: plan.quantity ?? null });
       return {
         ok: true,
         dispatched: true,

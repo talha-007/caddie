@@ -1,3 +1,4 @@
+import { isPlaceholder } from './sellable.js';
 import type { Product } from '@caddie/shared';
 import { env } from '../env.js';
 import { parseRange, rangeOf, type Range } from './audience.js';
@@ -99,7 +100,8 @@ let index: { version: number; size: number; designs: Design[]; vocabulary: Set<s
 
 /** Every design in the catalogue (brand products only), built once per catalogue change. */
 function designs(): { designs: Design[]; vocabulary: Set<string> } {
-  const products = allProducts();
+  // Sellable products only: "the polo looks good" once matched the £0 placeholder "LOOK 1" (journey test, 29 Sep).
+  const products = allProducts().filter((product) => !isPlaceholder(product));
   const version = catalogueVersion();
   if (index && index.version === version && index.size === products.length) return index;
   const tag = env.shopify.brandTag?.toLowerCase();

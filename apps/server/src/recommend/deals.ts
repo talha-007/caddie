@@ -83,7 +83,21 @@ export function chooseDeal(
 ): { deal: DealRecipe } | { ask: DealRecipe[] } | null {
   const deals = allDeals();
   const keyword = KEYWORDS.find((entry) => entry.words.test(query));
-  if (!keyword) return null;
+  if (!keyword) {
+    /*
+     * "What pack do you recommend for cold wet weather": no deal named, but a
+     * pack asked for and the weather clear. The Ambassador pack for that
+     * weather is the recommendation - listing every deal and asking which
+     * was the reply a customer got (journey test, 29 Sep).
+     */
+    const generic = /\b(packs?|bundles?|deals?|kits?|sets?)\b/i.test(query);
+    const condition = generic ? conditionFrom(query, weather) : undefined;
+    if (!condition) return null;
+    const range: Range = parseRange(query).range ?? known ?? 'men';
+    const ambassador = deals.filter((deal) => /ambassador/.test(deal.handle) && deal.condition === condition);
+    const pick = ambassador.find((deal) => deal.range === range) ?? ambassador.find((deal) => deal.range === 'men') ?? ambassador[0];
+    return pick ? { deal: pick } : null;
+  }
   const named = deals.filter((deal) => keyword.match.test(deal.handle) || keyword.match.test(deal.title.toLowerCase()));
   if (named.length === 0) return null;
   const range: Range = parseRange(query).range ?? known ?? 'men';

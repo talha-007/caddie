@@ -12,6 +12,7 @@ import { runTool } from '../tools/index.js';
 import { route } from '../ai/devRouter.js';
 import { screen } from '../ai/guard.js';
 import { converse, openaiEnabled, type TurnMeta } from '../ai/openai.js';
+import { basketFromSync } from '../tools/cartOperations.js';
 import { consumeShared, LIMITS } from '../lib/rateLimit.js';
 import { clientKey, noteCartMode } from '../lib/request.js';
 import { clientHash } from '../usage/identity.js';
@@ -48,10 +49,25 @@ const contextSchema = z.object({
   variantId: z.string().max(200).optional(),
 });
 
+const basketLineSchema = z.object({
+  key: z.string().min(1).max(200),
+  productId: z.string().min(1).max(100),
+  variantId: z.string().min(1).max(100),
+  title: z.string().max(200).optional(),
+  variantTitle: z.string().max(200).optional(),
+  quantity: z.number().int().min(0).max(999),
+  bundle: z.string().max(100).optional(),
+  bundleName: z.string().max(100).optional(),
+  properties: z.record(z.string().max(200)).optional(),
+  sellingPlanId: z.string().max(100).optional(),
+});
+const basketSchema = z.object({ cartToken: z.string().max(120).optional(), lines: z.array(basketLineSchema).max(100) });
+
 const bodySchema = z.object({
   sessionId: z.string().min(1).max(100).optional(),
   text: z.string().min(1).max(2000),
   context: contextSchema.optional(),
+  basket: basketSchema.optional(),
 });
 
 function message(role: CaddieMessage['role'], text: string, attachment?: CaddieMessage['attachment']): CaddieMessage {
@@ -114,6 +130,11 @@ chatRouter.post('/', async (req, res, next) => {
   // follow-up - which carries no context of its own - still knows the page.
   if (parsed.data.context) {
     await sessions.patch(sessionId, { page: parsed.data.context });
+  }
+  // The basket the message was typed over, on the storefront: the same reading the basket route takes, so the turn's words are never about a basket the server has not seen.
+  if (parsed.data.basket && session.cartMode === 'theme') {
+    const lines = parsed.data.basket.lines.map((line) => ({ ...line, title: line.title ?? '', variantTitle: line.variantTitle ?? '' }));
+    await sessions.patch(sessionId, { basket: basketFromSync(lines), ...(parsed.data.basket.cartToken ? { cartToken: parsed.data.basket.cartToken } : {}) });
   }
 
   const userMessage = message('user', parsed.data.text);

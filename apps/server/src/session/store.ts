@@ -40,6 +40,8 @@ export interface CartOperationRecord {
   /** What was said about it once settled - repeated for a duplicate report. */
   text?: string;
   error?: string;
+  /** One of several lines taken out together (the whole basket, a pack): confirmed once, when the last of them settles. */
+  batch?: { id: string; size: number; title: string };
 }
 
 /**
@@ -63,6 +65,8 @@ export interface PendingAction {
   outgoing?: string;
   /** update-line: the basket line. */
   lineId?: string;
+  /** update-line: every line the removal takes out when it is more than one - the whole basket, or a whole pack. */
+  lineIds?: string[];
   /** The one thing it is waiting for now. */
   awaiting: PendingNeed;
   /** Everything still needed, first first. */
@@ -154,6 +158,8 @@ export interface CaddieSession {
     query?: string;
     budgetAmount?: number;
     colour?: string;
+    /** An outfit: the size it was built for, so "add everything" adds each piece in it. */
+    size?: string;
   };
   /**
    * The last outfit built, kept when a search replaces what is on screen, so
@@ -211,6 +217,8 @@ export interface CaddieSession {
    * nothing is in hand. Never what they are shopping for.
    */
   lastLead?: { id: string; colour: string };
+  /** Products offered as the natural next piece already: each is offered once, never pushed again. */
+  crossSellOffered?: string[];
   /**
    * When lastShown last changed - a card tapped before it was on an older
    * screen, and no longer what "add it" means (shoppingSession.ts).

@@ -49,6 +49,10 @@ export interface SessionRow {
   declined: number;
   voiceSeconds: number;
   client: string | null;
+  /** The journey, read off the transcript: whether a basket change went out, how many customer turns it took, and questions the Caddie asked twice. */
+  reachedBasket?: boolean;
+  turnsToBasket?: number | null;
+  repeatedQuestions?: number;
 }
 
 export interface UsageReport {
@@ -67,6 +71,15 @@ export interface UsageReport {
     costPerThousandConversations: number;
     /** The cost we would have paid with no prompt caching at all. */
     costWithoutCacheUsd: number;
+    /**
+     * The three numbers that say whether the Caddie is doing its job, read
+     * off the transcripts: conversations of two or more turns that reached a
+     * basket change, the customer turns it took on average, and questions
+     * asked twice in one conversation. Every change to the brain should move
+     * these; cost alone says nothing about whether a customer got what they
+     * came for.
+     */
+    journeys?: { conversations: number; reachedBasket: number; reachedBasketRate: number; avgTurnsToBasket: number | null; repeatedQuestions: number };
   };
   byKind: KindRow[];
   byModel: ModelRow[];
@@ -213,7 +226,53 @@ export function summarise(events: UsageEvent[], windowDays: number): UsageReport
   };
 }
 
+/** A basket change the Caddie sent or confirmed, in its own words (tools/cartOperations.ts, tools/actionGateway.ts). */
+const BASKET_CHANGED = /\b(updating your basket|added the|removed the|removed everything|taking (the|everything|\d+ items)|is being (added|removed)|going into your basket|now in \w+\.)/i;
+
+/** What the transcript says about the journey: reached the basket, how soon, and questions asked twice. */
+export function journeyOf(lines: Array<{ role: string; text: string }>): { reachedBasket: boolean; turnsToBasket: number | null; repeatedQuestions: number } {
+  let customerTurns = 0;
+  let turnsToBasket: number | null = null;
+  let repeated = 0;
+  const asked = new Set<string>();
+  for (const line of lines) {
+    if (line.role === 'user') customerTurns += 1;
+    if (line.role !== 'assistant') continue;
+    if (turnsToBasket === null && BASKET_CHANGED.test(line.text)) turnsToBasket = customerTurns;
+    for (const part of line.text.split(/(?<=\?)/)) {
+      if (!part.includes('?')) continue;
+      const key = part.trim().toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').slice(-60);
+      if (key.length < 12) continue;
+      if (asked.has(key)) repeated += 1;
+      asked.add(key);
+    }
+  }
+  return { reachedBasket: turnsToBasket !== null, turnsToBasket, repeatedQuestions: repeated };
+}
+
 export async function buildReport(windowDays: number): Promise<UsageReport> {
   const events = await usage.since(Date.now() - windowDays * 24 * 60 * 60 * 1000);
-  return summarise(events, windowDays);
+  const report = summarise(events, windowDays);
+  // The journey figures come from the transcripts, for conversations of two or more turns - a single message is a question, not a journey.
+  let conversations = 0;
+  let reached = 0;
+  let turnsSum = 0;
+  let repeatedQuestions = 0;
+  for (const row of report.sessions) {
+    if (row.turns < 2) continue;
+    const lines = await usage.transcript(row.sessionId).catch(() => []);
+    if (!lines.length) continue;
+    const journey = journeyOf(lines);
+    row.reachedBasket = journey.reachedBasket;
+    row.turnsToBasket = journey.turnsToBasket;
+    row.repeatedQuestions = journey.repeatedQuestions;
+    conversations += 1;
+    if (journey.reachedBasket) {
+      reached += 1;
+      turnsSum += journey.turnsToBasket ?? 0;
+    }
+    repeatedQuestions += journey.repeatedQuestions;
+  }
+  report.totals.journeys = { conversations, reachedBasket: reached, reachedBasketRate: conversations ? reached / conversations : 0, avgTurnsToBasket: reached ? turnsSum / reached : null, repeatedQuestions };
+  return report;
 }

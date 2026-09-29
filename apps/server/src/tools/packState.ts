@@ -1,11 +1,13 @@
 import type { Product, ProductVariant } from '@caddie/shared';
 import { sizeInRequest } from '../catalog/constraints.js';
 import { productById } from '../catalog/sync.js';
-import { normaliseSize, optionValueMatches } from '../recommend/sizeWords.js';
+import { foldNonAscii, normaliseSize, optionValueMatches } from '../recommend/sizeWords.js';
 import type { CaddieSession } from '../session/store.js';
 import { optionScale, resolveVariant } from '../catalog/commerce.js';
 import { trustedShopperFacts } from '../shopper/facts.js';
 import { readIntent } from '../shopper/profile.js';
+import { modelReadingFor } from '../ai/readTurn.js';
+import { PACK_SIZES_ON_CARD } from './sizeHandoff.js';
 
 /**
  * What the customer has actually chosen for a pack - and what is still open.
@@ -109,6 +111,8 @@ export function readPackChoices(
   before: PackChoices = {},
   /** A recommended size the customer has just accepted ("use that size") - theirs now, for this pack. */
   accepted?: { top?: string; waist?: string },
+  /** What the waiting record says the pack still lacks (tools/pending.ts): a bare "34" is that, now that the question no longer names it. */
+  asked?: 'top' | 'waist' | 'leg',
 ): PackChoices {
   const text = said.toLowerCase();
   const next: PackChoices = { ...before, requested: { ...(before.requested ?? {}) } };
@@ -138,7 +142,8 @@ export function readPackChoices(
   // A bare number is whichever measurement the Caddie had just asked for.
   const bare = /^\s*(?:a\s+|the\s+)?(\d{2})\s*(?:please|thanks|then|one)?[\s.!]*$/i.exec(text);
   if (bare && !pair && !waist && !leg) {
-    if (/\bleg\b/i.test(lastReply)) set('leg', bare[1]!);
+    if (asked === 'leg' || asked === 'waist') set(asked, bare[1]!);
+    else if (/\bleg\b/i.test(lastReply)) set('leg', bare[1]!);
     else if (/\bwaist\b/i.test(lastReply)) set('waist', bare[1]!);
     // The last reply was about something else, but only one measurement is still open.
     else if (before.waist && !before.leg && valuesFor(pieces, 'leg').length) set('leg', bare[1]!);
@@ -158,7 +163,7 @@ export function readPackChoices(
   const top = [sizeInRequest(lettered), readIntent(lettered).usualSize].find((value) => !!value && !/^\d/.test(value));
   if (top && !/^\d/.test(top)) set('top', top);
   else {
-    const alone = normaliseSize(text.replace(/\b(please|thanks|in|size|a|an|the|for the tops?|tops?)\b/g, ' ').replace(/[^a-z0-9\s]/g, ' ').trim());
+    const alone = normaliseSize(foldNonAscii(text).replace(/\b(please|thanks|in|size|a|an|the|for the tops?|tops?)\b/g, ' ').replace(/[^a-z0-9\s]/g, ' ').trim());
     if (alone && !/^\d/.test(alone)) set('top', alone);
     /*
      * A top size said in a sentence, or a yes to one named back to them.
@@ -174,6 +179,17 @@ export function readPackChoices(
       if (phrased ?? confirmed) set('top', (phrased ?? confirmed)!);
     }
   }
+  /*
+   * What the patterns above could not read, the model's reading of the same
+   * words can (ai/readTurn.ts): "waist thirty two and leg thirty four" is no
+   * digits, "talla mediana" no English. Only for what is still unread.
+   */
+  const read = modelReadingFor(said);
+  if (read) {
+    if (read.waist && !next.waist && !next.requested?.waist && !waist && !pair) set('waist', read.waist);
+    if (read.leg && !next.leg && !next.requested?.leg && !leg && !pair) set('leg', read.leg);
+    if (read.size && !/^\d/.test(read.size) && !next.top && !next.requested?.top) set('top', read.size);
+  }
   if (accepted?.top && !next.top && !next.requested?.top) set('top', accepted.top);
   if (accepted?.waist && !next.waist && !next.requested?.waist) set('waist', accepted.waist);
   if (!Object.keys(next.requested!).length) delete next.requested;
@@ -187,7 +203,7 @@ const ASKED_TOP = /\b(top size|what size do you wear|size (?:for|do you wear for
 
 /** The letter sizes in some words - "medium", "M", "extra large", "2XL" - read as sizesNeverGiven reads them. */
 function letterSizesIn(words: string): string[] {
-  const tokens = words.toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9\s/-]/g, ' ').split(/\s+/).filter(Boolean);
+  const tokens = foldNonAscii(words.toLowerCase().replace(/['’]/g, '')).replace(/[^a-z0-9\s/-]/g, ' ').split(/\s+/).filter(Boolean);
   const found = new Set<string>();
   for (let i = 0; i < tokens.length; i += 1) {
     const pair = normaliseSize(`${tokens[i]} ${tokens[i + 1] ?? ''}`.trim());
@@ -311,15 +327,16 @@ function nextQuestion(plans: PiecePlan[], choices: PackChoices): string {
    * who had said S twice (live replay) - ask about the piece instead.
    */
   if (top && choices.top) return `The ${title(top.plan.product.title)} doesn't come in ${choices.top} - which size would you like: ${list(top.entry.values)}?`;
-  if (top) return 'What top size do you wear?';
+  // The pack's sizes are chosen on the pack card, never asked for (tools/sizeHandoff.ts).
+  if (top) return PACK_SIZES_ON_CARD;
   const waist = firstMissing('waist');
-  if (waist) return choices.requested?.waist ? `The trousers don't come in a ${choices.requested.waist} waist. Would you like ${list(waist.entry.values)}?` : 'What waist size do you need for the trousers?';
+  if (waist) return choices.requested?.waist ? `The trousers don't come in a ${choices.requested.waist} waist. Would you like ${list(waist.entry.values)}?` : PACK_SIZES_ON_CARD;
   const leg = firstMissing('leg');
   if (leg) {
     const known = choices.waist ? `Waist ${choices.waist} is fine, but ` : '';
     return choices.requested?.leg
       ? `${known}the trousers don't come in a ${choices.requested.leg} leg. Would you like ${list(leg.entry.values)}?`
-      : `Which leg length for the trousers: ${list(leg.entry.values)}?`;
+      : PACK_SIZES_ON_CARD;
   }
   const other = plans.flatMap((plan) => plan.missing.map((entry) => ({ plan, entry })))[0];
   if (other) return other.entry.values.length ? `Which ${other.entry.option.toLowerCase()} for the ${title(other.plan.product.title)}: ${list(other.entry.values)}?` : `That combination isn't available for the ${title(other.plan.product.title)} - which would you like instead?`;

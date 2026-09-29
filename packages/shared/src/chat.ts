@@ -177,6 +177,15 @@ export interface ChatRequest {
   /** Where the customer is standing in the shop, if the theme tells us. */
   /** Optional. The server ignores it until the prompt makes use of it. */
   context?: PageContext;
+  /**
+   * The store cart as the widget read it just before sending, on the
+   * storefront. The separate basket sync is fire-and-forget on open, so a
+   * message typed straight away could reach the server before its basket
+   * did - and "remove all of these" was answered "which item?" over a
+   * basket the server had not yet seen. Sent with the message, the server is
+   * never blind to what the words are about.
+   */
+  basket?: BasketSync;
 }
 
 export interface ChatResponse {

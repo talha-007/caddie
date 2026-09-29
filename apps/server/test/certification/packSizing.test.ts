@@ -118,7 +118,7 @@ describe('stored quick-start sizes: men, M, waist 32', () => {
     for (const title of pieces(shown)) expect(rule.packPiece(EVERYTHING.find((p) => p.title === title)!)).toBe(true);
     // Top and waist come from what they told us; only the leg is open.
     const status = packStatus(await sessions.getOrCreate(id), COOL_WET.handle);
-    expect(status.next).toMatch(/leg/i);
+    expect(status.next).toMatch(/choose the sizes on the pack card/i);
     expect(status.next).not.toMatch(/top size|waist|mens|womens/i);
   });
 

@@ -131,7 +131,7 @@ describe('"add it", then the size it was waiting for', () => {
     const id = await conversation(['Show me the Warrior Jacket in black.', 'It is £16.']);
     const asked = await modelAdds(id, 'Add it', { productId: JACKET.id });
     expect(asked.lines).toEqual([]);
-    expect(asked.result.speech).toMatch(/which size/i);
+    expect(asked.result.speech).toMatch(/choose your size/i);
     await recordTurn(id, 'Add it', 'Which size would you like for the Warrior Jacket?');
     expect((await modelAdds(id, 'M')).lines).toEqual([{ variantId: '702', quantity: 1 }]);
   });

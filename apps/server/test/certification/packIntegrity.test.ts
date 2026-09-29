@@ -151,7 +151,7 @@ describe('1. sizes known before the pack is shown', () => {
     expect(pieces(shown)).not.toContain(WARRIOR.title);
     const rule = eligibilityFor(await sessions.getOrCreate(id));
     for (const title of pieces(shown)) expect(rule.packPiece(EVERYTHING.find((p) => p.title === title)!)).toBe(true);
-    expect(packStatus(await sessions.getOrCreate(id), COOL_WET.handle).next).toMatch(/leg/i);
+    expect(packStatus(await sessions.getOrCreate(id), COOL_WET.handle).next).toMatch(/choose the sizes on the pack card/i);
   });
 });
 
@@ -203,7 +203,8 @@ describe('2-6. a piece they have seen, sold out in the size they then give', () 
   it('5. the Hexa in two colours: asked once; "black" puts the black one in the pack', async () => {
     await jacketRequired();
     const ask = await say("I'll take the Hexa", [{ tool: { name: 'add_to_cart', args: { productId: HEXA_NAVY.id, options: { Size: 'M' } } } }, { content: 'Which colour?' }]);
-    expect(ask.text).toMatch(/colour/i);
+    // The gateway's own bound question stands over the model's when the add was refused for want of a target (reply.basket_question_unbound).
+    expect(ask.text).toMatch(/colour|in place of/i);
     const black = await say('black', [{ tool: { name: 'get_product_details', args: { productId: HEXA_BLACK.id } } }, { content: 'Done.' }]);
     expect(pieces(black)).toContain(HEXA_BLACK.title);
     expect((await configured())[0]).toBe(HEXA_BLACK.id);
@@ -229,7 +230,10 @@ describe('2-6. a piece they have seen, sold out in the size they then give', () 
     await say('Show me the Cool & Wet Ambassador Pack in red', showRed);
     await sessions.patch(id, { pendingAction: { type: 'add-product', productIds: [OUTSIDE.id], awaiting: 'size', turn: 1 } });
     await say('My top size is M.', [{ content: 'OK.' }]);
-    expect((await sessions.getOrCreate(id)).pendingAction).toBeUndefined();
+    // The standalone add is gone; what waits now, if anything, is the replacement's own swap offer (a concrete piece offered in the sold-out one's place).
+    const waiting = (await sessions.getOrCreate(id)).pendingAction;
+    expect(waiting?.type).not.toBe('add-product');
+    if (waiting) expect(waiting).toMatchObject({ type: 'replace-pack-piece', awaiting: 'confirmation' });
   });
 });
 

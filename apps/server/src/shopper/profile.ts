@@ -203,7 +203,14 @@ export function readIntent(text: string): Intent {
     // "Navy or black" offered as options, or said with a softener, is a preference.
     const soft = (PREFER.test(rest) && !REQUIRE.test(rest)) || LET_GO.test(rest);
     out.colours = { words: colours, strength: soft ? 'preferred' : 'required' };
-    out.coloursStanding = PREFER.test(rest) || REQUIRE.test(rest);
+    /*
+     * "You showed me only red" is a complaint about what was shown, not a
+     * rule; read as "only red", it filtered every later polo search of the
+     * session to red and yellow (live, 29 Sep). What the Caddie did is not
+     * what they require.
+     */
+    const aboutWhatWasShown = rest.replace(/\byou(?:'ve| have)? (?:only )?(?:showed|show|shown|gave|given|sent|found|listed|displayed)(?: me)?(?: only)?\b[^.,;!?]*/gi, ' ');
+    out.coloursStanding = PREFER.test(aboutWhatWasShown) || REQUIRE.test(aboutWhatWasShown);
   }
 
   // "Relaxed-fit" is "relaxed fit": the patterns read words, and a hyphen joined them into one.

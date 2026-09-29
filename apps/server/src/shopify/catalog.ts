@@ -1,3 +1,4 @@
+import { isPlaceholder } from '../catalog/sellable.js';
 import type { Cart, CartLine, Product, ProductOption, ProductVariant } from '@caddie/shared';
 import { env } from '../env.js';
 import { inRange, parseRange, type Range } from '../catalog/audience.js';
@@ -141,6 +142,13 @@ interface SearchPayload {
  * we filter on the tag afterwards and over-fetch to compensate.
  */
 export function isBrandProduct(product: Product): boolean {
+  /*
+   * A product priced at nothing in every variant is a placeholder - the live
+   * store holds "MENS", "LADIES", "AW26" and "LOOK 1" at £0.00, and "the
+   * polo looks good, add it" once put LOOK 1 in a basket (journey test, 29
+   * Sep). Not searched, not named, not sold.
+   */
+  if (isPlaceholder(product)) return false;
   const tag = env.shopify.brandTag;
   if (!tag) return true;
   const needle = tag.toLowerCase();

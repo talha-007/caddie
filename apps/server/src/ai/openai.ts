@@ -1,4 +1,4 @@
-import type { CaddieAttachment, CartAction } from '@caddie/shared';
+import type { CaddieAttachment, CartAction, Product } from '@caddie/shared';
 import { env } from '../env.js';
 import { UpstreamError } from '../lib/errors.js';
 import { fetchWithTimeout, Semaphore } from '../lib/http.js';
@@ -11,7 +11,7 @@ import { readCustomerTurn } from './turn.js';
 import { completeGoal, confirmPackSwap, notePackSwapOffer, replacementRequired, runTool, toolDefinitionsForVapi } from '../tools/index.js';
 import { asksForKnown, customerGoal, describeGoal, goalLog, type CustomerGoal } from '../tools/journey.js';
 import { guardCards } from '../tools/eligibility.js';
-import { alignReplyWithPending, notePendingOffer, resolvePending } from '../tools/pending.js';
+import { alignReplyWithPending, knownSizeFor, notePendingOffer, resolvePending } from '../tools/pending.js';
 import { UPDATING, basketStatement, unsettledOperation } from '../tools/cartOperations.js';
 import { colourwayName, garmentName } from '../catalog/colourways.js';
 import { costOfTokens } from '../usage/pricing.js';
@@ -20,10 +20,13 @@ import { SYSTEM_PROMPT } from './prompt.js';
 import { verifyReply, withoutClaims, type VerifyContext } from './verify.js';
 import { namesADeal } from '../recommend/deals.js';
 import { productById } from '../catalog/sync.js';
-import { asksToAdd } from '../tools/cartAuthorization.js';
+import { asksToAdd, asksToRemove, removalOfBasket, removalOnly } from '../tools/cartAuthorization.js';
+import { readReply } from '../tools/answers.js';
+import { needsModelReading, readTurnWithModel } from './readTurn.js';
+import { ASKS_SIZE, SIZE_ON_CARD, SIZES_ON_CARDS } from '../tools/sizeHandoff.js';
 import { customerTurn, describeFocus } from '../session/focus.js';
 import { allDeals } from '../catalog/bundles.js';
-import { resolveVariant, sizeScale } from '../catalog/commerce.js';
+import { primaryKind, resolveVariant, sizeApplies, sizeOptionName, sizeScale } from '../catalog/commerce.js';
 
 /**
  * The Caddie's brain for text chat.
@@ -40,12 +43,17 @@ import { resolveVariant, sizeScale } from '../catalog/commerce.js';
 // One more than the tools need: a reply that fails the check (verify.ts) gets one rewrite.
 const MAX_STEPS = 6;
 /*
- * Every turn kept here is resent on every call in the loop, so this is the
- * cheapest dial in the file. Eight covers "cheaper" and "the navy one"
- * comfortably; the session holds the durable facts - size, budget, colour,
- * what is on screen - so history is not carrying them.
+ * Every turn kept here is resent on every call in the loop, so this is a
+ * cost dial - but a cheap one: the stable prefix is ~14,000 tokens and cached,
+ * the history a few hundred. Eight messages was four exchanges, and in the
+ * recorded conversations the model had forgotten the pack it was building
+ * and the price it had quoted by turn five, while a customer was still
+ * talking about them (admin log, 25-28 Sep). Twenty keeps a whole pack
+ * conversation in view; MAX_MESSAGES in session/store.ts is the ceiling.
  */
-const HISTORY_TURNS = 8;
+const HISTORY_TURNS = 20;
+/** How much of what the tools said in recent turns the model is shown (newest first). */
+const TOOL_MEMORY_CHARS = 3500;
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -315,11 +323,35 @@ export function shopperContext(session: CaddieSession): ChatMessage | null {
   return text ? { role: 'system', content: text } : null;
 }
 
+/** The lead's own words, recognised however the model rephrases them: its first five words in any punctuation ("Pick your size on the card" / "pick your size on the card—"). */
+function leadUnless(speech: string): RegExp {
+  const words = speech.split(/\s+/).filter((word) => /[a-z]/i.test(word)).slice(0, 5).map((word) => word.replace(/[^a-z0-9']/gi, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp(words.join('\\W+'), 'i');
+}
+
 function history(session: CaddieSession): ChatMessage[] {
   return session.messages.slice(-HISTORY_TURNS).map((message) => ({
     role: message.role,
     content: message.text,
   }));
+}
+
+/**
+ * What the tools said in the last turns, shown to the model. History holds
+ * only the words; the cards, prices and sizes the tools returned were kept
+ * for the reply checker (recentEvidence) and never shown to the model - so
+ * "how much is the pack?" two turns after the pack card got a list of pieces
+ * and no price, and "is it in medium?" went back to search (admin log). The
+ * same text the checker holds the reply to is what the model reads.
+ */
+function toolMemoryContext(session: CaddieSession): ChatMessage | null {
+  const kept = (session.recentEvidence ?? '').trim();
+  if (!kept) return null;
+  const shown = kept.length > TOOL_MEMORY_CHARS ? `${kept.slice(0, TOOL_MEMORY_CHARS)}\n[older results cut]` : kept;
+  return {
+    role: 'system',
+    content: `What your tools returned in the last few turns, newest first. Use it to answer follow-ups about these products, prices, sizes and packs without asking or searching again; it is verified data. Anything not here still needs a tool.\n${shown}`,
+  };
 }
 
 /**
@@ -403,6 +435,64 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
    * same message ("...and show me socks") would carry off. Complete and
    * theirs, it is done here, once.
    */
+  /*
+   * Their words read by a model first (ai/readTurn.ts), when they answer a
+   * question or are not in English: the yes, the size, the colour that the
+   * pattern readers below would otherwise miss. Cached for this turn, so
+   * every reader that follows sees the same reading.
+   */
+  {
+    const before = await sessions.getOrCreate(sessionId);
+    const lastAssistant = [...before.messages].reverse().find((message) => message.role === 'assistant')?.text;
+    const answering = !!before.pendingAction || /\?\s*$/.test(lastAssistant ?? '');
+    if (needsModelReading(userText, answering)) await readTurnWithModel(userText, { sessionId, ...(lastAssistant ? { question: lastAssistant } : {}), ...(meta?.client ? { client: meta.client } : {}) });
+  }
+  /*
+   * "Add everything" with an outfit on screen: every piece, each its own
+   * add - the model called product details four times and added one, and
+   * an offer waiting on the swapped polo then swallowed the words (journey
+   * test, 29 Sep). A piece offered in a slot's place takes that slot.
+   */
+  const wantsAll = /\b(everything|all of (it|them|these|those)|the (whole |full |complete )?outfit|the lot|all (the |of the )?(pieces|items|four|three))\b/i.test(userText);
+  {
+    const before = await sessions.getOrCreate(sessionId);
+    if (before.lastOutfit?.items?.length && asksToAdd(userText) && wantsAll && before.cartMode === 'theme' && !unsettledOperation(before)) {
+      const offer = before.pendingAction?.type === 'add-product' && before.pendingAction.awaiting === 'confirmation' ? before.pendingAction : undefined;
+      const offered = offer?.productIds.map((id) => productById(id)).find((product): product is Product => !!product);
+      const items = before.lastOutfit.items.filter((item) => item.id).map((item) => {
+        const own = productById(item.id);
+        return offered && own && primaryKind(own) && primaryKind(own) === primaryKind(offered) ? offered.id : item.id;
+      });
+      if (offer) await sessions.patch(sessionId, { pendingAction: undefined });
+      // What "everything" points at is the outfit, whatever search has replaced it on screen since: its pieces are the screen for these adds.
+      await sessions.patch(sessionId, { lastShown: { kind: 'products', items: items.map((id) => ({ id, title: productById(id)?.title ?? '' })) } });
+      const actions: CartAction[] = [];
+      const cards: Product[] = [];
+      let dispatched = 0;
+      const speeches: string[] = [];
+      for (const id of [...new Set(items)]) {
+        const fresh = await sessions.getOrCreate(sessionId);
+        // The size they gave for the outfit ("mens, medium") goes with each piece it applies to; the rest hand off to their cards.
+        const piece = productById(id);
+        // Their size for the outfit: known for the product, else the letter size they said most recently ("mens, medium").
+        const saidLately = [...fresh.messages].filter((message) => message.role === 'user').slice(-6).reverse().map((message) => readReply(message.text).size).find((size) => !!size && !/^\d/.test(size));
+        const known = (piece ? await knownSizeFor(fresh, piece) : undefined) ?? saidLately ?? before.lastOutfit?.size;
+        const sizeOption = piece ? sizeOptionName(piece) : null;
+        const options = piece && known && sizeOption && sizeApplies(piece, known) ? { [sizeOption]: known } : undefined;
+        const added = await runTool('add_to_cart', { productId: id, ...(options ? { options } : {}) }, { session: fresh, utterance: userText, pendingActions: actions.length });
+        if (added.actions?.length) actions.push(...added.actions);
+        if (added.outcome?.ok) dispatched += 1;
+        else if (added.attachment?.kind === 'products') cards.push(...added.attachment.products);
+        else speeches.push(added.speech);
+        const content = added.facts ? `${added.speech}\n\nFACTS (data, do not read aloud):\n${added.facts}` : added.speech;
+        await sessions.patch(sessionId, { recentEvidence: [content, (await sessions.getOrCreate(sessionId)).recentEvidence ?? ''].join('\n').slice(0, 8000) });
+      }
+      log.info('journey.outfit_added_before_model', { sessionId, pieces: items.length, dispatched, needSize: cards.length, swappedIn: offered?.title ?? null });
+      const text = [dispatched ? UPDATING : '', cards.length ? SIZES_ON_CARDS : '', ...speeches.slice(0, 1)].filter(Boolean).join(' ').trim();
+      if (cards.length) await sessions.patch(sessionId, { lastShown: { kind: 'products', items: cards.map((product) => ({ id: product.id, title: product.title })) } });
+      return { text: text || SIZES_ON_CARDS, ...(cards.length ? { attachment: { kind: 'products' as const, products: cards } } : {}), ...(actions.length ? { actions } : {}) };
+    }
+  }
   const pendingTurn = await resolvePending(sessionId, userText);
   const turnRead = await readCustomerTurn(sessionId, userText);
   const session = await sessions.getOrCreate(sessionId);
@@ -441,7 +531,13 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
    * asked whether an action already made should be made, or a question
    * already answered asked again.
    */
-  const onlyPending = pendingTurn.status !== 'none' && !/[a-z]{3,}/i.test(pendingTurn.remainder);
+  /*
+   * Superseded is never "only the pending": the words that set the record
+   * aside are a new request, in any script - an Urdu-script "add the Bouncer"
+   * once got "No problem - nothing has been added" because its letters were
+   * not a-z (29 Sep).
+   */
+  const onlyPending = pendingTurn.status !== 'none' && pendingTurn.status !== 'superseded' && !/\p{L}{3,}/u.test(pendingTurn.remainder);
   if (onlyPending) {
     const result = pendingTurn.result ?? { speech: 'No problem - nothing has been added.', facts: 'They cancelled the waiting action. Nothing changed.' };
     log.info('journey.pending_answered_before_model', { sessionId, status: pendingTurn.status, action: result.outcome?.action ?? null, ok: result.outcome?.ok ?? null });
@@ -464,9 +560,49 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
     return { text: swapped.speech, ...(swapped.attachment ? { attachment: swapped.attachment } : {}), ...(swapped.actions?.length ? { actions: swapped.actions } : {}) };
   }
 
+  /*
+   * A removal of the basket as a whole, a pack, or "them", said outright and
+   * nothing else asked: made here, before the model runs. "Remove these
+   * items from my basket" got a question and no tool; "remove them all" got
+   * six refused calls and the model's own "remove the entire pack?" with
+   * nothing recorded behind it; "please remove it" was then a new "it" to
+   * resolve (live, pack removal). The gateway reads their words, takes out
+   * the lines they mean or asks one question bound to every line, and the
+   * customer hears its exact words.
+   */
+  /*
+   * "What colours does it come in?" about the product in hand: the colours
+   * tool, before the model. Left to the model it searched for rain gear
+   * and answered about a jacket (journey test, 29 Sep).
+   */
+  const asksColours = /\b(what|which) colou?rs?\b|\bcolou?rs? (does|do) (it|this|that|they|these) come in\b|\bother colou?rs?\b|\bcome in (any )?(other|different) colou?rs?\b|\bany other colou?rs?\b/i.test(userText);
+  const inHandId = session.page?.pageType === 'product' && session.page.productId ? session.page.productId : session.activeShoppingContext?.productId ?? session.lastLead?.id;
+  if (pendingTurn.status === 'none' && asksColours && inHandId && !asksToAdd(userText)) {
+    const colours = await runTool('other_colours', { productId: inHandId }, { session, utterance: userText });
+    log.info('journey.colours_before_model', { sessionId, productId: inHandId, ok: !colours.outcome || colours.outcome.ok });
+    const content = colours.facts ? `${colours.speech}\n\nFACTS (data, do not read aloud):\n${colours.facts}` : colours.speech;
+    await sessions.patch(sessionId, { recentEvidence: [content, session.recentEvidence ?? ''].join('\n').slice(0, 8000) });
+    if (colours.attachment?.kind === 'products') await sessions.patch(sessionId, { lastShown: { kind: 'products', items: colours.attachment.products.map((product) => ({ id: product.id, title: product.title })) } });
+    return { text: colours.speech, ...(colours.attachment ? { attachment: colours.attachment } : {}) };
+  }
+  if (pendingTurn.status === 'none' && !livePending(session) && !session.basket && session.cartMode === 'theme' && removalOfBasket(userText)) {
+    // The widget has not reported the basket yet (its sync on open is fire-and-forget): said so, rather than "which item?" over lines the server cannot see.
+    log.warn('journey.basket_unknown', { sessionId });
+    const speech = "I can't see your basket from here just yet - give it a second and ask me again, or open the cart with the basket icon.";
+    await sessions.patch(sessionId, { recentEvidence: [speech, session.recentEvidence ?? ''].join('\n').slice(0, 8000) });
+    return { text: speech };
+  }
+  if (pendingTurn.status === 'none' && !livePending(session) && session.basket && session.cartMode === 'theme' && (removalOfBasket(userText) || (!session.basket.length && removalOnly(userText)))) {
+    const removed = await runTool('update_cart_item', { lineId: session.basket[0]?.lineId ?? 'none', quantity: 0 }, { session, utterance: userText });
+    log.info('journey.removal_before_model', { sessionId, ok: removed.outcome?.ok ?? null, reason: removed.outcome?.reason ?? null, dispatched: removed.outcome?.dispatched ?? false });
+    const content = removed.facts ? `${removed.speech}\n\nFACTS (data, do not read aloud):\n${removed.facts}` : removed.speech;
+    await sessions.patch(sessionId, { recentEvidence: [content, session.recentEvidence ?? ''].join('\n').slice(0, 8000) });
+    return { text: removed.speech, ...(removed.attachment ? { attachment: removed.attachment } : {}), ...(removed.actions?.length ? { actions: removed.actions } : {}) };
+  }
+
   const messages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
-    ...([pageContext(session), screenContext(session), focusContext(session), goalContext(startGoal), basketContext(session), shopperContext(session)].filter(Boolean) as ChatMessage[]),
+    ...([pageContext(session), screenContext(session), focusContext(session), goalContext(startGoal), basketContext(session), shopperContext(session), toolMemoryContext(session)].filter(Boolean) as ChatMessage[]),
     ...history(session),
     /*
      * Last before their words: the tap happened after the reply before it.
@@ -479,13 +615,17 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
 
   /*
    * What this turn's reply may rest on: the customer's own words, what is on
-   * their screen and in their basket, what they have told us, and every tool
-   * result this turn. Not the model's earlier replies - those are what is
-   * being checked. See verify.ts.
+   * their screen and in their basket, what they have told us, every tool
+   * result this turn - and the Caddie's own earlier replies. Those were once
+   * excluded as "what is being checked", but every reply in history has
+   * already passed this same check before it went out, so a price or a name
+   * the Caddie has said is one it verified. Without them, "how much is the
+   * pack?" two turns after "£129.99" lost the figure (admin log). See
+   * verify.ts.
    */
   const evidence: string[] = [
     userText,
-    ...messages.slice(1).filter((m) => m.role === 'system' || m.role === 'user').map((m) => String(m.content ?? '')),
+    ...messages.slice(1).filter((m) => m.role === 'system' || m.role === 'user' || m.role === 'assistant').map((m) => String(m.content ?? '')),
     // What the tools said in the last turns: "how much is the pack?" is answered from a card already shown.
     session.recentEvidence ?? '',
   ];
@@ -499,6 +639,7 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
   // A sentence a tool said the reply must open with - see ToolResult.lead.
   let lead: { text: string; unless: RegExp } | undefined;
   let rewrote = false;
+  let showRewrote = false;
   // Whether an add was tried this turn - once it has, a question back is the tool's, not the model skipping it.
   let addTried = false;
   // Whether the goal was carried out by code this turn (see below) - once, never twice.
@@ -537,7 +678,14 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
           : `They cancelled what was waiting - nothing was added or changed. Answer what they said: "${pendingTurn.remainder}".`;
     messages.splice(messages.length - 1, 0, { role: 'system', content: note });
     evidence.push(note);
-    if (pendingTurn.status === 'asked' && result?.speech) lead = { text: result.speech, unless: new RegExp(result.speech.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 40), 'i') };
+    /*
+     * The action's own words open the reply whether it is still asking or
+     * was just done. "Red blazer, you already know my size" executed the
+     * waiting add, and the model answered only the rest - "we don't stock a
+     * red blazer" - so the customer never heard that the jacket was going in
+     * (admin log, 28 Sep).
+     */
+    if ((pendingTurn.status === 'asked' || pendingTurn.status === 'executed') && result?.speech) lead = { text: result.speech, unless: leadUnless(result.speech) };
     log.info('journey.pending_before_model', { sessionId, status: pendingTurn.status, remainder: pendingTurn.remainder.slice(0, 80) });
   }
   /** Set when searches were merged, so "on screen" is updated to match. */
@@ -624,7 +772,14 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
             attachmentWeight = cardWeight(asked.attachment, true);
           }
           finalText = asked.speech;
-        } else if (!/\?/.test(finalText)) finalText = asked.speech;
+        } else {
+          // Refused with a choice to make: the candidates go on screen with the question, so a tap can answer it.
+          if (asked.attachment?.kind === 'products') {
+            attachment = asked.attachment;
+            attachmentWeight = cardWeight(asked.attachment, false);
+          }
+          if (!/\?/.test(finalText)) finalText = asked.speech;
+        }
       }
       /*
        * The same for the pack: "add the pack to my basket" answered with
@@ -724,8 +879,70 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
      * they asked to add and nothing was tried, the add tool goes first: it
      * knows which product they named and asks for exactly what is missing.
      */
-    const asksSize = /\b(what|which)\s+size\b|\bsize (would|do|should) you\b|\byour size\b/i.test(finalText);
+    const asksSize = ASKS_SIZE.test(finalText);
     const askedInstead = asksSize || /\?\s*$/.test(finalText);
+    /*
+     * "What size do you need?" as the closing line of every search. In the
+     * recorded conversations it ended replies to "show me the cheapest
+     * jackets" and "show me trousers" alike, and a customer who was
+     * browsing was interrogated instead of helped (admin log). Their size is
+     * asked when they are buying. Sent back once, told to end with an offer.
+     */
+    /*
+     * The Caddie never asks for a size (tools/sizeHandoff.ts): the card does.
+     * A reply that asks is sent back once; if it asks again, the question
+     * comes off and, when an add is waiting on a size, the card's line goes
+     * in its place.
+     */
+    /*
+     * "Which colour of the Block Pique Polo would you like?" at the end of an
+     * answer to "which is better for hot weather?" (journey test, 29 Sep): a
+     * colour is asked when they are adding, never as the closing line of an
+     * answer. The question comes off.
+     */
+    const asksColourChoice = /\s*[^.?!]*\bwhich (colour|color)\b[^?]*\?/i;
+    if (calls.length === 0 && asksColourChoice.test(finalText) && !asksToAdd(userText) && (await sessions.getOrCreate(sessionId)).pendingAction?.awaiting !== 'colour') {
+      const stripped = finalText.replace(asksColourChoice, '').trim();
+      if (stripped) {
+        log.warn('reply.colour_question_removed', { sessionId });
+        finalText = stripped;
+      }
+    }
+    /*
+     * "Which one would you like?" as the closing line over a screen of
+     * results, with nothing waiting: the customer has just been shown six
+     * cards and asked to do the Caddie's job (journey test, 29 Sep). It comes
+     * off; the recommendation and one offer stand. Kept when a real choice
+     * is waiting - two lines in the basket, two designs named - because then
+     * the question is the code's own.
+     */
+    const askedWhichOne = /\s*[^.?!]*\bwhich (one|ones|of (these|those|them))?\s*(would you|do you|are you)?\s*(like|prefer|want|fancy|going for|choose|pick)\b[^?]*\?/i;
+    if (calls.length === 0 && attachment?.kind === 'products' && askedWhichOne.test(finalText) && !outcomes.length && !livePending(await sessions.getOrCreate(sessionId))) {
+      const stripped = finalText.replace(askedWhichOne, '').trim();
+      if (stripped) {
+        log.warn('reply.which_one_removed', { sessionId });
+        finalText = stripped;
+      }
+    }
+    const askedAboutTheirSize = /\b(what size am i|my size|which size (am i|would i be|do i need)|size (guide|chart))\b/i.test(userText);
+    if (calls.length === 0 && asksSize && !askedAboutTheirSize) {
+      if (!rewrote) {
+        rewrote = true;
+        log.warn('reply.asked_size', { sessionId });
+        messages.push({ role: 'assistant', content: finalText });
+        messages.push({
+          role: 'system',
+          content:
+            `Never ask their size - they choose it on the product page (View product). ${asksToAdd(userText) || livePending(await sessions.getOrCreate(sessionId)) ? `Say exactly: "${SIZE_ON_CARD}"` : 'Keep your recommendation and end with one offer instead - to add the one you led with, or to narrow down by colour, budget or the weather they play in.'} One sentence, no size question.`,
+        });
+        continue;
+      }
+      const stripped = finalText.replace(/,?\s*(and|or)\s+(what|which)\s+(top |waist |leg )?size[^?]*\?/i, '?').replace(/\s*[^.?!]*\b(what|which)\s+(top |waist |leg )?size\b[^?]*\?/i, '').replace(/\s*[^.?!]*\bsize (would|do|should|will) you\b[^?]*\?/i, '').trim();
+      const waitingOnSize = livePending(await sessions.getOrCreate(sessionId))?.awaiting;
+      const handoff = waitingOnSize === 'size' || waitingOnSize === 'waist' || waitingOnSize === 'leg' ? ` ${SIZE_ON_CARD}` : '';
+      log.warn('reply.size_question_removed', { sessionId });
+      finalText = `${stripped}${handoff}`.trim() || SIZE_ON_CARD;
+    }
     /*
      * Not when the goal still needs something: "add this Hexa instead of the
      * red jacket" rightly gets "which colour?" - sent back to call
@@ -749,6 +966,43 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
      * like?" with no tool called - the tool reads the weather and picks Cool &
      * Wet itself. Sent back once to call it.
      */
+    /*
+     * Asked to take something out, and answered with a question instead of
+     * the tool. "Remove these items from my basket" got "which item?" with
+     * no tool called - update_cart_item reads their words and asks only what
+     * is really missing. Sent back once to call it.
+     */
+    if (calls.length === 0 && !rewrote && !goalCarriedOut && !livePending(await sessions.getOrCreate(sessionId)) && (session.basket ?? []).length && asksToRemove(userText) && /\?\s*$/.test(finalText) && !outcomes.length) {
+      rewrote = true;
+      log.warn('reply.asked_instead_of_removing', { sessionId });
+      messages.push({ role: 'assistant', content: finalText });
+      messages.push({
+        role: 'system',
+        content:
+          'They asked to take something out of the basket. Do not ask which - call update_cart_item now with quantity 0 and the line id you think they mean (one call is enough for "all", "them" or "the pack"). The tool reads their words, takes out the lines they mean, and asks for exactly what is missing if anything is.',
+      });
+      continue;
+    }
+    /*
+     * Asked to see something, and nothing shown. "Show me the cheapest polo
+     * and the most expensive" was answered "would you like to narrow down
+     * by colour or budget?" with no search at all; "I also want to see
+     * yellow" was answered from memory with no new cards (live, 29 Sep).
+     * A customer who asks to see gets a screen. Sent back once to search.
+     */
+    const asksToSee = /\b(show|see|find|looking for|browse|cheapest|expensive|dearest|priciest|options?|what (do|have) you (got|have)|do you have|any (other|more)|as well|too)\b/i.test(userText);
+    if (calls.length === 0 && !showRewrote && !attachment && !goalCarriedOut && !outcomes.length && asksToSee && !asksToAdd(userText) && !asksToRemove(userText)) {
+      // Its own allowance: the size-reflex rewrite often runs first on the same turn, and a screen matters more than the wording.
+      showRewrote = true;
+      log.warn('reply.answered_without_showing', { sessionId });
+      messages.push({ role: 'assistant', content: finalText });
+      messages.push({
+        role: 'system',
+        content:
+          'They asked to see products and nothing new is on screen. Call search_products now with their words (colour, price, kind as they said them - "cheapest" and "most expensive" are read by the tool) and then reply in one sentence about what it returned. Do not answer from memory.',
+      });
+      continue;
+    }
     if (calls.length === 0 && !rewrote && step === 0 && namesADeal(userText) && /\?\s*$/.test(finalText)) {
       rewrote = true;
       log.warn('reply.skipped_the_deal', { sessionId });
@@ -815,6 +1069,13 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
      */
     // Handed to the widget is not made: "added" is a claim until the cart's report says so (tools/cartOperations.ts).
     const dispatchedNow = outcomes.find((outcome) => outcome.ok && outcome.dispatched);
+    /*
+     * A basket change went to the widget this turn and the reply says nothing
+     * of it: "remove all of these and show me polos" came back as polos only,
+     * and the customer had to look at the drawer to know the pack was going
+     * (harness replay, 29 Sep). The update opens the reply.
+     */
+    if (dispatchedNow && calls.length === 0 && !/\b(basket|cart|bag)\b/i.test(finalText)) finalText = `${UPDATING} ${finalText}`.trim();
     // "I’m updating your basket" with a curly apostrophe once slipped past this check: read with plain quotes.
     const plainText = finalText.replace(/[‘’]/g, "'");
     const nowSession = await sessions.getOrCreate(sessionId);
@@ -830,7 +1091,9 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
       /\bin your (basket|cart|bag)( now)?\b/i.test(plainText) &&
       (nowSession.basket ?? []).some((line) => plainText.toLowerCase().includes(garmentName(line.title).toLowerCase())) &&
       !/\b(added|adding|put|placed|placing|going in|gone in|goes in|removed|removing|updated|updating|changed|changing|swapped|swapping)\b/i.test(plainText);
-    if (calls.length === 0 && !outcomes.some((outcome) => outcome.ok && !outcome.dispatched) && !goalCarriedOut && claimsDone.test(plainText) && !statesContents) {
+    // A pack card built this turn: "I've swapped the polo" is about the pack on screen, not the basket.
+    const packChangedNow = (attachment?.kind === 'pack' || attachment?.kind === 'outfit') && !outcomes.length;
+    if (calls.length === 0 && !outcomes.some((outcome) => outcome.ok && !outcome.dispatched) && !goalCarriedOut && claimsDone.test(plainText) && !statesContents && !packChangedNow) {
       const waiting = nowSession.pendingAction;
       // "Nothing has changed": an earlier turn may well have added something.
       const truth = dispatchedNow ? UPDATING : (refused[refused.length - 1]?.speech ?? waiting?.question ?? 'Nothing has changed in your basket.');
@@ -848,6 +1111,21 @@ export async function converse(sessionId: string, userText: string, meta?: TurnM
       }
       log.warn('reply.claimed_refused_action_after_rewrite', { sessionId });
       finalText = truth;
+    }
+    /*
+     * A basket change refused for want of a target, and the model asking a
+     * question of its own over the tool's. "Which item do you mean?" bound
+     * nothing either way, but "shall I remove the entire pack?" invited a
+     * yes that no record could honour - and the loop began (live, pack
+     * removal). The tool's question is the one the next turn can answer.
+     */
+    const untargeted = refused.filter((outcome) => (outcome.action === 'update-line' || outcome.action === 'add-product') && (outcome.reason === 'no-target' || outcome.reason === 'ambiguous-target'));
+    if (calls.length === 0 && untargeted.length && !outcomes.some((outcome) => outcome.ok) && /\?/.test(finalText) && !livePending(nowSession)) {
+      const own = untargeted[untargeted.length - 1]!.speech;
+      if (own && finalText !== own) {
+        log.warn('reply.basket_question_unbound', { sessionId, over: finalText.slice(0, 120) });
+        finalText = own;
+      }
     }
     if (calls.length === 0 && finalText) {
       const violations = verifyReply(finalText, evidence.join('\n'), attachment, userText, await verifyContext(sessionId));

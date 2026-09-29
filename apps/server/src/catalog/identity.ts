@@ -109,8 +109,30 @@ export function editDistance(a: string, b: string, limit = 3): number {
  * Short words are left alone: "tex" and "hex" are both Druids names, one
  * letter apart.
  */
+/*
+ * Ordinary English words are never read as a misspelt product name. "Price
+ * scale" was one edit from PRIME, so "polos at the upper end of your price
+ * scale" became a search for the Prime Polo, and a £20 polo was called the
+ * dearest in the store (harness, 29 Sep). A product name a customer typed
+ * wrongly is still matched; a word of the language is not.
+ */
+const COMMON_WORDS = new Set(
+  (
+    'price prices priced pricing cost costs cheap cheaper cheapest dear dearer dearest upper lower end scale range order sort show find want need like love best good great nice better ' +
+    'worse more less most least some many much thing things item items option options choice please thanks thank about around under over with without from into onto have has had does doing done ' +
+    'make made take took give gave look looks looking size sizes fit fits wear wears colour colours color colors style styles design designs kind kinds type types sorts stock store shop basket cart bag ' +
+    'back again another other these those there here where what when which that this than then them they your yours mine ours first second third last next only just also even still very quite really ' +
+    'pretty weather rain rainy cold warm hot wet dry wind windy sun sunny season trip weekend today tomorrow week month year mens ladies womens kids golf game round course club clubs play playing ' +
+    'player budget money spend pound pounds quid total deal deals offer offers bundle pack packs gift present dad mum wife husband friend mate son daughter name names brand expensive priciest pricey ' +
+    'premium quality value top bottom high low big bigger small smaller long short wide narrow plain simple basic classic fancy smart casual formal everything anything something nothing none both ' +
+    'either neither each every any few several lot lots plenty enough such well way ways help sorry hello yes okay sure fine right wrong maybe perhaps probably definitely actually exactly instead ' +
+    'rather prefer preferred favourite favorite recommend suggest suggestion advice idea ideas light lightweight heavy thick thin soft hard'
+  ).split(/\s+/),
+);
+
 export function wordSimilarity(said: string, known: string): 'strong' | 'weak' | null {
   if (said === known || said.length < 4 || known.length < 4) return null;
+  if (COMMON_WORDS.has(said.toLowerCase())) return null;
   const distance = editDistance(said, known, 2);
   if (distance > 2) return null;
   const sameStart = said[0] === known[0];

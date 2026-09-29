@@ -154,7 +154,7 @@ describe('"add it" after tapping M', () => {
     // Nor may the model carry it across: M was never said for the Warrior.
     const guessed = await add(id, { productId: WARRIOR.id, options: { Size: 'M' } }, 'Add it.');
     expect(guessed.variantIds).toEqual([]);
-    expect(guessed.result.speech).toMatch(/what size/i);
+    expect(guessed.result.speech).toMatch(/choose your size/i);
   });
 
   it('M sold out since: nothing added, and the customer is told', async () => {
@@ -172,7 +172,7 @@ describe('what the card merely shows is not a choice', () => {
     await sessions.patch(id, { lastShown: { kind: 'products', items: [{ id: TEX.id, title: TEX.title }] } });
     const { result, variantIds } = await add(id, { productId: TEX.id }, 'Add it.');
     expect(variantIds).toEqual([]);
-    expect(result.speech).toMatch(/which size/i);
+    expect(result.speech).toMatch(/choose your size/i);
   });
 });
 

@@ -46,6 +46,16 @@ const WORDS: Record<string, string> = {
  * word is a failure of ours and should not read to the customer as the store
  * being empty.
  */
+/**
+ * Letters outside ASCII folded to a harmless letter before a size reader
+ * strips text to a-z: stripping the accent off "sí" left an "s", and a
+ * Spanish yes was read as size S in five places at once (the pack reader,
+ * the goal, the size evidence check). "sí" becomes "sx", which is no size.
+ */
+export function foldNonAscii(text: string): string {
+  return text.replace(/[^\x00-\x7F]/gu, (ch) => (/\p{L}/u.test(ch) ? 'x' : ' '));
+}
+
 export function normaliseSize(raw: string | undefined | null): string | null {
   if (!raw) return null;
 

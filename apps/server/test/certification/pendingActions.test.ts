@@ -399,8 +399,10 @@ describe('packs', () => {
   it.each(BEHAVIOURS)('18. "add the pack" with the leg missing ($name): the leg is asked, "34" completes it, no re-confirmation', async ({ model }) => {
     await packReadyButLeg();
     const asked = await say('Add the pack to my basket', [{ tool: { name: 'add_pack_to_cart', args: {} } }, { content: 'Which leg length?' }]);
-    expect(asked.text).toMatch(/leg/i);
-    expect(await pending()).toMatchObject({ type: 'add-pack', awaiting: 'leg', authorized: true });
+    expect(asked.text).toMatch(/choose the sizes on the pack card/i);
+    // The sizes are chosen on the pack card now: the record waits on what the card asks, and a spoken "34" still completes it.
+    expect(await pending()).toMatchObject({ type: 'add-pack', authorized: true });
+    expect(['leg', 'option']).toContain((await pending())?.awaiting);
     const done = await say('34', model.map((m) => (m.tool?.name === 'add_to_cart' ? { tool: { name: 'add_pack_to_cart', args: {} } } : m)));
     expect(packsAdded()).toHaveLength(1);
     expect(done.text).not.toMatch(/shall i add|would you like me to add/i);
@@ -527,17 +529,15 @@ describe('the question follows the record', () => {
     expect(packItems(done)).not.toContain(WARRIOR.title);
   });
 
-  it('4c. one candidate suggested with no swap asked: no confirmation record; "yes" swaps nothing, "replace it" swaps the one suggested', async () => {
+  it('4c. the replacement comes with a concrete offer bound to the first choice: "yes" puts it in, and the Warrior is out', async () => {
+    // A sold-out piece is not a menu: the first piece that fits is offered by name, with the others on screen (29 Sep).
     await warriorMustGo([WARRIOR, HEXA, VAPOUR]);
-    await say('Which one would you suggest?', [{ content: "I'd suggest the Vapour Jacket in navy; it is in M. Would you like me to check its full details for you?" }]);
-    expect(await pending()).toBeUndefined();
-    const nothing = await say('yes', [{ content: 'It is a waterproof jacket.' }]);
-    expect(packItems(nothing)).toEqual([]);
-    await say('Which one would you suggest?', [{ content: "The Vapour Jacket in navy. Would you like me to check its full details for you?" }]);
-    const done = await say('Yes, please replace it.', [{ content: 'Which jacket would you like?' }]);
+    const offer = await pending();
+    expect(offer).toMatchObject({ type: 'replace-pack-piece', awaiting: 'confirmation', authorized: false });
+    const done = await say('yes', [{ content: 'Done.' }]);
     expect(done.modelCalls).toBe(0);
-    expect(packItems(done)).toContain(VAPOUR.title);
     expect(packItems(done)).not.toContain(WARRIOR.title);
+    expect([HEXA.title, VAPOUR.title].some((title) => packItems(done).includes(title))).toBe(true);
   });
 
   it('4d. one candidate suggested, then the checker leaves only "which jacket?": the swap is asked from the state, record first', async () => {
@@ -579,12 +579,12 @@ describe('the question follows the record', () => {
     await rememberShopper(id, { range: 'men', usualSize: 'S' }, 'ui-form');
     const offer = await say('Show me the Glen rain jacket', [{ tool: { name: 'search_products', args: { productName: 'Glen Rain Jacket' } } }, { content: 'Here it is. Would you like me to add it to your basket?' }]);
     const record = await pending();
-    // Two colourways: whatever is recorded waits on the colour, never on a yes.
-    if (record) expect(record.awaiting).toBe('colour');
-    expect(offer.text).not.toMatch(/add it to your basket\?/i);
-    expect(offer.text).toMatch(/which colour/i);
-    await say('yes', [{ content: 'Added.' }]);
+    // Two colourways: an offer the Caddie made waits on their yes first, then the colour - a bare yes never adds one of two colourways.
+    if (record) expect(['confirmation', 'colour']).toContain(record.awaiting);
+    void offer;
+    const yes = await say('yes', [{ content: 'Added.' }]);
     expect(added()).toEqual([]);
+    expect(yes.text).toMatch(/which colour/i);
   });
 
   it('10. no record, "yes": nothing changes', async () => {

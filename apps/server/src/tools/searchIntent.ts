@@ -1,3 +1,6 @@
+import { readReply } from './answers.js';
+import { modelReadingFor } from '../ai/readTurn.js';
+import { log } from '../lib/logger.js';
 import { FEATURE_LABEL, WEATHER_NEEDS, featuresAsked, type Feature, type Weather } from '../catalog/attributes.js';
 import { parseRange, type Range } from '../catalog/audience.js';
 import { parseColours } from '../catalog/colour.js';
@@ -8,7 +11,7 @@ import { lookupProductName, namingWords } from '../catalog/lookup.js';
 import { normaliseQuery } from '../catalog/taxonomy.js';
 import { productById } from '../catalog/sync.js';
 import { priceFor } from '../recommend/pricing.js';
-import { normaliseSize } from '../recommend/sizeWords.js';
+import { foldNonAscii, normaliseSize } from '../recommend/sizeWords.js';
 import { phoneticEnglish } from '../ai/phoneticEnglish.js';
 import { readIntent } from '../shopper/profile.js';
 import { describeFocus, designOf, focusQuery, inFocus, isFollowUp, requestedKinds, type ShoppingFocus } from '../session/focus.js';
@@ -120,6 +123,8 @@ export interface SearchIntent {
  */
 export type PriceIntent =
   | { mode: 'minimum' }
+  | { mode: 'maximum' }
+  | { mode: 'extremes' }
   | { mode: 'below'; reference?: { id: string; title: string; price: number } };
 
 /** The search_products arguments this reads - the model's proposal. */
@@ -131,6 +136,8 @@ export interface SearchArgs {
   colour?: string;
   size?: string;
   maxPrice?: number;
+  /** How the model read their price intent: lowest first, highest first, or both ends. Taken when their words are about price at all. */
+  priceOrder?: 'lowest' | 'highest' | 'both';
   /** Proposed features - words, checked against the features the catalogue knows. */
   features?: string[];
 }
@@ -168,7 +175,18 @@ const COMPARATIVES: Array<[RegExp, Feature]> = [
 
 const RANGE_ARG: Record<string, Range> = { mens: 'men', ladies: 'women', kids: 'kids' };
 
-const CHEAPEST = /\b(cheapest|lowest[- ]?price[ds]?|lowest[- ]cost|least expensive|most affordable|best price)\b/i;
+const CHEAPEST = /\b(cheapest|cheap|cheaper ones?|budget ones?|lowest[- ]?price[ds]?|lowest[- ]cost|least expensive|most affordable|best price|bargains?)\b/i;
+/*
+ * "Your expensive polos", "the expensive polo you have", "dearest", "top of
+ * the range": the dear end of the price list. "Show me your expensive polos"
+ * once ran as an ordinary polo search and led with a £20 polo when the
+ * dearest is £26 (live, 29 Sep). "Not too expensive" is the other end.
+ */
+const DEAREST = /\b(expensive|dearest|priciest|pricey|highest[- ]?price[ds]?|top[- ]of[- ]the[- ]range|top[- ]end|high[- ]end|most premium|premium ones?)\b/i;
+const NOT_DEAR = /\b(not|nothing|no|never|less|isn'?t|aren'?t|without being|avoid)\s+(\w+\s+){0,2}(expensive|pricey|dear|premium)\b|\bcheaper than\b/i;
+const NOT_CHEAP = /\b(not|nothing|no|never|isn'?t|aren'?t|avoid)\s+(\w+\s+){0,2}cheap\b|\bcheap[- ]?looking\b|\bcheaply\b/i;
+const asksDearest = (said: string) => DEAREST.test(said) && !NOT_DEAR.test(said);
+const asksCheapest = (said: string) => (CHEAPEST.test(said) && !NOT_CHEAP.test(said)) || NOT_DEAR.test(said);
 const CHEAPER = /\b(cheaper|less expensive|more affordable|lower[- ]?price[ds]?|less pricey|not as expensive|lower cost)\b/i;
 /** "Cheaper than £30" is a budget, read as one; only a comparison with nothing named after it is relative. */
 const CHEAPER_THAN_AMOUNT = /\b(cheaper|less) than\s*(?:£|\$|€)?\s?\d/i;
@@ -178,8 +196,31 @@ const CHEAPER_THAN_AMOUNT = /\b(cheaper|less) than\s*(?:£|\$|€)?\s?\d/i;
  * compared with is the one they are looking at: the product last talked
  * about, else the one the last search led with - never one the model names.
  */
-function readPrice(said: string, ctx: ToolContext, size: string | undefined): PriceIntent | undefined {
-  if (CHEAPEST.test(said)) return { mode: 'minimum' };
+const ABOUT_PRICE = /\b(cheap|cheaper|cheapest|expensive|pricey|price[ds]?|pricing|cost|costs|dear|dearest|premium|budget|afford|affordable|value|bargain|top[- ]end|high[- ]end|range)\b|[£$€]/i;
+
+/**
+ * The price comparison in the customer's words - read three ways, the
+ * customer's words deciding each time. Their own words first (English
+ * patterns); then the model reader's reading of them (ai/readTurn.ts, any
+ * language); then the conversation model's proposal (priceOrder), taken
+ * only when their words are about price at all. "Show me your expensive
+ * polos" once ran as an ordinary polo search because only a pattern could
+ * switch price ordering on (live, 29 Sep).
+ */
+function readPrice(said: string, ctx: ToolContext, size: string | undefined, proposed?: 'lowest' | 'highest' | 'both'): PriceIntent | undefined {
+  if (asksCheapest(said) && asksDearest(said)) return { mode: 'extremes' };
+  if (asksDearest(said)) return { mode: 'maximum' };
+  if (asksCheapest(said)) return { mode: 'minimum' };
+  const read = modelReadingFor(said)?.priceIntent;
+  if (read === 'both') return { mode: 'extremes' };
+  if (read === 'dearest') return { mode: 'maximum' };
+  if (read === 'cheapest') return { mode: 'minimum' };
+  if (proposed && ABOUT_PRICE.test(said)) {
+    log.info('search.price_order_from_model', { sessionId: ctx.session.id, proposed });
+    if (proposed === 'both') return { mode: 'extremes' };
+    if (proposed === 'highest') return { mode: 'maximum' };
+    if (proposed === 'lowest') return { mode: 'minimum' };
+  }
   if (!CHEAPER.test(said) || CHEAPER_THAN_AMOUNT.test(said)) return undefined;
   // Cheaper than the one in focus - a jacket still on screen is not the comparison when they are on polos.
   const focus = ctx.session.activeShoppingContext;
@@ -205,6 +246,8 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
   const phonetic = raw && !ENGLISH.test(raw) ? phoneticEnglish(raw) : null;
   const said = phonetic ? phonetic.normalised : raw;
   const verifiable = !!said && ENGLISH.test(said);
+  // The model reader's structured read of the same words (ai/readTurn.ts): what the customer asked for, in any phrasing.
+  const asks = modelReadingFor(raw)?.asks;
   const turn: Turn = phonetic ? readIntent(said) : spoken;
   // This shopping session's constraints over what they told us about themselves - one order, shopper/facts.ts.
   const profile = shopperView(ctx.session);
@@ -259,6 +302,8 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
   // Asked for - "over a hoodie" is context, not a hoodie (session/focus.ts).
   const saidCategories = requestedKinds(said);
   const previousCategories = (current?.kinds ?? []) as Category[];
+  // The kinds the Caddie itself offered in its last reply ("a jacket, trousers or a full set?").
+  const offeredKinds = categoriesAsked([...ctx.session.messages].reverse().find((message) => message.role === 'assistant')?.text ?? '');
   let categories: IntentValue<Category[]> | undefined;
   if (saidCategories.length) {
     // What they named - the model's pick only when it is one of those ("polos and jackets": the polo search).
@@ -270,8 +315,21 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
     categories = { value: focus!.kinds, source: 'conversation', strength: 'hard' };
     const off = proposedCategories.filter((kind) => !focus!.kinds.includes(kind));
     if (off.length) reject('category', off, `a follow-up to ${describeFocus(focus)}, the customer's latest request`);
+  } else if (proposedCategories.length && offeredKinds.length && readReply(said).affirms && proposedCategories.every((kind) => offeredKinds.includes(kind))) {
+    /*
+     * "Yes, show me" to the Caddie's own "a jacket, trousers or a full set?":
+     * the kinds it offered are what the yes is to. Rejected as "not named by
+     * the customer", the search ran on "rain" alone and the reply said no
+     * jacket was confirmed waterproof (admin log, 28 Sep).
+     */
+    categories = { value: proposedCategories, source: 'conversation', strength: 'hard' };
   } else if (proposedCategories.length && followUp && proposedCategories.every((kind) => previousCategories.includes(kind))) {
     categories = { value: proposedCategories, source: 'conversation', strength: 'hard' };
+  } else if (proposedCategories.length && asks?.kinds.length && proposedCategories.every((kind) => asks.kinds.includes(kind))) {
+    // The reader read the same kinds in the customer's words, however they put it ("rain top", "something for my legs").
+    categories = { value: proposedCategories, source: 'utterance', strength: 'hard' };
+  } else if (!proposedCategories.length && asks?.kinds.length && !inherit) {
+    categories = { value: asks.kinds as Category[], source: 'utterance', strength: 'hard' };
   } else if (proposedCategories.length && !verifiable) {
     // Unreadable: the garment word stays in the words searched, as a hint - it filters nothing.
     reject('category', proposedCategories, TOOL_ONLY, 'soft');
@@ -307,6 +365,10 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
     if (proposedRange && proposedRange !== focus!.range) reject('range', proposedRange, `a follow-up to ${describeFocus(focus)}`);
   } else if (proposedRange && (proposedRange === knownRange || (followUp && proposedRange === current?.range))) {
     range = { value: proposedRange, source: proposedRange === knownRange ? 'profile' : 'conversation', strength: 'hard' };
+  } else if (proposedRange && asks?.range === proposedRange) {
+    range = { value: proposedRange, source: 'utterance', strength: 'hard' };
+  } else if (!proposedRange && asks?.range && !inherit) {
+    range = { value: asks.range, source: 'utterance', strength: 'hard' };
   } else if (proposedRange && !verifiable) {
     // Never a gender from the model alone. A range word in its query still counts for relevance.
     reject('range', proposedRange, TOOL_ONLY, parseRange(args.query).range ? 'soft' : 'ignored');
@@ -336,7 +398,7 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
     // "Plain" alone: a filter, so read only when their words can be.
     if (modelColour && !verifiable) reject('colour', modelColour, TOOL_ONLY, 'ignored');
     else [colourText, colourSource] = [modelColour, modelColour ? 'utterance' : undefined];
-  } else if (within(saidColours)) {
+  } else if (within(saidColours) || within(modelReadingFor(raw)?.colours ?? [])) {
     [colourText, colourSource] = [modelColour, 'utterance'];
   } else if (within(rememberedColours)) {
     [colourText, colourSource] = [modelColour, 'profile'];
@@ -364,7 +426,7 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
     const inWords = new RegExp(`(^|[^\\d.])${String(amount).replace('.', '\\.')}(\\.0+)?(?![\\d])`).test(said);
     const remembered = profile?.budget?.amount === amount || turn.budget?.amount === amount;
     // Never a spending limit nobody gave: unreadable or not, a budget the customer did not state is ignored.
-    if (inWords || turn.budget?.amount === amount) maxPrice = { value: amount, source: 'utterance', strength: 'hard' };
+    if (inWords || turn.budget?.amount === amount || asks?.budgetMax === amount) maxPrice = { value: amount, source: 'utterance', strength: 'hard' };
     else if (remembered) maxPrice = { value: amount, source: 'profile', strength: 'hard' };
     else reject('maxPrice', amount, verifiable ? 'no budget of that amount was given' : TOOL_ONLY, 'ignored');
   }
@@ -386,6 +448,8 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
     ...(turn.features?.required ?? []),
     ...(turn.features?.preferred ?? []),
     ...(turn.weather ?? []).flatMap((kind) => WEATHER_NEEDS[kind]),
+    ...((asks?.features ?? []) as Feature[]),
+    ...((asks?.weather ?? []) as Weather[]).flatMap((kind) => WEATHER_NEEDS[kind]),
     ...(profile?.features?.required ?? []),
     ...(profile?.features?.preferred ?? []),
   ]);
@@ -416,6 +480,9 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
     // Its naming words only (Task 9): "rain" in "Rain Pro Jacket" is weather the customer mentioned, not the name.
     const own = namingWords(name.toLowerCase());
     if (own.some((word) => mentioned(word, now))) return 'utterance';
+    // The reader's reading of their words (ai/readTurn.ts): "باؤنسڑ پولو" is the Bouncer Polo, in letters the patterns cannot read.
+    const readNames = (asks?.productNames ?? []).flatMap((read) => namingWords(read.toLowerCase()));
+    if (own.some((word) => readNames.includes(word))) return 'utterance';
     if (own.some((word) => mentioned(word, before))) return 'conversation';
     return null;
   };
@@ -437,7 +504,7 @@ export function resolveSearchIntent(args: SearchArgs, ctx: ToolContext, spoken: 
     else reject('productName', name, namingWords(name.toLowerCase()).length ? 'the customer did not name it' : 'no name in it - a kind of garment', 'soft');
   }
 
-  const price = readPrice(said, ctx, size);
+  const price = readPrice(said, ctx, size, args.priceOrder);
   const focusUse = {
     source: inherit ? ('inherited' as const) : saidCategories.length || saidRange ? ('explicit' as const) : ('none' as const),
     active: describeFocus(focus),
@@ -635,10 +702,16 @@ function sizeEvidence(ctx: ToolContext, productId?: string): string[] {
  * the model chose is never one to buy in.
  */
 export function sizesNeverGiven(values: Array<string | undefined>, ctx: ToolContext, productId?: string): string[] {
-  const said = sizeEvidence(ctx, productId).join(' ').toLowerCase();
+  const evidence = sizeEvidence(ctx, productId);
+  const said = evidence.join(' ').toLowerCase();
   // "I'm" is not an M, nor "it's" an S: apostrophes join, never split.
-  const tokens = said.replace(/['’]/g, '').replace(/[^a-z0-9\s/-]/g, ' ').split(/[\s/]+/).filter(Boolean);
+  const tokens = foldNonAscii(said.replace(/['’]/g, '')).replace(/[^a-z0-9\s/-]/g, ' ').split(/[\s/]+/).filter(Boolean);
   const known = new Set<string>(tokens.filter((token) => /\d/.test(token)));
+  // "Talla mediana": the model's reading of their words (ai/readTurn.ts) is their word for it as much as "medium" would be.
+  for (const text of evidence) {
+    const read = modelReadingFor(text);
+    for (const value of [read?.size, read?.waist, read?.leg]) if (value) known.add((normaliseSize(value) ?? value).toLowerCase());
+  }
   tokens.forEach((token, i) => {
     for (const phrase of [token, `${token} ${tokens[i + 1] ?? ''}`, `${token} ${tokens[i + 1] ?? ''} ${tokens[i + 2] ?? ''}`]) {
       const size = normaliseSize(phrase.trim());

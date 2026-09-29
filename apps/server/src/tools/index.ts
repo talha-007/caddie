@@ -20,7 +20,9 @@ import {
 } from '../catalog/hybrid.js';
 import { conceptKindsInQuery, topKindsFor, type Climate } from '../catalog/concepts.js';
 import { colourAsked, intentDiagnostics, rememberedWhenEchoed, resolveSearchIntent, sizesNeverGiven } from './searchIntent.js';
-import { asksToAdd, asksToRemove, cartAuthorization, lineChangeAuthorization, offerSentence, offeredAction, quantityAsked, quantityInWords, sizeChangeAsked, turnNow } from './cartAuthorization.js';
+import { modelReadingFor } from '../ai/readTurn.js';
+import { PACK_SIZES_ON_CARD, SIZE_ON_CARD, delegatesChoice } from './sizeHandoff.js';
+import { asksToAdd, asksToRemove, cartAuthorization, lineChangeAuthorization, offerSentence, offeredAction, quantityAsked, quantityInWords, removalScope, sizeChangeAsked, turnNow, type RemovalScope } from './cartAuthorization.js';
 import { UPDATING, basketStatement } from './cartOperations.js';
 import { executeCommerceAction, registerPlanner, type ActionOutcome, type ActionPlan, type ActionSource, type CommerceAction } from './actionGateway.js';
 import { packPieces, packStatus, packStatusFacts, readPackChoices, type PackChoices } from './packState.js';
@@ -52,7 +54,7 @@ import { recommendPack } from '../recommend/pack.js';
 import { findNamedPack, findUnstockedBundle, recommendNamedPack } from '../recommend/packs.js';
 import { priceFor, priceRange } from '../recommend/pricing.js';
 import { categoryForProduct, recommendSize } from '../recommend/size.js';
-import { normaliseSize, optionValueMatches, sameSize } from '../recommend/sizeWords.js';
+import { foldNonAscii, normaliseSize, optionValueMatches, sameSize } from '../recommend/sizeWords.js';
 import { addToCart, getCart, getProductDetails, isBrandProduct, searchProducts, setLineQuantity } from '../shopify/catalog.js';
 import { storeCurrency } from '../shopify/money.js';
 import { sessions, type CaddieSession, type PendingNeed } from '../session/store.js';
@@ -347,7 +349,7 @@ function listFacts(products: Product[], evidence?: (product: Product) => string)
  */
 export function bareReference(text: string): boolean {
   // "I'll" is one word ("ill"), not "i" and "ll".
-  const words = text.toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const words = foldNonAscii(text.toLowerCase().replace(/['’]/g, '')).replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
   // "Add them" is as bare as "add it": a pair of socks, a set of the cards on screen.
   if (!words.some((word) => ['it', 'this', 'that', 'one', 'them', 'these', 'those'].includes(word))) return false;
   const filler = new Set(['add', 'put', 'pop', 'get', 'buy', 'take', 'ill', 'i', 'will', 'can', 'you', 'please', 'it', 'this', 'that', 'one', 'them', 'these', 'those', 'the', 'a', 'to', 'in', 'into', 'my', 'basket', 'cart', 'bag', 'yes', 'yeah', 'ok', 'okay', 'go', 'ahead', 'and', 'just', 'size', 'thanks', 'thank', 'now', 'for', 'me', 'then', 'do', 'lets', 'let', 's']);
@@ -630,6 +632,7 @@ const searchSchema = z
     features: z.array(z.string()).optional(),
     limit: z.number().int().min(1).max(20).optional(),
     maxPrice: z.number().positive().optional(),
+    priceOrder: z.enum(['lowest', 'highest', 'both']).optional(),
     category: z.string().optional(),
     range: z.enum(['mens', 'ladies', 'kids']).optional(),
     size: z.string().optional(),
@@ -712,6 +715,7 @@ const searchTool = defineTool({
       },
       limit: { type: 'integer', minimum: 1, maximum: 20 },
       maxPrice: { type: 'number', description: 'Upper price limit per item, if the customer gave a hard one' },
+      priceOrder: { type: 'string', enum: ['lowest', 'highest', 'both'], description: 'When they ask by price: "cheapest", "cheap ones", "nothing too expensive" is lowest; "expensive", "dearest", "top of the range" is highest; "cheapest and most expensive" is both. Sorted across everything that fits, not the first page.' },
       category: { type: 'string', description: 'The kind of garment, when they named one: "polo", "jacket", "gilet", "midlayer", "hoodie", "trousers", "shorts", "cap"... Only that kind comes back.' },
       range: { type: 'string', enum: ['mens', 'ladies', 'kids'], description: 'Only when they said it: mens, ladies (womens) or kids.' },
       size: { type: 'string', description: 'The size they need, when they said one: "XL", "M", "2XL", a waist "34", a ladies "12". Only products in stock in that size come back, priced at that size.' },
@@ -987,7 +991,21 @@ const searchTool = defineTool({
      * "tour ankle socks", and the lookup found the Ladies pair. The model's
      * name still helps find products; it never decides which one they meant.
      */
-    const customerIdentity = ctx.direct ? ({ status: 'none' } as CustomerIdentity) : resolveCustomerProductIdentity(ctx.utterance ?? '');
+    /*
+     * "Add the Glen and show me some socks": the socks search is not about
+     * the Glen. A product the customer named binds a search only when the
+     * search is not for another kind they asked for in the same breath -
+     * bound, the socks search reported "the Glen Rain Jacket is not a socks"
+     * (admin log, 28 Sep).
+     */
+    const queryKinds = categoriesAsked(intent.query);
+    const namedIdentity = ctx.direct ? ({ status: 'none' } as CustomerIdentity) : resolveCustomerProductIdentity(ctx.utterance ?? '');
+    const searchIsForOtherKind =
+      queryKinds.length > 0 &&
+      requestedKinds(ctx.utterance ?? '').some((kind) => queryKinds.includes(kind)) &&
+      identityProducts(namedIdentity).length > 0 &&
+      !identityProducts(namedIdentity).some((product) => isCategory(product, queryKinds));
+    const customerIdentity = searchIsForOtherKind ? ({ status: 'none' } as CustomerIdentity) : namedIdentity;
     const own = new Set(identityProducts(customerIdentity).map((p) => p.id));
     const modelIds = modelExistence?.kind === 'exact-product' ? [modelExistence.product.id] : modelExistence?.kind === 'exact-family' ? modelExistence.products.map((p) => p.id) : [];
     // The same product the customer named: the lookup's own report, which says when a misspelling was read ("galatic" is GALACTIC).
@@ -1066,7 +1084,7 @@ const searchTool = defineTool({
      */
     let priceNote = '';
     async function priceOrder(): Promise<
-      { mode: 'minimum' | 'below'; products: Product[]; facts: string; speech: string } | { answer: ToolResult } | null
+      { mode: 'minimum' | 'maximum' | 'extremes' | 'below'; products: Product[]; facts: string; speech: string } | { answer: ToolResult } | null
     > {
       const price = intent.price!;
       const reference = price.mode === 'below' ? price.reference : undefined;
@@ -1096,6 +1114,38 @@ const searchTool = defineTool({
       const needsNote = needs.length ? `, ${needs.map((feature) => FEATURE_LABEL[feature]).join(' or ')} as their weather needs` : '';
       const sizeNote = size ? `, priced in ${size}` : '';
 
+      /*
+       * The dear end, and both ends. "The cheapest polo and the expensive
+       * polo you have in your store" once got the cheapest three and the
+       * dearest of the six red polos on screen called the most expensive in
+       * the store (live, 29 Sep). Sorted across everything that fits.
+       */
+      if (price.mode === 'maximum' || price.mode === 'extremes') {
+        if (!eligible.length) {
+          priceNote = 'Nothing meets everything they asked for, so there is no dearest to name. Call none of these the most expensive.';
+          return null;
+        }
+        const ascending = eligible.map((product, index) => ({ product, index })).sort((a, b) => pence(a.product) - pence(b.product) || a.index - b.index).map((entry) => entry.product);
+        const descending = [...ascending].reverse();
+        const dearest = descending[0]!;
+        const lowest = ascending[0]!;
+        if (price.mode === 'maximum') {
+          return {
+            mode: 'maximum',
+            products: descending,
+            facts: `Price ordering: sorted by price, highest first, across all ${eligible.length} products that meet what they asked for${needsNote}${sizeNote}. The highest-priced is ${dearest.title} [${dearest.id}] at ${pounds(dearest)} - you may call it the most expensive.`,
+            speech: `The most expensive that fits is the ${titleCaseWords(dearest.title)} at ${pounds(dearest)}. The rest are on screen, highest price first.`,
+          };
+        }
+        const half = Math.max(1, Math.floor(limit / 2));
+        const ends = [...ascending.slice(0, half), ...descending.slice(0, limit - half).filter((product) => !ascending.slice(0, half).includes(product))];
+        return {
+          mode: 'extremes',
+          products: ends,
+          facts: `Price ordering: both ends of the price list across all ${eligible.length} products that meet what they asked for${needsNote}${sizeNote}. The lowest-priced is ${lowest.title} [${lowest.id}] at ${pounds(lowest)} (the cheapest); the highest-priced is ${dearest.title} [${dearest.id}] at ${pounds(dearest)} (the most expensive). On screen: the ${half} cheapest, then the ${ends.length - half} most expensive.`,
+          speech: `The cheapest is the ${titleCaseWords(lowest.title)} at ${pounds(lowest)} and the most expensive the ${titleCaseWords(dearest.title)} at ${pounds(dearest)} - both ends are on screen.`,
+        };
+      }
       if (price.mode === 'minimum') {
         if (!eligible.length) {
           priceNote = 'Nothing meets everything they asked for, so there is no cheapest to name. Call none of these the cheapest.';
@@ -1277,13 +1327,23 @@ const searchTool = defineTool({
       colours: rankColour?.strength === 'preferred' && rankColour.words.length > 1 ? rankColour.words : [],
       ...(ctx.session.lastLead ? { lastLead: ctx.session.lastLead } : {}),
     })[0];
+    const ordinary = named.length || !chosenLead ? searched : [chosenLead, ...searched.filter((product) => product !== chosenLead)].slice(0, limit);
+    /*
+     * Two colours asked for, both shown. "Polos in red and yellow" ranked
+     * the reds above every yellow and the six cards were all red; asked
+     * again for yellow, the customer got red again (live, 29 Sep). The
+     * colours take turns, best of each first, the lead still first.
+     */
+    const askedColours = intent.colour?.value ? parseColours(intent.colour.value).colours : [];
+    const mixed =
+      !priced && !possible.length && !named.length && askedColours.length > 1
+        ? interleaveByColour([...(chosenLead ? [chosenLead] : []), ...shownRanked.map((entry) => entry.product), ...searched].filter((product, index, all) => all.indexOf(product) === index), askedColours, limit)
+        : null;
     const products = priced
       ? priced.products.slice(0, limit)
       : possible.length
       ? possible.slice(0, limit)
-      : named.length || !chosenLead
-        ? searched
-        : [chosenLead, ...searched.filter((product) => product !== chosenLead)].slice(0, limit);
+      : mixed ?? ordinary;
     const onlyPartial = !priced && !possible.length && ranking && good.length === 0 && shownRanked.length > 0;
     const lead = possible.length ? undefined : products[0];
 
@@ -1303,10 +1363,22 @@ const searchTool = defineTool({
       log.warn('search.possible_match_unshown', { name: existence.name, candidates: existence.products.map((p) => p.title), shown: products.map((p) => p.title) });
     }
     // The possible matches named in the facts are the cards on screen, so the words and the screen agree.
+    /*
+     * "Do you have the Warrior jacket in medium?" when every Warrior is sold
+     * out in M: the reply once said "we have it in medium" over a screen of
+     * Clima jackets, because nothing in the facts said what became of the
+     * Warrior (journey test, 29 Sep). What they named and why it is not on
+     * screen comes first, in the catalogue's own words.
+     */
+    const namedButFailing =
+      existence && (existence.kind === 'exact-product' || existence.kind === 'exact-family')
+        ? (existence.kind === 'exact-product' ? [existence.product] : existence.products).filter((product) => !meetsRules(product)).map((product) => `${product.title}: ${failures(product).join(', ')}`)
+        : [];
+    const namedAllFail = namedButFailing.length > 0 && named.length === 0;
     const existenceFacts = existence
       ? possible.length && existence.kind === 'possible-match'
         ? `${catalogueCheck({ ...existence, products })} These possible matches are the cards on screen - ask which one they meant.`
-        : catalogueCheck(existence)
+        : `${catalogueCheck(existence)}${namedButFailing.length ? `\nNot on screen, and why: ${namedButFailing.join('; ')}.${namedAllFail ? ' Say so plainly - never say we have it as asked. What is on screen are alternatives that do fit.' : ''}` : ''}`
       : '';
     /*
      * Why each result is here, as checked - only for what was asked. The model
@@ -1485,7 +1557,7 @@ const searchTool = defineTool({
           : `Here are the ${products.length} closest matches in the store. They are on screen now.`}${packSpeech}`,
       facts: [
         packNote,
-        `Results for "${query}", ${priced?.mode === 'minimum' ? 'lowest price first' : 'best match first'}:\n${listFacts(products, evidence)}`,
+        `Results for "${query}", ${priced?.mode === 'minimum' ? 'lowest price first' : priced?.mode === 'maximum' ? 'highest price first' : priced?.mode === 'extremes' ? 'cheapest then most expensive' : 'best match first'}:\n${listFacts(products, evidence)}`,
         priced?.facts ?? priceNote,
         normal.mapped.length ? `Searched in catalogue terms: ${normal.mapped.join('; ')}.` : '',
         topKinds.length
@@ -1825,7 +1897,15 @@ const sizeTool = defineTool({
       (form ? undefined : args.audience) ??
       audienceOf(onScreen(ctx)) ??
       // A store that only sells one range has already answered the question.
-      audienceOf(allProducts().filter(isBrandProduct));
+      audienceOf(allProducts().filter(isBrandProduct)) ??
+      /*
+       * Nothing says which range: the mens range, said as an assumption. "Is
+       * that for the mens or the womens range?" was asked twice running to a
+       * customer who had moved on to "show me polos in that size" (journey
+       * test, 29 Sep) - a question that blocks is worse than a stated guess.
+       */
+      'men';
+    const audienceAssumed = !(form?.audience ?? saidRange(ctx.utterance) ?? (productRange === 'men' || productRange === 'women' ? productRange : undefined) ?? (current === 'men' || current === 'women' ? current : undefined) ?? (form ? undefined : args.audience) ?? audienceOf(onScreen(ctx)) ?? audienceOf(allProducts().filter(isBrandProduct)));
     /*
      * With a pack in hand and no one product named, the pack's own garment is
      * what is being sized: "chest 36, waist 32, leg 34" for the Cool & Wet
@@ -1926,8 +2006,12 @@ const sizeTool = defineTool({
           : `${recommendation.size} is not in stock in the ${product.title} - say so, and offer the alternative size or another colourway.`
         : '';
     const level = recommendation.confidenceLevel ?? 'estimate';
+    const assumedNote = audienceAssumed ? " I've assumed the mens range - say if it's for the ladies range." : '';
+    const sizeSpeech = `${recommendation.reason}${level === 'estimate' && !/estimate/i.test(recommendation.reason) ? ` ${CONFIDENCE_WORDS.estimate}` : ''}${assumedNote}`;
     return {
-      speech: `${recommendation.reason}${level === 'estimate' && !/estimate/i.test(recommendation.reason) ? ` ${CONFIDENCE_WORDS.estimate}` : ''}`,
+      speech: sizeSpeech,
+      // The answer as the tool gave it opens the reply: rephrased, "you're an M, I've assumed mens" became "is this for men's clothes?" with no size in it (journey test, 29 Sep).
+      lead: { text: sizeSpeech, unless: new RegExp(`\\b${recommendation.size.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`) },
       facts: [
         `Confidence: ${level}. ${CONFIDENCE_WORDS[level]}`,
         recommendation.alternativeSize ? `Alternative: ${recommendation.alternativeSize} - ${recommendation.alternativeReason ?? ''}` : '',
@@ -3615,6 +3699,7 @@ const outfitTool = defineTool({
       query: outgoing ? (outfitShown(ctx)?.query ?? args.seed) : args.seed,
       budgetAmount,
       colour: askedColour,
+      ...(input.size ? { size: input.size } : {}),
       ...(swappedOut.length ? { swappedOut } : {}),
     };
     await sessions.patch(ctx.session.id, {
@@ -3809,6 +3894,8 @@ async function changeLineSize(ctx: ToolContext, size: string): Promise<ToolResul
   const said = ctx.utterance ?? '';
   const found = resolveBasketLine(ctx, lines, said, 'customer-utterance', undefined, undefined);
   if ('plan' in found) return { speech: found.plan.speech, facts: found.plan.facts, outcome: { ok: false, action: 'add-product', reason: found.plan.reason } };
+  // A size is one line's: several lines named is a question, never a guess.
+  if ('lines' in found) return { speech: 'Which item would you like in a different size?', facts: `Several lines fit their words: ${cartSummary(found.lines)}. A size change is one line's. Ask which.`, outcome: { ok: false, action: 'add-product', reason: 'ambiguous-target' } };
   const line = found.line;
   const product = productById(line.productId);
   if (!product) return { speech: "I can't find that item in the catalogue just now.", facts: 'The basket line names a product the mirror does not hold. Nothing was changed.', outcome: { ok: false, action: 'add-product', reason: 'not-found' } };
@@ -3846,7 +3933,8 @@ function fromOutcome(outcome: ActionOutcome, extraFacts = ''): ToolResult {
     speech: outcome.speech,
     ...(facts ? { facts } : {}),
     ...(outcome.actions?.length ? { actions: outcome.actions } : {}),
-    ...(outcome.cart ? { attachment: { kind: 'cart' as const, cart: outcome.cart } } : {}),
+    // A refusal's choice on screen: "which do you mean?" with the candidates as cards, so a tap answers it (premium: never the same question twice).
+    ...(outcome.cards?.length ? { attachment: { kind: 'products' as const, products: outcome.cards } } : outcome.cart ? { attachment: { kind: 'cart' as const, cart: outcome.cart } } : {}),
     outcome: { ok: outcome.ok, action: outcome.action, ...(outcome.reason ? { reason: outcome.reason } : {}), ...(outcome.dispatched ? { dispatched: true } : {}) },
   };
 }
@@ -3914,13 +4002,20 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
    * the words would have to carry again.
    */
   const replacedLineProduct = !ui && action.replaces && proposed && (ctx.session.basket ?? []).some((line) => line.lineId === action.replaces && sameProduct(line.productId, proposed.id)) ? proposed : undefined;
-  const target: ActionTarget = ui
+  let target: ActionTarget = ui
     ? proposed
       ? { kind: 'bound', products: [proposed], label: proposed.title, source: 'card-action' }
       : { kind: 'unbound' }
     : replacedLineProduct
       ? { kind: 'bound', products: [replacedLineProduct], label: replacedLineProduct.title, source: 'customer-words' }
       : actionTarget(ctx);
+  // "Any design, you pick": the choice they handed over is made - the first design on screen (tools/sizeHandoff.ts).
+  if (target.kind === 'ambiguous' && !ui && delegatesChoice(ctx.utterance ?? '')) {
+    const onScreenIds = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
+    const chosen = target.designs.find((design) => design.products.some((product) => onScreenIds.has(product.id))) ?? target.designs[0]!;
+    log.info('cart.choice_delegated', { sessionId: ctx.session.id, design: chosen.design });
+    target = { kind: 'bound', products: chosen.products, label: chosen.design, source: 'customer-words' };
+  }
   const diagnostics = {
     sessionId: ctx.session.id,
     source,
@@ -3936,9 +4031,41 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
     return {
       ok: false,
       reason: 'ambiguous-target',
-      speech: `Which do you mean - ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}?`,
-      facts: `What they named fits more than one product: ${target.designs.map((design) => `${design.design} (${design.range}) [${design.products.map((p) => p.id).join(', ')}]`).join('; ')}. Ask which one - never pick for them.`,
+      speech: `Which do you mean - ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}? They are on screen.`,
+      facts: `What they named fits more than one product: ${target.designs.map((design) => `${design.design} (${design.range}) [${design.products.map((p) => p.id).join(', ')}]`).join('; ')}. Ask which one - never pick for them. The candidates are on screen now.`,
+      cards: target.designs.map((design) => design.products[0]!).filter(Boolean),
     };
+  }
+  /*
+   * "Any design, you pick, add to cart" with nothing named: the choice they
+   * handed over is the model's pick when it is on screen, else the first
+   * card. Never for words that did not hand it over.
+   */
+  // "Add both of these", "these two": cards on screen, named by pointing; the model's pick counts when it is one of them.
+  const pointsAtScreen = /\b(both|these|those|them|the two|all of (these|those|them)|everything|all|the (whole |full |complete )?outfit|the lot)\b/i.test(ctx.utterance ?? '');
+  if (target.kind === 'unbound' && !ui && (delegatesChoice(ctx.utterance ?? '') || pointsAtScreen)) {
+    const onScreenIds = (ctx.session.lastShown?.items ?? []).map((item) => item.id);
+    const pickedId = proposed && onScreenIds.includes(proposed.id) ? proposed.id : delegatesChoice(ctx.utterance ?? '') ? onScreenIds[0] : undefined;
+    const picked = pickedId ? productById(pickedId) : null;
+    if (picked) {
+      log.info('cart.choice_delegated', { sessionId: ctx.session.id, product: picked.title, fromModel: !!proposed && picked.id === proposed.id });
+      target = { kind: 'bound', products: [picked], label: picked.title, source: 'customer-words' };
+    }
+  }
+  /*
+   * A product named in letters the patterns cannot read - "باؤنسڑ پولو" spoken
+   * as English and written in Urdu script - is still named: the reader gives
+   * its English name (ai/readTurn.ts), the catalogue check confirms it.
+   */
+  if (target.kind === 'unbound' && !ui) {
+    for (const read of modelReadingFor(ctx.utterance ?? '')?.asks.productNames ?? []) {
+      const found = lookupProductName(read);
+      const products = found?.kind === 'exact-product' ? [found.product] : found?.kind === 'exact-family' ? found.products : [];
+      if (!products.length) continue;
+      log.info('cart.add_target_from_reader', { sessionId: ctx.session.id, read, products: products.length });
+      target = { kind: 'bound', products, label: found!.kind === 'exact-product' ? found!.product.title : (found as { familyName: string }).familyName, source: 'customer-words' };
+      break;
+    }
   }
   if (target.kind === 'unbound') {
     log.warn('cart.add_target', { ...diagnostics, decision: 'no trusted target' });
@@ -3959,23 +4086,47 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
    * only one of its colours is on screen; otherwise the colour is asked.
    */
   const inTarget = !!proposed && target.products.some((product) => product.id === proposed.id);
-  const saidColours = parseColours(ctx.utterance ?? '').colours;
-  const byColour = saidColours.length ? target.products.filter((product) => colourMatch(product, saidColours, false) > 0) : [];
+  /*
+   * The colour they said with the add, or failing that the colour this
+   * shopping session is for: "rain jackets in red" ... "add the Glen" was
+   * asked "which colour?" with red in the constraints all along, and the
+   * customer had to say it again (admin log, 28 Sep). A standing colour of
+   * theirs is not used here: it is a preference, not a choice.
+   */
+  // "En blanco": the model's reading of their words carries the colour the English parser cannot see (ai/readTurn.ts).
+  const saidColours = parseColours(ctx.utterance ?? '').colours.length ? parseColours(ctx.utterance ?? '').colours : parseColours((modelReadingFor(ctx.utterance ?? '')?.colours ?? []).join(' ')).colours;
+  const missionColours = !saidColours.length && !ui ? parseColours((ctx.session.activeShoppingContext?.colours ?? ctx.session.activeShoppingContext?.constraints?.colours?.words ?? []).join(' ')).colours : [];
+  // Failing both, the colour in their last few messages: "rain jackets in red" two turns before "add the Glen" - after a socks search had replaced the screen.
+  const recentColours = !saidColours.length && !missionColours.length && !ui
+    ? ctx.session.messages.filter((message) => message.role === 'user').slice(-4).reverse().map((message) => { const own = parseColours(message.text).colours; return own.length ? own : parseColours((modelReadingFor(message.text)?.colours ?? []).join(' ')).colours; }).find((colours) => colours.length) ?? []
+    : [];
+  const wantedColours = saidColours.length ? saidColours : missionColours.length ? missionColours : recentColours;
+  const byColour = wantedColours.length ? target.products.filter((product) => colourMatch(product, wantedColours, false) > 0) : [];
   const familyGuess = inTarget && target.products.length > 1 && !(byColour.length === 1 && byColour[0]!.id === proposed!.id);
   if (!inTarget || familyGuess) {
     const shown = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
     const onScreen = target.products.filter((product) => shown.has(product.id));
-    const pick = target.products.length === 1 ? target.products[0]! : byColour.length === 1 ? byColour[0]! : onScreen.length === 1 ? onScreen[0]! : null;
+    const delegated = !ui && delegatesChoice(ctx.utterance ?? '') ? (onScreen[0] ?? target.products[0] ?? null) : null;
+    // On a product page, "it" is that product - even after its colourways were put on screen for "what colours does it come in?".
+    const pageId = ctx.session.page?.pageType === 'product' ? ctx.session.page.productId : undefined;
+    const pageProduct = pageId ? target.products.find((product) => sameProduct(product.id, pageId)) ?? null : null;
+    // "Blue" fits blue and navy: the colourway named exactly, else the one of them on screen (live, 29 Sep).
+    const exactColour = byColour.length > 1 ? byColour.filter((product) => wantedColours.some((colour) => colour.word.toLowerCase() === colourwayName(product.title).toLowerCase())) : [];
+    const byColourOnScreen = byColour.length > 1 ? byColour.filter((product) => shown.has(product.id)) : [];
+    const pick = target.products.length === 1 ? target.products[0]! : byColour.length === 1 ? byColour[0]! : exactColour.length === 1 ? exactColour[0]! : byColourOnScreen.length === 1 ? byColourOnScreen[0]! : pageProduct ?? (onScreen.length === 1 ? onScreen[0]! : delegated);
+    if (delegated && pick === delegated) log.info('cart.choice_delegated', { sessionId: ctx.session.id, colourway: delegated.title });
     log.warn('identity.rejected_model_target', { ...diagnostics, corrected: pick?.title ?? null });
     if (!pick) {
       const made = target.products.length ? target.products : proposed ? designMembers(proposed) : [];
       return {
         ok: false,
         reason: target.products.length ? 'missing-option' : 'unavailable',
-        speech: `Which colour of the ${titleCaseWords(target.label)} would you like?`,
+        speech: `Which colour of the ${titleCaseWords(target.label)} would you like?${target.products.length > 1 ? ' They are on screen.' : ''}`,
         facts: target.products.length
-          ? `They mean the ${target.label} - one of: ${target.products.map((product) => `${product.title} [${product.id}]`).join(', ')}. ${proposed ? `${proposed.title} is not one of them. ` : ''}Ask which colour; never add another product.`
+          ? `They mean the ${target.label} - one of: ${target.products.map((product) => `${product.title} [${product.id}]`).join(', ')}. ${proposed ? `${proposed.title} is not one of them. ` : ''}Ask which colour; never add another product. The colourways are on screen now.`
           : `The ${target.label} is not made in the colour they asked for.${made.length ? ` It comes in: ${made.map((product) => colourwayName(product.title)).join(', ')}.` : ''} Say so, and ask which colour.`,
+        // The colourways on screen, so the answer can be a tap on the card rather than a colour word read by regex.
+        ...(target.products.length > 1 ? { cards: target.products } : made.length > 1 ? { cards: made } : {}),
         // The size they gave with the add stays with it: "add it in small" - "which colour?" - "red" was asked the size again (live replay).
         ...(target.products.length
           ? { pending: { type: 'add-product' as const, productIds: target.products.map((product) => product.id), awaiting: 'colour' as const, ...sizeSaidWith(ctx, target.products) } }
@@ -3985,6 +4136,10 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
     productId = pick.id;
   }
   const chosenProduct = productById(productId) ?? proposed;
+  if (chosenProduct && !isBrandProduct(chosenProduct)) {
+    log.warn('cart.add_unsellable', { sessionId: ctx.session.id, product: chosenProduct.title });
+    return { ok: false, reason: 'unavailable', speech: "That isn't something I can add - it's not a product for sale.", facts: `${chosenProduct.title} is a placeholder, not a product for sale (priced at nothing). Never add or offer it. Ask what they would like instead.` };
+  }
   log.info('cart.add_target', { ...diagnostics, resolved: chosenProduct?.title ?? productId, decision: 'bound' });
   /*
    * Added this very turn already - by the waiting action's resolver before
@@ -4031,9 +4186,10 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
       return {
         ok: false,
         reason: 'missing-option',
-        speech: 'What size would you like?',
-        facts: `The customer never gave ${invented.join(', ')} - never choose a size for them. Ask, then add with the size they say.`,
+        speech: SIZE_ON_CARD,
+        facts: `The customer never gave ${invented.join(', ')} - never choose a size for them, and never ask for one: the product page (View product on the card) has the size picker and the theme adds it there. Say only that they choose their size there; a size they say in words is taken.`,
         pending: { type: 'add-product', productIds: target.products.map((product) => product.id), awaiting: 'size' },
+        ...(chosenProduct ? { cards: [chosenProduct] } : {}),
       };
     }
   }
@@ -4058,12 +4214,17 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
   const resolution = resolveVariant(product, options ?? {});
   if (resolution.status === 'incomplete') {
     const stillOpen = resolution.missing;
+    const awaiting = optionAwaiting(stillOpen[0]!.name);
+    const onCard = awaiting !== 'colour';
+    const card = productById(product.id) ?? chosenProduct;
     return {
       ok: false,
       reason: 'missing-option',
-      speech: `Which ${stillOpen.map((option) => option.name.toLowerCase()).join(' and ')} would you like for the ${product.title}?`,
-      facts: `${product.title} needs a choice:\n${stillOpen.map((option) => `- ${option.name}: ${option.values.join(', ')}`).join('\n')}`,
-      pending: { type: 'add-product', productIds: [product.id], ...(options ? { options } : {}), awaiting: optionAwaiting(stillOpen[0]!.name) },
+      // Sizes are picked on the card, never asked for (tools/sizeHandoff.ts); a colour is a question, with the colourways on screen.
+      speech: onCard ? SIZE_ON_CARD : `Which ${stillOpen.map((option) => option.name.toLowerCase()).join(' and ')} would you like for the ${product.title}? They are on screen.`,
+      facts: `${product.title} needs a choice:\n${stillOpen.map((option) => `- ${option.name}: ${option.values.join(', ')}`).join('\n')}${onCard ? '\nThe product page (View product on the card) has the picker and the theme adds it there: say only that they choose it there. Never ask for a size.' : ''}`,
+      pending: { type: 'add-product', productIds: [product.id], ...(options ? { options } : {}), awaiting },
+      ...(card ? { cards: onCard ? [card] : designMembers(card) } : {}),
     };
   }
   // Every option named and still no single variant: the choices did not identify one. Never the first of them.
@@ -4111,7 +4272,10 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
         .map((line) => line.productId)
         .filter((id) => !sameProduct(id, product.id))
     : [];
-  const next = await nextStep([product], { profile: shopperView(ctx.session, ctx.utterance), basketProductIds: (ctx.session.basket ?? []).map((line) => line.productId), eligible: eligibilityOf(ctx).eligible });
+  const nextCandidate = await nextStep([product], { profile: shopperView(ctx.session, ctx.utterance), basketProductIds: (ctx.session.basket ?? []).map((line) => line.productId), eligible: eligibilityOf(ctx).eligible });
+  // Once: a next piece already offered this session is not pushed again after every add.
+  const next = nextCandidate?.productId && (ctx.session.crossSellOffered ?? []).includes(nextCandidate.productId) ? null : nextCandidate;
+  if (next?.productId) await sessions.patch(ctx.session.id, { crossSellOffered: [...new Set([...(ctx.session.crossSellOffered ?? []), next.productId])].slice(-20) });
   const nextLine = next ? next.line : '';
   // Chosen is liked; what it replaces is turned down - once it is in, never before.
   const afterSuccess = async () => {
@@ -4212,7 +4376,24 @@ function lineMatches(line: { productId: string; variantTitle: string }, wanted: 
   return true;
 }
 
-type BasketLineRecord = { lineId: string; productId: string; variantId?: string; fingerprint?: string; title: string; variantTitle: string; quantity: number; bundle?: string };
+type BasketLineRecord = { lineId: string; productId: string; variantId?: string; fingerprint?: string; title: string; variantTitle: string; quantity: number; bundle?: string; bundleName?: string };
+/** More than one line taken out together: the whole basket, a whole pack, or every line of a kind. */
+type BasketLines = { lines: BasketLineRecord[]; scope: RemovalScope; confirm: boolean };
+/** The lines grouped as they are bought: each pack as one, each loose line as one. */
+function basketGroups(lines: BasketLineRecord[]): BasketLineRecord[][] {
+  const groups = new Map<string, BasketLineRecord[]>();
+  for (const line of lines) {
+    const key = line.bundle ? `pack:${line.bundle}` : `line:${line.lineId}`;
+    groups.set(key, [...(groups.get(key) ?? []), line]);
+  }
+  return [...groups.values()];
+}
+/** The pack's name as a customer would say it, from the deal handle the widget reported. */
+function packName(lines: BasketLineRecord[]): string {
+  const handle = lines.find((line) => line.bundleName)?.bundleName;
+  const deal = handle ? allDeals().find((entry) => entry.handle === handle) : undefined;
+  return deal?.title ?? (handle ? titleCaseWords(handle.replace(/[-_]+/g, ' ')) : 'pack');
+}
 
 /**
  * The basket line the customer means - by the product named, the kind ("the
@@ -4228,11 +4409,16 @@ function resolveBasketLine(
   source: ActionSource,
   waiting: ReturnType<typeof livePending>,
   proposedLineId: string | undefined,
-): { line: BasketLineRecord } | { plan: Extract<ActionPlan, { ok: false }> } {
+): { line: BasketLineRecord } | BasketLines | { plan: Extract<ActionPlan, { ok: false }> } {
   let line: (typeof lines)[number] | undefined;
   if (source === 'ui-cart-change') {
     line = lines.find((entry) => entry.lineId === proposedLineId);
   } else if (waiting?.type === 'update-line' && waiting.lineId && (source === 'customer-confirmation' || ctx.pendingResolved)) {
+    // Their yes to a removal of several lines (the basket, a pack): those lines, as the record holds them.
+    if (waiting.lineIds?.length) {
+      const held = lines.filter((entry) => waiting.lineIds!.includes(entry.lineId));
+      if (held.length) return { lines: held, scope: 'all', confirm: false };
+    }
     // Their yes to the change the record holds (tools/pending.ts): that line, and no other reading of "it" - re-found by variant and fingerprint if the cart re-keyed it since.
     line = lines.find((entry) => entry.lineId === waiting.lineId) ?? lines.find((entry) => !!waiting.variantId && entry.variantId === waiting.variantId && (!waiting.lineFingerprint || entry.fingerprint === waiting.lineFingerprint) && !entry.bundle);
   } else {
@@ -4241,10 +4427,43 @@ function resolveBasketLine(
     const byIds = (ids: string[]) => lines.filter((entry) => ids.some((id) => sameProduct(entry.productId, id)));
     let candidates = byIds(identityProducts(identity).map((product) => product.id));
     if (!candidates.length && offered?.type === 'update-line' && offered.productIds) candidates = byIds(offered.productIds);
-    if (!candidates.length && identity.status === 'none') {
+    const kinds = identity.status === 'none' ? categoriesAsked(said) : [];
+    if (!candidates.length && kinds.length) {
       // "The polo": the lines of that kind.
-      const kinds = categoriesAsked(said);
-      if (kinds.length) candidates = lines.filter((entry) => { const own = productById(entry.productId); return !!own && isCategory(own, kinds); });
+      candidates = lines.filter((entry) => { const own = productById(entry.productId); return !!own && isCategory(own, kinds); });
+    }
+    /*
+     * More than one line, meant as more than one: "remove them all", "take
+     * the pack out", "remove these items", "remove all the polos". Each once
+     * got "which item do you mean?", because a removal could only ever land
+     * on a single line - and the model's six correct line ids were, rightly,
+     * not trusted on their own (live, pack removal). The basket as a whole
+     * or a whole pack needs no second question; "them" over a basket of
+     * more than one pack-or-line is asked once, bound to every line.
+     */
+    const scope = source === 'customer-utterance' && identity.status === 'none' ? removalScope(said) : null;
+    if (scope && !lineDescriptors(said).size && !lineDescriptors(said).colours.length) {
+      /*
+       * "Remove all of these items and show me polos": the polos are what
+       * to show next, not which lines to remove. The removal is the words
+       * before the showing; "all" with no kind in them is every line.
+       */
+      const removalClause = said.split(/\b(?:and|then|,)\s+(?:show|find|see|get|give|recommend|suggest|search|look)\b/i)[0] ?? said;
+      if (scope === 'all' && !categoriesAsked(removalClause).length) return { lines, scope, confirm: false };
+      if (candidates.length > 1) return { lines: candidates, scope, confirm: false };
+      if (!candidates.length) {
+        const packs = basketGroups(lines).filter((group) => group[0]!.bundle);
+        if (scope === 'all') return { lines, scope, confirm: false };
+        if (scope === 'pack') {
+          if (packs.length === 1) return { lines: packs[0]!, scope, confirm: false };
+          if (packs.length > 1) {
+            return { plan: { ok: false, reason: 'ambiguous-target', speech: `Which pack do you mean - ${packs.map((pack) => `the ${packName(pack)}`).join(' or ')}?`, facts: `More than one pack is in the basket: ${packs.map((pack) => `${packName(pack)} (${pack.length} lines)`).join('; ')}. Ask which - never pick for them.` } };
+          }
+          return { plan: { ok: false, reason: 'no-target', speech: 'There is no pack in your basket at the moment.', facts: `No basket line is part of a pack. In the basket: ${cartSummary(lines)}.` } };
+        }
+        if (lines.length === 1) return { line: lines[0]! };
+        return { lines, scope, confirm: basketGroups(lines).length > 1 };
+      }
     }
     /*
      * A size or colour they name picks among the lines - "the M one", "the
@@ -4268,6 +4487,8 @@ function resolveBasketLine(
       if (!candidates.length && recent) candidates = byIds([recent.productId]);
       if (!candidates.length && focus?.productId) candidates = byIds(designMembers(productById(focus.productId) ?? ({ id: focus.productId } as Product)).map((p) => p.id));
       if (!candidates.length && lines.length === 1) candidates = lines;
+      // "Remove it" with nothing in hand and one pack, and only that, in the basket: the pack - asked once, with every line bound.
+      if (!candidates.length && source === 'customer-utterance' && asksToRemove(said) && lines.length > 1 && lines.every((entry) => entry.bundle) && basketGroups(lines).length === 1) return { lines, scope: 'pack', confirm: true };
     }
     // Two lines it could be (two sizes of one polo): ask - the model's pick between them is still a guess.
     line = candidates.length === 1 ? candidates[0] : undefined;
@@ -4301,6 +4522,7 @@ async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: 
   const waiting = livePending(ctx.session);
   const found = resolveBasketLine(ctx, lines, said, source, waiting, action.lineId);
   if ('plan' in found) return found.plan;
+  if ('lines' in found) return removeLines(ctx, found, lines, source, said, theme);
   const line = found.line;
 
   // How many: a click's own number; "remove" is none; otherwise the number their words give.
@@ -4336,7 +4558,9 @@ async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: 
      * One piece out takes the whole pack out (its price is the pack's): said
      * first, and done on their yes - never on "remove the belt" alone.
      */
-    if (source === 'customer-utterance' && !ctx.pendingResolved) {
+    // "Remove all of these", "take the pack out": the whole pack is what they said, so nothing to confirm.
+    const saidWhole = removalScope(said) === 'all' || removalScope(said) === 'pack';
+    if (source === 'customer-utterance' && !ctx.pendingResolved && !saidWhole) {
       return {
         ok: false,
         reason: 'missing-option',
@@ -4345,13 +4569,13 @@ async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: 
         pending: { type: 'update-line', productIds: [line.productId], lineId: line.lineId, quantity: 0, awaiting: 'confirmation', missing: ['confirmation'] },
       };
     }
-    return {
-      ok: true,
-      speech: `That piece is part of a pack, so I am taking the whole pack out - ${pack.length} pieces.`,
-      actions: pack.map((entry) => ({ type: 'change' as const, lineKey: entry.lineId, quantity: 0 })),
-      productId: line.productId,
-      quantity: 0,
-    };
+    /*
+     * Through removeLines, which stamps the change as an operation. Returned
+     * as bare change actions, the widget refused them as unstamped and the
+     * customer read "this page and the assistant are out of step" under a
+     * reply saying the pack was coming out (live, 29 Sep).
+     */
+    return removeLines(ctx, { lines: pack, scope: 'pack', confirm: false }, lines, source, said, theme);
   }
   // More of it only when more is in stock.
   if (quantity > line.quantity) {
@@ -4379,6 +4603,83 @@ async function planUpdateLine(ctx: ToolContext, action: CommerceAction, source: 
     };
   }
   return { ok: true, speech, storefront: () => setLineQuantity(ctx.session.cartId!, line!.lineId, quantity), productId: line.productId, quantity };
+}
+
+/** Products of several asked colours, taking turns - the best of each colour first - so every colour asked for is on screen. */
+function interleaveByColour(pool: Product[], colours: ColourRequest[], limit: number): Product[] {
+  const buckets = colours.map(() => [] as Product[]);
+  const rest: Product[] = [];
+  for (const product of pool) {
+    const at = colours.findIndex((colour) => colourMatch(product, [colour], false) > 0);
+    if (at >= 0) buckets[at]!.push(product);
+    else rest.push(product);
+  }
+  const out: Product[] = [];
+  for (let round = 0; out.length < limit && buckets.some((bucket) => bucket.length > round); round += 1) {
+    for (const bucket of buckets) if (bucket[round] && out.length < limit) out.push(bucket[round]!);
+  }
+  for (const product of rest) if (out.length < limit) out.push(product);
+  return out;
+}
+
+/** The line's variant id, as the widget read it or as the catalogue holds it. */
+function basketLineVariant(line: BasketLineRecord): string | undefined {
+  return line.variantId ?? productById(line.productId)?.variants.find((entry) => entry.title === line.variantTitle || Object.values(entry.options).join(' / ') === line.variantTitle)?.id;
+}
+
+/**
+ * Several lines out together - the whole basket, a whole pack, every line
+ * of a kind. Only ever a removal: quantities are one line's. A pack piece
+ * among them brings its whole pack (its price is the pack's). What they
+ * named outright is done; "them" over more than one pack-or-line is asked
+ * once, with every line bound to the record their yes executes.
+ */
+function removeLines(ctx: ToolContext, found: BasketLines, lines: BasketLineRecord[], source: ActionSource, said: string, theme: boolean): ActionPlan {
+  const waiting = livePending(ctx.session);
+  const confirmed = source === 'customer-confirmation' || !!ctx.pendingResolved;
+  const removal = source === 'ui-cart-change' || asksToRemove(said) || (confirmed && waiting?.type === 'update-line' && waiting.quantity === 0);
+  if (!removal) return { ok: false, reason: 'missing-option', speech: 'Which item would you like to change?', facts: `Several lines fit their words, and only one line's quantity can change at a time. In the basket: ${cartSummary(lines)}. Ask which.` };
+  const bundles = new Set(found.lines.map((line) => line.bundle).filter(Boolean));
+  const chosen = lines.filter((line) => found.lines.includes(line) || (line.bundle && bundles.has(line.bundle)));
+  if (!chosen.length) return { ok: false, reason: 'not-found', speech: 'I cannot find that in your basket.', facts: cartSummary(lines) };
+  const groups = basketGroups(chosen);
+  const whole = chosen.length === lines.length;
+  const onePack = groups.length === 1 && !!groups[0]![0]!.bundle;
+  const what = onePack ? `the whole ${packName(chosen)} - all ${chosen.length} pieces` : whole ? `everything in your basket - ${chosen.length} ${chosen.length === 1 ? 'item' : 'items'}` : `${chosen.length} items`;
+  if (found.confirm && !confirmed) {
+    const named = groups.map((group) => (group[0]!.bundle ? `the ${packName(group)} (${group.length} pieces)` : `the ${titleCaseWords(garmentName(group[0]!.title))}`));
+    return {
+      ok: false,
+      reason: 'missing-option',
+      speech: onePack ? `The only thing in your basket is ${what}. Shall I take it out?` : `That is ${what}: ${named.join(' and ')}. Shall I take it all out?`,
+      facts: `Their words take out more than one line: ${chosen.map((line) => `${line.title} (${line.variantTitle}) [line ${line.lineId}]`).join('; ')}. Nothing was changed. Ask this once; their yes - or "please remove it" - takes every one of these out.`,
+      pending: { type: 'update-line', productIds: [...new Set(chosen.map((line) => line.productId))], lineId: chosen[0]!.lineId, lineIds: chosen.map((line) => line.lineId), quantity: 0, awaiting: 'confirmation', missing: ['confirmation'] },
+    };
+  }
+  const speech = `Taking ${what} out of your basket.`;
+  const title = onePack ? 'whole pack' : `${chosen.length} items`;
+  if (theme) {
+    // One operation per line (the widget runs one action per operation id), confirmed once as a batch under this title.
+    const items = chosen.map((line) => {
+      const variant = basketLineVariant(line);
+      return { kind: 'update-line' as const, expect: variant ? { remove: [{ key: line.lineId, variantId: numericId(variant), quantity: line.quantity }] } : {}, onApplied: {}, wording: { title: titleCaseWords(garmentName(line.title)), choice: line.variantTitle, quantity: 0 } };
+    });
+    return {
+      ok: true,
+      speech,
+      actions: chosen.map((line) => ({ type: 'change' as const, lineKey: line.lineId, quantity: 0 })),
+      productId: chosen[0]!.productId,
+      quantity: 0,
+      operations: { items, title },
+    };
+  }
+  return {
+    ok: true,
+    speech,
+    storefront: async () => { let cart = await getCart(ctx.session.cartId!); for (const line of chosen) cart = await setLineQuantity(ctx.session.cartId!, line.lineId, 0); return cart!; },
+    productId: chosen[0]!.productId,
+    quantity: 0,
+  };
 }
 
 registerPlanner('add-product', planAddProduct);
@@ -4774,7 +5075,9 @@ async function planAddPack(ctx: ToolContext, action: CommerceAction, source: Act
   const status = packStatus(session, deal.handle, products as Product[]);
   if (!status.ready) {
     // The pack they asked for, waiting on one of its fields: their "34" finishes it, with their yes kept (tools/pending.ts).
-    const need: PendingNeed = /\bleg\b/i.test(status.next) ? 'leg' : /\bwaist\b/i.test(status.next) ? 'waist' : /\btop size\b|\bsize\b/i.test(status.next) ? 'size' : 'option';
+    // From what the pack still lacks, not from the wording of the question - which now points at the pack card (tools/sizeHandoff.ts).
+    const firstMissing = status.pieces.flatMap((piece) => piece.missing.map((entry) => entry.kind))[0];
+    const need: PendingNeed = firstMissing === 'leg' ? 'leg' : firstMissing === 'waist' ? 'waist' : firstMissing === 'top' ? 'size' : 'option';
     return { ok: false, reason: 'not-ready', speech: status.next, facts: packStatusFacts(status), pending: { type: 'add-pack', productIds: [], pack: deal.handle, awaiting: need, missing: [need] } };
   }
   const pieces = status.pieces.map((plan) => ({ product: plan.product, variant: plan.variant! }));
@@ -5311,12 +5614,46 @@ export async function replacementRequired(ctx: ToolContext, deal: DealRecipe, in
   const choices = await packStepChoices(deal, index, fresh, undefined);
   const name = outgoing ? titleCaseWords(garmentName(outgoing.title)) : step.title.toLowerCase();
   const none = choices.attachment?.kind !== 'products' || !choices.attachment.products.length;
+  /*
+   * The first choice that fits is offered by name, so their yes finishes it:
+   * "the Warrior is sold out in L - here are the choices, which would you
+   * like?" was the one journey a customer could not finish without picking
+   * from a list (journey test, 29 Sep). The offer is bound as a swap record
+   * (tools/pending.ts bindSuggestedSwap); the other choices stay on screen
+   * and a different one named is still theirs.
+   */
+  const shownChoices = choices.attachment?.kind === 'products' ? choices.attachment.products : [];
+  const first = !none && outgoing ? shownChoices[0] : undefined;
+  if (first) {
+    const now = await sessions.getOrCreate(ctx.session.id);
+    const question = `Shall I swap the ${name} for the ${titleCaseWords(garmentName(first.title))} in ${colourwayName(first.title).toLowerCase()}${size ? `, in ${size}` : ''}?`;
+    await setReplacement(ctx.session.id, { step: index, candidates: shownChoices.map((product) => product.id), ...(size ? { size } : {}), offer: { productId: first.id, turn: customerTurn(now), suggested: true } });
+    // The same record bindSuggestedSwap writes (tools/pending.ts): their yes next turn puts this piece in.
+    await sessions.patch(ctx.session.id, {
+      pendingAction: {
+        type: 'replace-pack-piece',
+        productIds: [first.id],
+        pack: deal.handle,
+        step: index,
+        outgoing: outgoing!.id,
+        ...(size ? { options: { size } } : {}),
+        awaiting: 'confirmation',
+        missing: ['confirmation'],
+        authorized: false,
+        question,
+        turn: customerTurn(now, false),
+        mission: currentMission(now),
+      },
+    });
+    log.info('pending.offer_recorded', { sessionId: ctx.session.id, type: 'replace-pack-piece', product: first.title, from: 'replacement-required' });
+  }
+  const offerLine = first ? `I'd put the ${titleCaseWords(garmentName(first.title))} in ${colourwayName(first.title).toLowerCase()} in its place${size ? `, in ${size}` : ''} - shall I? The other choices are on screen.` : '';
   return {
     ...choices,
     speech: none
       ? `The ${name} is ${why}, and nothing else in that part of the ${titleCaseWords(deal.title)} can be had${size ? ` in ${size}` : ''} right now. Would you like a different size, or another pack?`
-      : `The ${name} is ${why}, so it can't stay in the ${titleCaseWords(deal.title)}. Here are the ${step.title.toLowerCase().replace(/\s*\/\s*/g, ' or ')} choices you can have${size ? ` in ${size}` : ''} - which would you like?`,
-    facts: `${outgoing?.title ?? step.title} is ${why} - informational only: never offer it. The ${step.title} step of ${deal.title} needs their choice; nothing was put in its place. ${choices.facts ?? ''}`.trim(),
+      : `The ${name} is ${why}, so it can't stay in the ${titleCaseWords(deal.title)}. ${offerLine}`,
+    facts: `${outgoing?.title ?? step.title} is ${why} - informational only: never offer it. ${first ? `${first.title} is offered in its place; their yes puts it in, another choice named is theirs instead.` : `The ${step.title} step of ${deal.title} needs their choice; nothing was put in its place.`} ${choices.facts ?? ''}`.trim(),
   };
 }
 

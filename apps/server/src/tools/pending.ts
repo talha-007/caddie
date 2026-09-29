@@ -3,6 +3,10 @@ import { colourMatch } from '../catalog/colour.js';
 import { optionScale, resolveVariant, sameDesign, sizeApplies, sizeOptionName, sizeScale } from '../catalog/commerce.js';
 import { colourwayName, garmentName } from '../catalog/colourways.js';
 import { allDeals } from '../catalog/bundles.js';
+import { SIZE_ON_CARD, delegatesChoice } from './sizeHandoff.js';
+import { modelReadingFor } from '../ai/readTurn.js';
+import { lookupProductName } from '../catalog/lookup.js';
+import { resolveProduct } from '../session/screen.js';
 import { designMembers, identityProducts, resolveCustomerProductIdentity } from '../catalog/productIdentity.js';
 import { productById } from '../catalog/sync.js';
 import { log } from '../lib/logger.js';
@@ -12,7 +16,7 @@ import { sessions, type CaddieSession, type PendingAction, type PendingNeed } fr
 import { trustedShopperFacts } from '../shopper/facts.js';
 import { executeCommerceAction, type ActionOutcome } from './actionGateway.js';
 import { readReply, type ReadReply } from './answers.js';
-import { asksToAdd, quantityInWords } from './cartAuthorization.js';
+import { asksToAdd, confirmsRemoval, quantityInWords } from './cartAuthorization.js';
 import { eligibilityFor } from './eligibility.js';
 import { optionValueMatches } from '../recommend/sizeWords.js';
 import { OUTCOME_TIMEOUT_MS, STILL_UPDATING, UNCERTAIN_HELD, expireDispatched } from './cartOperations.js';
@@ -117,6 +121,27 @@ export async function resolvePending(sessionId: string, said: string): Promise<P
     await sessions.patch(sessionId, { pendingAction: undefined });
     return { status: 'superseded', remainder: said };
   }
+  /*
+   * Named in letters the patterns cannot read: the reader's English names
+   * (ai/readTurn.ts). "Select the Bouncer Polo in white and add it", spoken
+   * as English and transcribed in Urdu script, read as a yes and took the
+   * Caddie's offer of the Elite Polo instead (live, 29 Sep). A different
+   * design named steps the record aside; the add then binds to the name.
+   */
+  if (pending.type !== 'add-pack') {
+    const held = pending.productIds.map((id) => productById(id)).filter((product): product is Product => !!product);
+    const readNames = modelReadingFor(said)?.asks.productNames ?? [];
+    const namesAnother = readNames.some((name) => {
+      const found = lookupProductName(name);
+      const products = found?.kind === 'exact-product' ? [found.product] : found?.kind === 'exact-family' ? found.products : [];
+      return products.length > 0 && !products.some((product) => held.some((own) => designOf(own.title) === designOf(product.title)));
+    });
+    if (namesAnother) {
+      log.info('pending.superseded', { sessionId, type: pending.type, by: 'reader-name' });
+      await sessions.patch(sessionId, { pendingAction: undefined });
+      return { status: 'superseded', remainder: said };
+    }
+  }
   if (reply.declines) {
     log.info('pending.cancelled', { sessionId, type: pending.type, said: said.slice(0, 80) });
     await sessions.patch(sessionId, { pendingAction: undefined });
@@ -158,10 +183,56 @@ async function addProduct(ctx: ToolContext, pending: PendingAction, reply: ReadR
       const sameDesignInColour = designMembers(products[0]!).filter((product) => colourMatch(product, reply.colours, false) > 0);
       if (sameDesignInColour.length) products = sameDesignInColour;
     }
+    /*
+     * "Blue" matches the Elite Polo in blue and in navy, navy being a shade
+     * of blue; asked to add "this elite polo in blue" with the blue one on
+     * screen, the Caddie asked which colour, twice (live, 29 Sep). The
+     * colourway named exactly wins over a shade of its family, and the one
+     * on screen over one that is not.
+     */
+    if (products.length > 1) {
+      const words = reply.colours.map((colour) => colour.word.toLowerCase());
+      const exact = products.filter((product) => words.includes(colourwayName(product.title).toLowerCase()));
+      if (exact.length === 1) products = exact;
+    }
+  }
+  if (products.length > 1) {
+    const onScreen = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
+    const shown = products.filter((product) => onScreen.has(product.id));
+    if (shown.length === 1) products = shown;
+  }
+  // "Any colour, you pick": the choice they handed over is made - the colourway on screen, else the first (tools/sizeHandoff.ts).
+  const delegated = products.length > 1 && delegatesChoice(said);
+  if (delegated) {
+    const onScreen = new Set((ctx.session.lastShown?.items ?? []).map((item) => item.id));
+    const picked = products.find((product) => onScreen.has(product.id)) ?? products[0]!;
+    log.info('cart.choice_delegated', { sessionId: ctx.session.id, colourway: picked.title, from: 'pending' });
+    products = [picked];
+  }
+  /*
+   * "The second one in XL please" to "want me to add this one?": the offer
+   * taken up, for the card they point at instead (journey test, 29 Sep).
+   * A card named with a size is a yes to adding that card.
+   */
+  const pointed = !reply.affirms && !asksToAdd(said) && (reply.size || reply.waist || reply.leg) ? resolveProduct(ctx.session, said) : null;
+  if (pointed?.product) {
+    log.info('pending.offer_taken_for_another_card', { sessionId: ctx.session.id, product: pointed.product.title, how: pointed.how });
+    products = [pointed.product];
   }
   const options: Record<string, string> = { ...(pending.options ?? {}) };
-  const authorized = !!pending.authorized || reply.affirms || asksToAdd(said);
-  const answered = reply.affirms || reply.colours.length > 0 || !!reply.size || !!reply.waist || !!reply.leg || reply.sizeReference;
+  const authorized = !!pending.authorized || reply.affirms || asksToAdd(said) || !!pointed?.product;
+  /*
+   * An offer the Caddie made, not taken up: "actually make it black" after
+   * "want me to add the navy one?" is a new request for black polos, not
+   * the colour of an add they never asked for (journey test, 29 Sep). The
+   * record steps aside and the words go to the model as they are.
+   */
+  if (!pending.authorized && pending.awaiting === 'confirmation' && !reply.affirms && !asksToAdd(said) && !delegated && !pointed?.product) {
+    log.info('pending.offer_not_taken', { sessionId: ctx.session.id, said: said.slice(0, 80) });
+    await sessions.patch(ctx.session.id, { pendingAction: undefined });
+    return { status: 'none', remainder: said };
+  }
+  const answered = reply.affirms || reply.colours.length > 0 || !!reply.size || !!reply.waist || !!reply.leg || reply.sizeReference || delegated || asksToAdd(said);
 
   const single = products.length === 1 ? products[0]! : undefined;
   if (single) {
@@ -208,16 +279,18 @@ async function addProduct(ctx: ToolContext, pending: PendingAction, reply: ReadR
   const next: PendingAction = { ...pending, productIds: products.map((product) => product.id), options, authorized, awaiting: missing[0]!, missing, question };
   await sessions.patch(ctx.session.id, { pendingAction: next });
   log.info('pending.updated', { sessionId: ctx.session.id, type: 'add-product', missing, authorized });
+  // The size is picked on the card: the card goes with the words, so they see exactly which one.
+  const onCard = single && (missing[0] === 'size' || missing[0] === 'waist' || missing[0] === 'leg' || missing[0] === 'option');
   return {
     status: 'asked',
-    result: { speech: question, facts: `Waiting add: ${name}${Object.keys(options).length ? ` in ${Object.values(options).join(' / ')}` : ''}. Still needed: ${missing.map((need) => NEED_WORDS[need]).join(', ')}. Ask only for ${NEED_WORDS[missing[0]!]}; nothing was added.` },
+    result: { ...(onCard ? { attachment: { kind: 'products' as const, products: [single!] } } : {}), speech: question, facts: `Waiting add: ${name}${Object.keys(options).length ? ` in ${Object.values(options).join(' / ')}` : ''}. Still needed: ${missing.map((need) => NEED_WORDS[need]).join(', ')}. Ask only for ${NEED_WORDS[missing[0]!]}; nothing was added.` },
     remainder: reply.remainder,
     pending: next,
   };
 }
 
 /** The size already theirs for this product: usual size where it applies, else the current recommendation - accepted now for this mission. */
-async function knownSizeFor(session: CaddieSession, product: Product): Promise<string | undefined> {
+export async function knownSizeFor(session: CaddieSession, product: Product): Promise<string | undefined> {
   const facts = trustedShopperFacts(session);
   if (facts.usualSize && sizeApplies(product, facts.usualSize)) return facts.usualSize;
   const rec = session.sizeRecommendation;
@@ -247,14 +320,11 @@ function questionFor(need: PendingNeed, name: string, product: Product | undefin
   switch (need) {
     case 'colour':
       return `Which colour of the ${spoken} would you like?`;
-    case 'size': {
-      const values = product ? (sizeScale(product).dimensions.find((dimension) => dimension.scale !== 'leg' && dimension.scale !== 'waist')?.values ?? []) : [];
-      return `What size would you like for the ${spoken}${values.length ? ` - ${values.join(', ')}` : ''}?`;
-    }
+    // Sizes are picked on the card, never asked for (tools/sizeHandoff.ts).
+    case 'size':
     case 'waist':
-      return `What waist size for the ${spoken}?`;
     case 'leg':
-      return `Which leg length for the ${spoken}?`;
+      return SIZE_ON_CARD;
     case 'quantity':
       return `How many of the ${spoken} would you like?`;
     case 'line':
@@ -281,7 +351,8 @@ async function addPack(ctx: ToolContext, pending: PendingAction, reply: ReadRepl
   const pieces = packPieces(ctx.session, deal.handle);
   const lastReply = [...ctx.session.messages].reverse().find((message) => message.role === 'assistant')?.text ?? '';
   const before = ctx.session.packChoices?.[deal.handle] ?? {};
-  const choices = readPackChoices(said, lastReply, pieces, before);
+  const asked = pending.awaiting === 'leg' || pending.awaiting === 'waist' ? pending.awaiting : pending.awaiting === 'size' ? 'top' : undefined;
+  const choices = readPackChoices(said, lastReply, pieces, before, undefined, asked);
   const changed = JSON.stringify(choices) !== JSON.stringify(before);
   if (changed) await sessions.patch(ctx.session.id, { packChoices: { ...(ctx.session.packChoices ?? {}), [deal.handle]: choices } });
   const authorized = !!pending.authorized || reply.affirms || asksToAdd(said);
@@ -343,12 +414,14 @@ async function updateLine(ctx: ToolContext, pending: PendingAction, reply: ReadR
   }
   // "Two", "make it two", "2 please": the number they give, however they give it.
   const quantity = pending.awaiting === 'quantity' ? (reply.quantity ?? quantityInWords(said)?.set) : pending.quantity;
-  const authorized = pending.awaiting === 'confirmation' ? reply.affirms : quantity !== undefined;
+  // "Please remove it", "yes, take them out": the removal just asked about, in its own words, is their yes to it - never a new "it" to resolve.
+  const saidRemove = pending.awaiting === 'confirmation' && pending.quantity === 0 && confirmsRemoval(said);
+  const authorized = pending.awaiting === 'confirmation' ? reply.affirms || saidRemove : quantity !== undefined;
   if (!authorized || quantity === undefined) return { status: 'none', remainder: said, pending };
   const outcome = await executeCommerceAction({ session: ctx.session, utterance: said, pendingResolved: true }, { type: 'update-line', lineId: pending.lineId, quantity });
-  log.info('pending.resolved', { sessionId: ctx.session.id, type: 'update-line', ok: outcome.ok, reason: outcome.reason ?? null, quantity });
+  log.info('pending.resolved', { sessionId: ctx.session.id, type: 'update-line', ok: outcome.ok, reason: outcome.reason ?? null, quantity, lines: pending.lineIds?.length ?? 1 });
   if (!outcome.ok) await sessions.patch(ctx.session.id, { pendingAction: undefined });
-  return { status: outcome.ok ? 'executed' : 'asked', result: fromOutcome(outcome), remainder: reply.remainder };
+  return { status: outcome.ok ? 'executed' : 'asked', result: fromOutcome(outcome), remainder: saidRemove ? '' : reply.remainder };
 }
 
 /* ---------------- offers become records ---------------- */
@@ -418,8 +491,8 @@ export async function notePendingOffer(sessionId: string, reply: string): Promis
     const resolution = resolveVariant(products[0]!, options);
     if (resolution.status === 'incomplete') for (const option of resolution.missing) missing.push(needOf(option));
   }
-  missing.push('confirmation');
-  // A field still open: the question is for that field - the offer as worded ("shall I add it?") is not asked over the top of it.
+  // An offer the Caddie made: their yes first, then whatever is still open - never "which colour?" over an offer they have not accepted.
+  missing.unshift('confirmation');
   const asked = missing[0] === 'confirmation' ? question : questionFor(missing[0]!, garmentName(products[0]!.title), products.length === 1 ? products[0] : undefined, options);
   await sessions.patch(sessionId, {
     pendingAction: { type: 'add-product', productIds: products.map((product) => product.id), ...(Object.keys(options).length ? { options } : {}), awaiting: missing[0]!, missing, authorized: false, question: asked, turn, mission },
@@ -470,6 +543,22 @@ export async function alignReplyWithPending(sessionId: string, reply: string): P
     }
   }
   if (question && TRANSACTIONAL.test(question) && !pending) {
+    /*
+     * A pack piece is being replaced and the reply offers something else:
+     * the one question that moves the customer on is which of the choices
+     * on screen goes in its place. "Yes it is confirmed" to that choice once
+     * came back "Would you like to see the Warrior Jacket?" - the sold-out
+     * piece itself, offered as a showing (admin log, 28 Sep).
+     */
+    const replacing = session.activeShoppingContext?.replacing;
+    if (replacing && session.activeShoppingContext?.pack) {
+      const deal = allDeals().find((entry) => entry.handle === session.activeShoppingContext!.pack);
+      const kind = deal?.steps[replacing.step]?.title?.toLowerCase() ?? 'piece';
+      const ask = `Which ${kind} would you like in its place? The choices are on screen.`;
+      log.info('reply.replacement_question_restored', { sessionId, over: question.slice(0, 120) });
+      sentences[questionAt] = ask;
+      return sentences.join(' ');
+    }
     /*
      * "Would you like me to add this in M?" of the card the code chose to
      * lead with: the lead is a code-known target, so the offer binds to it
@@ -550,7 +639,7 @@ function asksFor(pending: PendingAction, reply: string): boolean {
  * this turn with no swap asked - made the record of the swap, and the exact
  * question for it returned. Null when nothing is established.
  */
-async function bindSuggestedSwap(sessionId: string, session: CaddieSession): Promise<string | null> {
+export async function bindSuggestedSwap(sessionId: string, session: CaddieSession): Promise<string | null> {
   const focus = session.activeShoppingContext;
   const replacing = focus?.replacing;
   const handle = focus?.pack;
@@ -615,7 +704,13 @@ async function bindLeadOffer(sessionId: string, session: CaddieSession, question
   const resolution = resolveVariant(lead, options);
   const missing: PendingNeed[] = [];
   if (resolution.status === 'incomplete') for (const option of resolution.missing) missing.push(needOf(option));
-  missing.push('confirmation');
+  /*
+   * An offer the Caddie made, not an add they asked for: their yes comes
+   * first, and the size after it. Bound size-first, a browsing customer who
+   * had asked for yellow polos was asked "what size for the Elite Polo?"
+   * twice over, by a record they never asked for (live, 29 Sep).
+   */
+  missing.unshift('confirmation');
   const name = garmentName(lead.title);
   const asked = missing[0] === 'confirmation' ? question : questionFor(missing[0]!, name, lead, options);
   await sessions.patch(sessionId, {

@@ -124,6 +124,10 @@ function render() {
   card('cache', pct(t.cacheHitRate), 'of input tokens cached');
   card('saved', money(Math.max(t.costWithoutCacheUsd - t.costUsd, 0)), 'saved by prompt caching');
   card('declined', num(t.declined), 'messages turned away');
+  var j = t.journeys || { conversations: 0, reachedBasket: 0, reachedBasketRate: 0, avgTurnsToBasket: null, repeatedQuestions: 0 };
+  card('reached', pct(j.reachedBasketRate), num(j.reachedBasket) + ' of ' + num(j.conversations) + ' conversations reached the basket');
+  card('turns', j.avgTurnsToBasket === null ? '-' : j.avgTurnsToBasket.toFixed(1), 'customer turns to the basket, on average');
+  card('repeated', num(j.repeatedQuestions), 'questions asked twice in one conversation');
 
   renderKinds();
   renderModels();
@@ -185,11 +189,13 @@ function renderSessions() {
       '<td class="num">' + num(s.promptTokens + s.completionTokens) + '</td>' +
       '<td class="num">' + (s.voiceSeconds ? Math.round(s.voiceSeconds) + 's' : '-') + '</td>' +
       '<td class="num">' + (s.declined ? '<span class="pill bad">' + s.declined + '</span>' : '-') + '</td>' +
+      '<td class="num">' + (s.reachedBasket ? 'yes, ' + s.turnsToBasket + ' turns' : (s.turns >= 2 ? 'no' : '-')) + '</td>' +
+      '<td class="num">' + (s.repeatedQuestions ? '<span class="pill bad">' + s.repeatedQuestions + '</span>' : '-') + '</td>' +
       '<td class="num">' + money(s.costUsd) + '</td>' +
       '<td>' + when(s.lastAt) + '</td></tr>';
   }).join('');
   document.querySelector('#sessions tbody').innerHTML =
-    rows || '<tr><td colspan="8" class="empty">No conversations in this window.</td></tr>';
+    rows || '<tr><td colspan="10" class="empty">No conversations in this window.</td></tr>';
 }
 
 function renderWarnings() {
@@ -279,6 +285,9 @@ export function renderAdminPage(token: string): string {
       <div class="card" id="cache"><div class="label">Cache hit rate</div><div class="value">-</div><div class="note"></div></div>
       <div class="card" id="saved"><div class="label">Saved by cache</div><div class="value">-</div><div class="note"></div></div>
       <div class="card" id="declined"><div class="label">Declined</div><div class="value">-</div><div class="note"></div></div>
+      <div class="card" id="reached"><div class="label">Reached the basket</div><div class="value">-</div><div class="note"></div></div>
+      <div class="card" id="turns"><div class="label">Turns to basket</div><div class="value">-</div><div class="note"></div></div>
+      <div class="card" id="repeated"><div class="label">Asked twice</div><div class="value">-</div><div class="note"></div></div>
     </div>
   </section>
 
@@ -306,7 +315,7 @@ export function renderAdminPage(token: string): string {
   <section>
     <h2>Who is using it</h2>
     <table id="sessions">
-      <thead><tr><th>Session</th><th>Client</th><th class="num">Turns</th><th class="num">Tokens</th><th class="num">Voice</th><th class="num">Declined</th><th class="num">Cost</th><th>Last seen</th></tr></thead>
+      <thead><tr><th>Session</th><th>Client</th><th class="num">Turns</th><th class="num">Tokens</th><th class="num">Voice</th><th class="num">Declined</th><th class="num">Basket</th><th class="num">Asked twice</th><th class="num">Cost</th><th>Last seen</th></tr></thead>
       <tbody></tbody>
     </table>
     <p class="sub" style="margin-top:8px">A row is one conversation. Select it to read what was said. Client is a salted hash of the address, not the address.</p>
