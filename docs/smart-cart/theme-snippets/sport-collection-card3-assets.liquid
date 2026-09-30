@@ -1,0 +1,1109 @@
+{%- comment -%}
+  All CSS + JS for sport-collection-card3.
+  Self-guarding: the <style> carries an id and a dedup script removes any
+  duplicate copy; the <script> is guarded by window.__dpcInit. So this can
+  be rendered by every card safely — styles stay once, JS runs once.
+  You never call this manually — the card auto-includes it on first render.
+{%- endcomment -%}
+
+<style id="dpc-card-styles">
+  /* ==========================================================
+     DRUIDS PRODUCT CARD v3 — .dpc
+     Nothing here hides .dpc__info in any state.
+     ========================================================== */
+  .dpc {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    height: 100%;                 /* fill the grid cell so all cards match */
+    font-family: var(--text-font--family), sans-serif;
+    color: var(--color-foreground, #111);
+  }
+  .dpc.is-swapping { opacity: 0.55; transition: opacity 0.2s ease; pointer-events: none; }
+  .dpc * { box-sizing: border-box; }
+  /* ---- colour-swap skeleton ---- */
+  .dpc__skeleton { display: flex; flex-direction: column; height: 100%; }
+    .dpc__sk-media {
+    position: relative;
+    width: 100%;
+    flex: 1 1 auto;                  /* fill available height instead of forcing its own */
+    min-height: 0;
+    border-radius: 4px;
+  }
+  .dpc__sk-line { border-radius: 3px; }
+  .dpc__sk-info { padding: 12px 2px 0; display: flex; flex-direction: column; flex: 1 1 auto; }
+  .dpc__sk-title { height: 13px; width: 78%; margin-bottom: 8px; }
+  .dpc__sk-price { height: 13px; width: 40%; margin-bottom: 10px; }
+  .dpc__sk-dots { display: flex; gap: 6px; margin-bottom: 12px; }
+  .dpc__sk-dot { width: 16px; height: 16px; border-radius: 50%; }
+  .dpc__sk-btn { height: 40px; width: 100%; margin-top: auto; border-radius: 3px; }
+
+  .dpc__sk-media,
+  .dpc__sk-line,
+  .dpc__sk-dot,
+  .dpc__sk-btn {
+    background: linear-gradient(100deg,
+      rgba(0,0,0,0.06) 30%,
+      rgba(0,0,0,0.11) 50%,
+      rgba(0,0,0,0.06) 70%);
+    background-size: 200% 100%;
+    animation: dpc-shimmer 2s ease-in-out infinite;
+  }
+  @keyframes dpc-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dpc__sk-media, .dpc__sk-line, .dpc__sk-dot, .dpc__sk-btn { animation: none; }
+  }
+  /* ---------------- MEDIA ---------------- */
+  .dpc__media {
+    position: relative;
+    overflow: hidden;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.04);
+  }
+
+  .dpc__imglink { display: block; position: relative; line-height: 0; }
+
+  .dpc__img { display: block; width: 100%; height: auto; }
+
+  .dpc__img--b {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+  }
+  .dpc:hover .dpc__img--b { opacity: 1; }
+
+  .dpc__badges {
+    position: absolute;
+    top: 10px; left: 10px;
+    z-index: 2;
+    display: flex; flex-wrap: wrap; gap: 6px;
+  }
+
+  .dpc__wish {
+    position: absolute;
+    top: 10px; right: 10px;
+    z-index: 2;
+    width: 32px; height: 32px;
+    padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: none;
+    color: #555;
+    cursor: pointer;
+    transition: color 0.25s;
+  }
+  .dpc__wish svg { width: 20px; height: 20px; }
+  .dpc__wish:hover,
+  .dpc__wish.is-on { color: var(--color-accent); }
+  .dpc__wish.is-on svg { fill: currentColor; }
+
+  /* ---------------- SIZE OVERLAY ----------------
+     Container is fully transparent — the image reads through
+     the gaps. Each box carries its own backing so the labels
+     stay legible over any photo. */
+  .dpc__sizes {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    z-index: 3;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    padding: 12px 10px;
+    background: transparent;
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+  .dpc:hover .dpc__sizes,
+  .dpc:focus-within .dpc__sizes {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .dpc__size {
+    min-width: 42px;
+    padding: 7px 10px;
+    font-family: var(--text-font--family), sans-serif;
+    font-weight: 500;
+    font-size: 12px;
+    line-height: 1;
+    background: rgba(255, 255, 255, 0.92);
+    color: #111;
+    border: 1px solid rgba(0, 0, 0, 0.22);
+    border-radius: 3px;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+    transition: color 0.25s, background 0.25s, border-color 0.25s;
+  }
+  .dpc__size:hover,
+  .dpc__size.is-on {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-accent-contrast);
+  }
+
+  /* ---------------- ADDED CONFIRMATION ---------------- */
+  .dpc__added {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 20px;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+  }
+  .dpc.is-added .dpc__added { opacity: 1; visibility: visible; }
+
+  .dpc__added-check { width: 42px; height: 42px; color: var(--color-accent); }
+  .dpc__added-check svg { width: 100%; height: 100%; }
+
+  .dpc__added-text {
+    margin: 0;
+    font-family: 'BebasNeue', sans-serif;
+    font-size: 20px;
+    letter-spacing: 0.04em;
+  }
+
+  .dpc__added-link {
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    text-decoration: underline;
+  }
+
+  /* ---------------- INFO PANEL ----------------
+     No hover / focus-within / is-added selectors exist for
+     this block anywhere in this file. It is always visible.
+     Flex column so the Add to Bag button can pin to the bottom,
+     keeping button baselines aligned across all cards. */
+  .dpc__info {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    padding: 12px 2px 0;
+  }
+
+  .dpc__title {
+    display: block;
+    font-family: var(--text-font--family), sans-serif;
+    font-size: clamp(12px, 1.1vw, 14px);
+    font-weight: 500 !important;
+    line-height: 1.35;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--color-foreground, #111);
+    text-decoration: none;
+    margin-bottom: 5px;
+  }
+  .dpc__title:hover { text-decoration: underline; }
+
+  .dpc__price {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 8px;
+    font-size: clamp(12px, 1.1vw, 14px);
+    font-family: var(--text-font--family), sans-serif;
+  }
+  .dpc__price-now { font-weight: 500 !important; }
+  .dpc__price-was {
+    color: #8a8a8a;
+    font-size: 0.9em;
+    text-decoration: line-through;
+  }
+
+  .dpc__swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .dpc__swatch {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--sw, #ccc);
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    transition: transform 0.2s ease;
+  }
+  .dpc__swatch:hover { transform: scale(1.12); }
+
+  .dpc__rating {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 10px;
+  }
+  .dpc__stars { display: inline-flex; gap: 1px; color: var(--color-accent); }
+  .dpc__star { width: 13px; height: 13px; }
+  .dpc__star.is-empty { color: rgba(0, 0, 0, 0.18); }
+  .dpc__rating-count { font-size: 11px; color: #777; }
+
+  .dpc__atc {
+    display: block;
+    width: 100%;
+    margin-top: auto;             /* pins the button to the bottom of every card */
+    padding: 10px 14px;
+    font-family: var(--text-font--family), sans-serif;
+    font-size: 16px;
+    font-weight: 900 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: transparent;
+    color: var(--color-accent);
+    border: 2px solid var(--color-accent);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: color 0.25s, background 0.25s;
+  }
+  .dpc__atc:hover:not([disabled]) {
+    background: var(--color-accent);
+    color: var(--color-accent-contrast);
+  }
+  .dpc__atc[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+    color: var(--color-foreground, #111);
+    border-color: rgba(0, 0, 0, 0.3);
+  }
+
+  /* Add to Bag (touch) — opens the bottom sheet; hidden on desktop */
+  .dpc__quickadd {
+    display: none;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 14px;
+    font-family: var(--text-font--family), sans-serif;
+    font-size: 16px;
+    font-weight: 900 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: transparent;
+    color: var(--color-accent);
+    border: 2px solid var(--color-accent);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: color 0.25s, background 0.25s;
+  }
+  .dpc__quickadd:hover {
+    background: var(--color-accent);
+    color: var(--color-accent-contrast);
+  }
+
+  /* ---------------- BOTTOM SHEET ---------------- */
+  .dpcsheet {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .dpcsheet.is-open { visibility: visible; pointer-events: auto; }
+
+  .dpcsheet__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    transition: opacity 0.28s ease;
+  }
+  .dpcsheet.is-open .dpcsheet__backdrop { opacity: 1; }
+
+  .dpcsheet__panel {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    max-height: 88vh;
+    overflow-y: auto;
+    padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+    background: var(--color-bg, #fff);
+    border-radius: 14px 14px 0 0;
+    transform: translateY(100%);
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .dpcsheet.is-open .dpcsheet__panel { transform: translateY(0); }
+
+  .dpcsheet__close {
+    position: absolute;
+    top: 12px; right: 12px;
+    width: 32px; height: 32px;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: #444;
+    cursor: pointer;
+  }
+  .dpcsheet__close svg { width: 20px; height: 20px; }
+
+  .dpcsheet__head {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 18px;
+    padding-right: 40px;
+  }
+  .dpcsheet__img {
+    width: 64px; height: 64px;
+    object-fit: cover;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.04);
+    flex-shrink: 0;
+  }
+  .dpcsheet__title {
+    margin: 0 0 3px;
+    font-family: 'BebasNeue', sans-serif;
+    font-size: 18px;
+    letter-spacing: 0.03em;
+    line-height: 1.15;
+  }
+  .dpcsheet__price { margin: 0; font-size: 13px; font-weight: 500 !important; }
+
+  .dpcsheet__body { margin-bottom: 16px; }
+  .dpcsheet__row { margin-bottom: 16px; }
+  .dpcsheet__row[hidden] { display: none; }
+
+  .dpcsheet__label {
+    font-family: var(--text-font--family), sans-serif;
+    font-weight: 500;
+    margin: 0 0 8px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #555;
+  }
+  .dpcsheet__label span { color: var(--color-foreground, #111); font-weight: 600 !important; }
+
+  .dpcsheet__swatches,
+  .dpcsheet__sizes { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .dpcsheet__sw {
+    width: 30px; height: 30px;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--sw, #ccc);
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    transition: box-shadow 0.2s ease;
+  }
+  .dpcsheet__sw.is-on {
+    box-shadow: 0 0 0 2px var(--color-bg, #fff), 0 0 0 4px var(--color-accent);
+  }
+
+  .dpcsheet__size {
+    min-width: 52px;
+    padding: 10px 12px;
+    font-family: var(--text-font--family), sans-serif;
+    font-weight: 500;
+    font-size: 13px;
+    line-height: 1;
+    background: transparent;
+    color: var(--color-foreground, #111);
+    border: 1px solid rgba(0, 0, 0, 0.25);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: color 0.25s, background 0.25s, border-color 0.25s;
+  }
+  .dpcsheet__size.is-on {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-accent-contrast);
+  }
+
+  .dpcsheet__atc {
+    width: 100%;
+    padding: 14px 16px;
+    font-family: var(--text-font--family), sans-serif;
+    font-size: 19px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-weight: 900 !important;
+    background: transparent;
+    color: var(--color-accent);
+    border: 2px solid var(--color-accent);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: color 0.25s, background 0.25s;
+  }
+  .dpcsheet__atc:hover:not([disabled]) {
+    background: var(--color-accent);
+    color: var(--color-accent-contrast);
+  }
+  .dpcsheet__atc[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+    color: var(--color-foreground, #111);
+    border-color: rgba(0, 0, 0, 0.3);
+  }
+
+  .dpcsheet__done { display: none; text-align: center; padding: 10px 0 4px; }
+  .dpcsheet.is-done .dpcsheet__done { display: block; }
+  .dpcsheet.is-done .dpcsheet__body,
+  .dpcsheet.is-done .dpcsheet__atc { display: none; }
+
+  .dpcsheet__done-check {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 46px; height: 46px;
+    margin-bottom: 10px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    color: var(--color-accent-contrast);
+  }
+  .dpcsheet__done-check svg { width: 24px; height: 24px; }
+
+  .dpcsheet__done-title {
+    margin: 0 0 4px;
+    font-family: 'BebasNeue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 0.04em;
+  }
+  .dpcsheet__done-sub { font-family: var(--text-font--family), sans-serif; font-weight: 500; margin: 0 0 16px; font-size: 12px; color: #666; }
+
+  .dpcsheet__viewbag {
+    display: block;
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 13px 16px;
+    font-family: var(--text-font--family), sans-serif;
+    font-size: 18px;
+    font-weight: 600 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-align: center;
+    text-decoration: none;
+    background: transparent;
+    color: var(--color-accent);
+    border: 2px solid var(--color-accent);
+    border-radius: 3px;
+    transition: color 0.25s, background 0.25s;
+  }
+  .dpcsheet__viewbag:hover {
+    background: var(--color-accent);
+    color: var(--color-accent-contrast);
+  }
+
+  .dpcsheet__continue {
+    width: 100%;
+    padding: 11px 16px;
+    font-family: var(--text-font--family), sans-serif;
+    font-weight: 500;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: transparent;
+    color: #666;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  /* ==================== RESPONSIVE ==================== */
+
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .dpc__size { min-width: 36px; padding: 6px 8px; font-size: 11px; }
+    .dpc__sizes { padding: 10px 8px; gap: 5px; }
+  }
+
+  @media (max-width: 768px) {
+    .dpc__info { padding: 10px 2px 0; }
+    .dpc__swatch { width: 15px; height: 15px; }
+  }
+
+  @media (max-width: 480px) {
+    .dpc__wish { width: 28px; height: 28px; top: 8px; right: 8px; }
+    .dpc__wish svg { width: 18px; height: 18px; }
+    .dpc__badges { top: 8px; left: 8px; }
+    .dpcsheet__panel { padding: 18px 14px calc(90px + env(safe-area-inset-bottom)); }
+    .dpc__quickadd, .dpc__atc { font-size: 12px !important; padding: 6px !important; }
+    .dpcsheet__atc, .dpcsheet__size { font-size: 12px !important; padding: 6px !important; }
+    .dpcsheet__viewbag { font-size: 12px !important; padding: 6px !important; }
+    .dpcsheet__done-check { width: 36px !important; height: 36px !important; }
+    .dpcsheet__done-check svg { width: 20px !important; height: 20px !important; }
+  }
+
+  /* touch devices: no hover, so the overlay is unreachable.
+     Sized products swap their inline Add to Bag for the sheet trigger.
+     Simple / sold-out products keep their own button (they have no sheet). */
+  @media (hover: none) {
+    .dpc__sizes { display: none; }
+    .dpc__img--b { display: none; }
+    .dpc__atc[data-atc] { display: none; }
+    .dpc__quickadd { display: flex; margin-top: auto; }
+  }
+
+
+  /* ---------------- BADGES ---------------- */
+  .sport-badges {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .sport-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    font-family: 'BebasNeue', sans-serif;
+    font-size: 13px;
+    line-height: 1;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-radius: 4px;
+    white-space: nowrap;
+    border: 2px solid transparent;   /* keeps solid + outlined badges the same height */
+  }
+
+  /* Solid-fill badges: white text on the badge colour */
+  .sport-badge--sale { background: var(--badge-sale); color: #fff; }
+  .sport-badge--new  { background: var(--badge-new);  color: #fff; }
+  .sport-badge--best { background: var(--badge-best); color: #fff; }
+  .sport-badge--tour { background: var(--badge-tour); color: #fff; }
+
+  /* Druids Pick: outlined — white fill, dark border + text */
+  .sport-badge--pick {
+    background: #fff;
+    color: var(--badge-pick, #111);
+    border-color: var(--badge-pick, #111);
+  }
+
+  @media (max-width: 480px) {
+    .sport-badge { font-size: 8px; padding: 4px 4px; }
+  }
+</style>
+
+<script>
+/* Dedup guard: if this stylesheet was already injected earlier on the page,
+   drop any extra copies so only the first remains. Runs on every render. */
+(function () {
+  var nodes = document.querySelectorAll('style#dpc-card-styles');
+  for (var i = 1; i < nodes.length; i++) {
+    if (nodes[i].parentNode) nodes[i].parentNode.removeChild(nodes[i]);
+  }
+})();
+</script>
+
+<script>
+(function () {
+  if (window.__dpcInit) return;
+  window.__dpcInit = true;
+
+  var ADDED_MS = 2000;
+  var sheet = null;
+  var state = { info: null, variants: [], colour: null, size: null };
+
+  function parseJSON(el) { try { return JSON.parse(el.textContent); } catch (e) { return null; } }
+  function variantsOf(card) { var el = card.querySelector('[data-variants]'); return el ? (parseJSON(el) || []) : []; }
+  function infoOf(card) { var el = card.querySelector('[data-card-info]'); return el ? parseJSON(el) : null; }
+  function bundleProps(key, card) {
+    // Smart Cart: the deal key the card carries (snippets/smart-cart-deal-key.liquid) - every "any N" deal, men, ladies and kids.
+    var dealKey = card && card.getAttribute('data-deal-key');
+    if (dealKey) { var d = {}; d[dealKey] = card.getAttribute('data-deal-value'); return d; }
+    var p = {}; if (key) { p['__data_three_polo'] = key; p['__' + key] = key; } return p;
+  }
+  function cartRoot() { return (window.Shopify && window.Shopify.routes && window.Shopify.routes.root) || '/'; }
+
+  function refreshCartDrawer() {
+    return fetch(cartRoot() + '?sections=cart-drawer-section')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var html = data['cart-drawer-section']; if (!html) return;
+        var tmp = document.createElement('div'); tmp.innerHTML = html;
+        var fresh = tmp.querySelector('[data-hydration-key="cart-drawer-inner"]');
+        var cur = document.querySelector('[data-hydration-key="cart-drawer-inner"]');
+        if (fresh && cur) cur.innerHTML = fresh.innerHTML;
+      }).catch(function () {});
+  }
+
+  function matchVariant(list, cPos, colour, sPos, size) {
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i].opts;
+      if ((!cPos || o[cPos - 1] === colour) && (!sPos || o[sPos - 1] === size)) return list[i];
+    }
+    return null;
+  }
+
+  /* show the confirmation, then clear it after ADDED_MS */
+  function showAdded(card, count) {
+    var c = card.querySelector('[data-cart-count]');
+    if (c && typeof count === 'number') c.textContent = count;
+    card.classList.add('is-added');
+    clearTimeout(card.__dpcTimer);
+    card.__dpcTimer = setTimeout(function () {
+      card.classList.remove('is-added');
+    }, ADDED_MS);
+  }
+
+  function addVariant(card, id, btn) {
+    var label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Adding\u2026';
+    return fetch(cartRoot() + 'cart/add.js', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ id: id, quantity: 1, properties: bundleProps(card.getAttribute('data-bundle-key'), card) }] })
+    })
+
+      .then(function () { return fetch(cartRoot() + 'cart.js'); })
+      .then(function (r) { return r.json(); })
+      .then(function (cart) {
+        showAdded(card, cart.item_count);
+        return refreshCartDrawer();
+      })
+      .catch(function (err) { console.error(err); })
+      .then(function () { btn.disabled = false; btn.textContent = label; });
+  }
+
+  /* ---------------- bottom sheet ---------------- */
+  function buildSheet() {
+    var el = document.createElement('div');
+    el.className = 'dpcsheet';
+    el.innerHTML =
+      '<div class="dpcsheet__backdrop" data-sheet-close></div>' +
+      '<div class="dpcsheet__panel">' +
+        '<button type="button" class="dpcsheet__close" data-sheet-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>' +
+        '<div class="dpcsheet__head"><img class="dpcsheet__img" data-sheet-img src="" alt=""><div><p class="dpcsheet__title" data-sheet-title></p><p class="dpcsheet__price" data-sheet-price></p></div></div>' +
+        '<div class="dpcsheet__body">' +
+          '<div class="dpcsheet__row" data-sheet-colour-row hidden><p class="dpcsheet__label">Colour: <span data-sheet-colour-name></span></p><div class="dpcsheet__swatches" data-sheet-colours></div></div>' +
+          '<div class="dpcsheet__row" data-sheet-size-row hidden><p class="dpcsheet__label">Size: <span data-sheet-size-name></span></p><div class="dpcsheet__sizes" data-sheet-sizes></div></div>' +
+        '</div>' +
+        '<button type="button" class="dpcsheet__atc" data-sheet-atc disabled>Select Size</button>' +
+        '<div class="dpcsheet__done">' +
+          '<span class="dpcsheet__done-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 7"/></svg></span>' +
+          '<p class="dpcsheet__done-title">Added to Bag</p>' +
+          '<p class="dpcsheet__done-sub" data-sheet-done-sub></p>' +
+          '<a class="dpcsheet__viewbag" data-sheet-viewbag href="/cart">View Bag (<span data-sheet-count>1</span>)</a>' +
+          '<button type="button" class="dpcsheet__continue" data-sheet-close>Continue Shopping</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function renderSheetSizes() {
+    var wrap = sheet.querySelector('[data-sheet-sizes]');
+    wrap.innerHTML = '';
+    state.info.sizes.forEach(function (name) {
+      var variantId = state.info.isCombo && state.info.sizeVariants ? state.info.sizeVariants[name] : null;
+      if (state.info.isCombo) {
+        if (!variantId) return;                 /* only in-stock combos */
+      } else {
+        var v = matchVariant(state.variants, state.info.colourPos, state.colour, state.info.sizePos, name);
+        if (!v || !v.available) return;          /* only in-stock sizes */
+      }
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'dpcsheet__size' + (state.size === name ? ' is-on' : '');
+      b.textContent = name;
+      b.setAttribute('data-size', name);
+      if (variantId) b.setAttribute('data-variant-id', variantId);
+      wrap.appendChild(b);
+    });
+    /* No size is preselected — the user must choose one before Add to Bag activates. */
+  }
+
+  function updateSheetATC() {
+    var btn = sheet.querySelector('[data-sheet-atc]');
+    var ready = (!state.info.colourPos || state.colour) && (!state.info.sizePos || state.size);
+    btn.disabled = !ready;
+    btn.textContent = ready ? 'Add to Bag  |  ' + state.info.price : 'Select Size';
+  }
+
+  function openSheet(card) {
+    if (!sheet) sheet = buildSheet();
+    var info = infoOf(card); if (!info) return;
+    state.info = info;
+    state.variants = variantsOf(card);
+    state.bundleKey = card.getAttribute('data-bundle-key');
+    state.card = card;
+    state.colour = info.colours.length ? info.colours[0].name : null;
+    state.size = null;
+    state.sizeVariantId = null;
+
+    sheet.classList.remove('is-done');
+    sheet.querySelector('[data-sheet-img]').src = info.image;
+    sheet.querySelector('[data-sheet-title]').textContent = info.title;
+    sheet.querySelector('[data-sheet-price]').textContent = info.price;
+
+    var cRow = sheet.querySelector('[data-sheet-colour-row]');
+    var cWrap = sheet.querySelector('[data-sheet-colours]');
+    cWrap.innerHTML = '';
+    if (info.colours.length) {
+      cRow.hidden = false;
+      info.colours.forEach(function (c) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'dpcsheet__sw' + (c.name === state.colour ? ' is-on' : '');
+        b.style.setProperty('--sw', c.hex);
+        b.title = c.name;
+        b.setAttribute('data-colour', c.name);
+        cWrap.appendChild(b);
+      });
+      sheet.querySelector('[data-sheet-colour-name]').textContent = state.colour || '';
+    } else { cRow.hidden = true; }
+
+    var sRow = sheet.querySelector('[data-sheet-size-row]');
+    if (info.sizes.length) {
+      sRow.hidden = false;
+      sheet.querySelector('[data-sheet-size-name]').textContent = '';
+      renderSheetSizes();
+    } else { sRow.hidden = true; }
+
+    updateSheetATC();
+    sheet.classList.add('is-open');
+    document.documentElement.style.overflow = 'hidden';
+  }
+
+  function closeSheet() {
+    if (!sheet) return;
+    sheet.classList.remove('is-open');
+    document.documentElement.style.overflow = '';
+  }
+
+  /* ---------------- delegated clicks ---------------- */
+  document.addEventListener('click', function (e) {
+    /* --- inside the sheet --- */
+    if (sheet && sheet.contains(e.target)) {
+      if (e.target.closest('[data-sheet-close]')) { e.preventDefault(); closeSheet(); return; }
+
+      var sw = e.target.closest('.dpcsheet__sw');
+      if (sw) {
+        state.colour = sw.getAttribute('data-colour');
+        sheet.querySelectorAll('.dpcsheet__sw').forEach(function (b) { b.classList.remove('is-on'); });
+        sw.classList.add('is-on');
+        sheet.querySelector('[data-sheet-colour-name]').textContent = state.colour;
+        state.size = null;
+        state.sizeVariantId = null;
+        sheet.querySelector('[data-sheet-size-name]').textContent = '';
+        renderSheetSizes();
+        updateSheetATC();
+        return;
+      }
+
+      var sz = e.target.closest('.dpcsheet__size');
+      if (sz) {
+        state.size = sz.getAttribute('data-size');
+        state.sizeVariantId = sz.getAttribute('data-variant-id') || null;
+        sheet.querySelectorAll('.dpcsheet__size').forEach(function (b) { b.classList.remove('is-on'); });
+        sz.classList.add('is-on');
+        sheet.querySelector('[data-sheet-size-name]').textContent = state.size;
+        updateSheetATC();
+        return;
+      }
+
+      var satc = e.target.closest('[data-sheet-atc]');
+      if (satc && !satc.disabled) {
+        var v = state.sizeVariantId
+          ? { id: parseInt(state.sizeVariantId, 10) }
+          : matchVariant(state.variants, state.info.colourPos, state.colour, state.info.sizePos, state.size);
+        if (!v) return;
+        satc.disabled = true;
+        satc.textContent = 'Adding\u2026';
+        fetch(cartRoot() + 'cart/add.js', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: [{ id: v.id, quantity: 1, properties: bundleProps(state.bundleKey, state.card) }] })
+        })
+
+          .then(function () { return fetch(cartRoot() + 'cart.js'); })
+          .then(function (r) { return r.json(); })
+          .then(function (cart) {
+            var bits = [state.info.title];
+            if (state.colour) bits.push(state.colour);
+            sheet.querySelector('[data-sheet-done-sub]').textContent =
+              bits.join(' - ') + (state.size ? ' (' + state.size + ')' : '');
+            sheet.querySelector('[data-sheet-count]').textContent = cart.item_count;
+            sheet.querySelector('[data-sheet-viewbag]').href = cartRoot() + 'cart';
+            sheet.classList.add('is-done');
+            return refreshCartDrawer();
+          })
+          .catch(function (err) { console.error(err); })
+          .then(function () { satc.disabled = false; updateSheetATC(); });
+        return;
+      }
+      return;
+    }
+
+    /* --- inside a card --- */
+    var card = e.target.closest('[data-dpc]');
+    if (!card) return;
+
+    var wish = e.target.closest('[data-wish]');
+    if (wish) { e.preventDefault(); wish.classList.toggle('is-on'); return; }
+
+    var openBtn = e.target.closest('[data-sheet-open]');
+    if (openBtn) { e.preventDefault(); openSheet(card); return; }
+
+    /* size box on the image — updates the ATC button's target */
+    var size = e.target.closest('.dpc__size');
+    if (size) {
+      e.preventDefault();
+      card.querySelectorAll('.dpc__size').forEach(function (b) { b.classList.remove('is-on'); });
+      size.classList.add('is-on');
+      var atc = card.querySelector('[data-atc]');
+      if (atc) {
+        atc.setAttribute('data-size', size.getAttribute('data-size'));
+        var vid = size.getAttribute('data-variant-id');
+        if (vid) { atc.setAttribute('data-variant-id', vid); }
+        else { atc.removeAttribute('data-variant-id'); }
+      }
+      return;
+    }
+
+    /* single-variant products */
+    var simple = e.target.closest('[data-atc-simple]');
+    if (simple) {
+      e.preventDefault();
+      addVariant(card, parseInt(simple.getAttribute('data-variant'), 10), simple);
+      return;
+    }
+
+    /* sized products — uses whichever size is currently selected */
+    var atcBtn = e.target.closest('[data-atc]');
+    if (atcBtn && !atcBtn.disabled) {
+      e.preventDefault();
+      var directId = atcBtn.getAttribute('data-variant-id');
+      if (directId) {
+        addVariant(card, parseInt(directId, 10), atcBtn);
+        return;
+      }
+      var info = infoOf(card);
+      var variant = matchVariant(
+        variantsOf(card), 0, null,
+        info ? info.sizePos : 0,
+        atcBtn.getAttribute('data-size')
+      );
+      if (!variant) return;
+      addVariant(card, variant.id, atcBtn);
+    }
+  });
+
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSheet(); });
+
+  /* ---------- lazy swatch dots via Section Rendering API ---------- */
+  (function () {
+    var SECTION = 'sport-swatch-dots';
+    var MAX_CONCURRENT = 4;
+    var queue = [];
+    var active = 0;
+
+    function fill(slot) {
+      var handle = slot.getAttribute('data-swatch-handle');
+      if (!handle) return Promise.resolve();
+      var url = cartRoot() + 'products/' + handle + '?section_id=' + SECTION;
+      return fetch(url)
+        .then(function (r) { return r.ok ? r.text() : ''; })
+        .then(function (html) {
+          if (!html) return;
+          var tmp = document.createElement('div');
+          tmp.innerHTML = html.trim();
+          var inner = tmp.querySelector('.sport-swatches');
+          slot.innerHTML = inner ? inner.innerHTML : tmp.innerHTML;
+        })
+        .catch(function () {});
+    }
+
+    function pump() {
+      while (active < MAX_CONCURRENT && queue.length) {
+        var slot = queue.shift();
+        active++;
+        fill(slot).then(function () { active--; pump(); });
+      }
+    }
+
+    function enqueue(slot) {
+      if (slot.__swQueued) return;
+      slot.__swQueued = true;
+      queue.push(slot);
+      pump();
+    }
+
+    var io = null;
+    if ('IntersectionObserver' in window) {
+      io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { io.unobserve(e.target); enqueue(e.target); }
+        });
+      }, { rootMargin: '200px' });
+    }
+
+    function observeSlot(slot) {
+      if (slot.__swSeen) return;      /* never process the same slot twice */
+      slot.__swSeen = true;
+      if (io) { io.observe(slot); } else { enqueue(slot); }
+    }
+
+    function scan(root) {
+      var scope = (root && root.querySelectorAll) ? root : document;
+      scope.querySelectorAll('.dpc__swatches--lazy[data-swatch-handle]').forEach(observeSlot);
+      if (root && root.matches && root.matches('.dpc__swatches--lazy[data-swatch-handle]')) {
+        observeSlot(root);
+      }
+    }
+
+    function start() {
+      scan(document);                 /* initial cards */
+
+      /* catch cards added later by infinite scroll / pagination / filters */
+      if ('MutationObserver' in window) {
+        var mo = new MutationObserver(function (mutations) {
+          mutations.forEach(function (m) {
+            m.addedNodes.forEach(function (node) {
+              if (node.nodeType === 1) scan(node);   /* element nodes only */
+            });
+          });
+        });
+        mo.observe(document.body, { childList: true, subtree: true });
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', start);
+    } else {
+      start();
+    }
+  })();
+
+  /* ---------- colour-dot click swaps the card in place ---------- */
+  (function () {
+    var SECTION = 'sport-product-card-collection';
+
+    function handleFromUrl(url) {
+      if (!url) return null;
+      var after = url.split('/products/')[1];
+      if (!after) return null;
+      return after.split('?')[0].split('#')[0].replace(/\/+$/, '');
+    }
+
+    function skeletonHTML() {
+      return '' +
+        '<div class="dpc__skeleton" aria-hidden="true">' +
+          '<div class="dpc__sk-media"></div>' +
+          '<div class="dpc__sk-info">' +
+            '<div class="dpc__sk-line dpc__sk-title"></div>' +
+            '<div class="dpc__sk-line dpc__sk-price"></div>' +
+            '<div class="dpc__sk-dots">' +
+              '<span class="dpc__sk-dot"></span>' +
+              '<span class="dpc__sk-dot"></span>' +
+              '<span class="dpc__sk-dot"></span>' +
+              '<span class="dpc__sk-dot"></span>' +
+            '</div>' +
+            '<div class="dpc__sk-btn"></div>' +
+          '</div>' +
+        '</div>';
+    }
+
+    function swapCard(card, handle, fallbackUrl) {
+      var url = cartRoot() + 'products/' + handle + '?section_id=' + SECTION;
+
+      /* freeze the card's current height so the skeleton doesn't jump,
+        then show the skeleton in place of the card's contents */
+      card.style.minHeight = card.offsetHeight + 'px';
+      var realHTML = card.innerHTML;          /* keep for fallback restore */
+      card.innerHTML = skeletonHTML();
+
+      fetch(url)
+        .then(function (r) { return r.ok ? r.text() : ''; })
+        .then(function (html) {
+          if (!html) throw new Error('empty');
+          var tmp = document.createElement('div');
+          tmp.innerHTML = html.trim();
+          var fresh = tmp.querySelector('[data-dpc]');
+          if (!fresh) throw new Error('no card');
+          /* replaceWith fires the lazy-swatch MutationObserver, so the new
+            card's dots + delegated ATC/size/sheet handlers all reactivate. */
+          card.replaceWith(fresh);
+        })
+        .catch(function () {
+          /* restore the original card, then fall back to navigation */
+          card.style.minHeight = '';
+          card.innerHTML = realHTML;
+          if (fallbackUrl) window.location.href = fallbackUrl;
+        });
+    }
+
+    document.addEventListener('click', function (e) {
+      /* respect new-tab / modified clicks — let the browser do its thing */
+      if (e.defaultPrevented || e.button !== 0 ||
+          e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+
+      var dot = e.target.closest('.sport-swatch');
+      if (!dot) return;
+
+      var card = dot.closest('[data-dpc]');
+      if (!card) return;              /* not in a card (e.g. product page) → navigate normally */
+
+      var href = dot.getAttribute('href');
+      var handle = handleFromUrl(href);
+      if (!handle) return;            /* can't parse → let it navigate */
+
+      /* clicking the already-active colour does nothing */
+      if (dot.classList.contains('is-active')) { e.preventDefault(); return; }
+
+      e.preventDefault();
+      swapCard(card, handle, href);
+    });
+  })();
+
+})();
+</script>
+
+
+<style id="dpc-wish-styles">
+  .dpc__wish { position: absolute; top: 10px; right: 10px; z-index: 3; width: 34px; height: 34px;
+    display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.9);
+    border: 1px solid rgba(0,0,0,0.08); border-radius: 50%; cursor: pointer; padding: 0;
+    transition: transform .15s ease, background .15s ease; }
+  .dpc__wish svg { width: 18px; height: 18px; fill: none; stroke: #111; stroke-width: 1.8;
+    transition: fill .15s ease, stroke .15s ease; }
+  .dpc__wish:hover { transform: scale(1.08); background: #fff; }
+  .dpc__wish.is-on svg { fill: var(--color-accent, #b8a94e); stroke: var(--color-accent, #b8a94e); }
+  .dpc__wish.is-busy { opacity: .55; pointer-events: none; }
+</style>
+<script>
+(function () {
+  if (window.__wardrobeInit) return; window.__wardrobeInit = true;
+  var API = 'https://druids-customer-portal.druidswholesale.com/api/wardrobe';
+  var CUSTOMER_ID = {{ customer.id | default: 'null' }};
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-wish]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!CUSTOMER_ID) { window.location.href = '/account/login'; return; }
+    if (btn.classList.contains('is-busy')) return;          // ignore rapid re-clicks
+    var pid = btn.getAttribute('data-product-id');
+    btn.classList.add('is-busy');
+    fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_id: String(CUSTOMER_ID), product_id: String(pid) }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.ok) {                                    // server tells us the new state
+          btn.classList.toggle('is-on', d.in === true);
+          btn.setAttribute('aria-pressed', d.in === true ? 'true' : 'false');
+        }
+      })
+      .catch(function () {})
+      .then(function () { btn.classList.remove('is-busy'); });
+  });
+})();
+</script>
+

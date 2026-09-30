@@ -1,0 +1,87 @@
+{%- comment -%}
+  Smart Cart: how far the bag is towards each "any N" deal, and the saving
+  SupaEasy actually applied. Counts units whose line carries the deal's key
+  (the key SupaEasy reads) - the same rules as the Caddie
+  (apps/server/src/smartCart/config.ts). Never works out a price: the saving
+  is read from the line's own discount. Rendered at the top of the drawer by
+  snippets/cart-drawer.liquid.
+{%- endcomment -%}
+{%- liquid
+  assign sc_keys = '__3_Polo_Bundle|__any-2-trousers|__any-2-trouser-shorts|__bundle_threepolo_kids|__ladies-any-2-trousers|__kids-any-2-trousers|__any-2-shorts|__any-2-shorts' | split: '|'
+  assign sc_match = '*|*|*|*|*|*|ladies|kids' | split: '|'
+  assign sc_needed = '3|2|2|3|2|2|2|2' | split: '|'
+  assign sc_titles = 'ANY 3 POLO BUNDLE|ANY 2 TROUSERS|ANY 2 SHORTS|ANY 3 POLO KIDS BUNDLE|LADIES ANY 2 TROUSERS|KIDS ANY 2 TROUSERS|LADIES ANY 2 SHORTS|KIDS ANY 2 SHORTS' | split: '|'
+  assign sc_names = 'Any 3 Polos|Any 2 Trousers|Any 2 Shorts|Any 3 Kids Polos|Any 2 Ladies Trousers|Any 2 Kids Trousers|Any 2 Ladies Shorts|Any 2 Kids Shorts' | split: '|'
+  assign sc_prices = '3 for £59.99|2 for £49|2 for £45|3 for £49|2 for £49|2 for £49|2 for £45|2 for £45' | split: '|'
+  assign sc_one = 'polo|pair of trousers|pair of shorts|kids polo|pair of ladies trousers|pair of kids trousers|pair of ladies shorts|pair of kids shorts' | split: '|'
+  assign sc_many = 'polos|pairs of trousers|pairs of shorts|kids polos|pairs of ladies trousers|pairs of kids trousers|pairs of ladies shorts|pairs of kids shorts' | split: '|'
+  assign sc_any = false
+-%}
+{%- capture sc_rows -%}
+  {%- for sc_key in sc_keys -%}
+    {%- liquid
+      assign i = forloop.index0
+      assign needed = sc_needed[i] | plus: 0
+      assign units = 0
+      assign saved = 0
+      for item in cart.items
+        assign value = item.properties[sc_key] | strip
+        if item.properties[sc_key] != blank
+          if sc_match[i] == '*' or value == sc_match[i]
+            assign units = units | plus: item.quantity
+            for allocation in item.line_level_discount_allocations
+              if allocation.discount_application.title == sc_titles[i]
+                assign saved = saved | plus: allocation.amount
+              endif
+            endfor
+          endif
+        endif
+      endfor
+      assign left = needed | minus: units
+      assign shown = units
+      if shown > needed
+        assign shown = needed
+      endif
+      assign percent = shown | times: 100 | divided_by: needed
+    -%}
+    {%- if units > 0 -%}
+      {%- assign sc_any = true -%}
+      <div class="sc-deal{% if left <= 0 %} sc-deal--done{% endif %}">
+        <div class="sc-deal__row">
+          <span class="sc-deal__name">{{ sc_names[i] }} <span class="sc-deal__price">{{ sc_prices[i] }}</span></span>
+          <span class="sc-deal__count">{{ shown }}/{{ needed }}</span>
+        </div>
+        <div class="sc-deal__bar" aria-hidden="true"><span style="width: {{ percent }}%"></span></div>
+        <p class="sc-deal__msg">
+          {%- if left == 1 -%}
+            Choose any 1 more {{ sc_one[i] }} to complete the deal
+          {%- elsif left > 1 -%}
+            Choose any {{ left }} more {{ sc_many[i] }} to complete the deal
+          {%- elsif saved > 0 -%}
+            &#10003; Deal applied &middot; you save {{ saved | money }}
+          {%- else -%}
+            &#10003; Your {{ sc_many[i] }} qualify &middot; priced at checkout
+          {%- endif -%}
+        </p>
+      </div>
+    {%- endif -%}
+  {%- endfor -%}
+{%- endcapture -%}
+{%- if sc_any -%}
+  <div class="sc-deals" aria-label="Deals in your bag">{{ sc_rows }}</div>
+{%- endif -%}
+
+{% stylesheet %}
+  .sc-deals { margin: 0 0 16px; border: 1px solid #e8e8e8; border-radius: 8px; background: #f7f7f5; }
+  .sc-deal { padding: 10px 12px; }
+  .sc-deal + .sc-deal { border-top: 1px solid #e8e8e8; }
+  .sc-deal__row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .sc-deal__name { font-size: 13px; font-weight: 600; color: #111; }
+  .sc-deal__price { font-weight: 400; color: #666; }
+  .sc-deal__count { font-size: 12px; color: #666; }
+  .sc-deal__bar { height: 4px; margin: 6px 0; border-radius: 2px; background: #e2e2e2; overflow: hidden; }
+  .sc-deal__bar span { display: block; height: 100%; background: #111; transition: width .3s ease; }
+  .sc-deal__msg { margin: 0; font-size: 12px; color: #444; }
+  .sc-deal--done .sc-deal__bar span { background: #4c6b2e; }
+  .sc-deal--done .sc-deal__msg { color: #4c6b2e; font-weight: 600; }
+{% endstylesheet %}

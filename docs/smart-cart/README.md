@@ -105,6 +105,10 @@ Deploy the widget and server together. An older widget ignores `properties`, so 
 - **Later:** chat wording about deal progress, labels on basket lines, and ladies and kids deals (several conflicting SupaEasy discounts; see `research/supaeasy-and-theme.md`).
 - **Untested edge cases:** a trousers deal when the same variant is also in the cart without the trigger, and a line carrying two triggers.
 
+## For the theme team
+
+`BRIEF.md` explains the whole of Smart Cart for the Druids team. `theme-snippets/` holds the 7 theme files applied to the copied theme, with a `README.md` on how to apply them.
+
 ## Research
 
 - `research/supaeasy-and-theme.md`: the SupaEasy configuration of every deal, which theme routes attach which trigger, the live theme compared with the copied theme, and the ladies polo conflict.

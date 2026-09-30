@@ -1,0 +1,345 @@
+{% comment %}
+  DRUIDS product card v3 (.dpc)
+  Renamed from .spc2 so no external stylesheet can override it.
+  Desktop: hover swaps image + reveals size boxes OVER the image
+           on a fully transparent container.
+  Info panel (title / price / swatches / Add to Bag) is always visible.
+  First in-stock size is preselected, so Add to Bag works immediately.
+  Mobile:  ADD TO BAG button -> bottom sheet, no size preselected.
+  @param {object} product
+{% endcomment %}
+{%- liquid
+  assign colour_opt = null
+  assign size_opt = null
+  for opt in product.options_with_values
+    assign n = opt.name | downcase
+    if n contains 'colour' or n contains 'color'
+      assign colour_opt = opt
+    endif
+    if n contains 'size'
+      assign size_opt = opt
+    endif
+  endfor
+
+  comment
+    A SECOND non-colour, non-size-named option (e.g. "Leg Length" next to
+    "Waist Size") switches the card into COMBO mode: every in-stock variant
+    becomes its own size box labelled "30 / 32", each carrying its real
+    variant id directly — same pattern as the legacy theme, which lists
+    product.variants directly instead of a single option axis.
+  endcomment
+  assign size_opt_2 = null
+  for opt in product.options_with_values
+    if opt.position != colour_opt.position and opt.position != size_opt.position
+      if size_opt_2 == null
+        assign size_opt_2 = opt
+      endif
+    endif
+  endfor
+  assign is_combo = false
+  if size_opt and size_opt_2
+    assign is_combo = true
+  endif
+
+  assign on_sale = false
+  if product.compare_at_price_max > product.price
+    assign on_sale = true
+  endif
+
+  assign img_a = product.featured_image
+  assign img_b = product.images[1]
+
+  assign rating = product.metafields.reviews.rating.value.rating
+  assign rating_count = product.metafields.reviews.rating_count.value
+
+  assign spos = 0
+  assign spos2 = 0
+  assign first_size = ''
+  assign first_variant_id = ''
+  if is_combo
+    assign spos = size_opt.position | minus: 1
+    assign spos2 = size_opt_2.position | minus: 1
+    for v in product.variants
+      if first_size != ''
+        break
+      endif
+      if v.available
+        assign first_size = v.options[spos] | append: ' / ' | append: v.options[spos2]
+        assign first_variant_id = v.id
+      endif
+    endfor
+  elsif size_opt
+    assign spos = size_opt.position | minus: 1
+    for value in size_opt.values
+      if first_size != ''
+        break
+      endif
+      for v in product.variants
+        if v.options[spos] == value.name and v.available
+          assign first_size = value.name
+          assign first_variant_id = v.id
+          break
+        endif
+      endfor
+    endfor
+  endif
+
+  assign instock_sizes = ''
+  if is_combo
+    for v in product.variants
+      if v.available
+        assign instock_sizes = instock_sizes | append: v.options[spos] | append: ',' | append: v.options[spos2] | append: ','
+      endif
+    endfor
+  elsif size_opt
+    for value in size_opt.values
+      for v in product.variants
+        if v.options[spos] == value.name and v.available
+          assign instock_sizes = instock_sizes | append: value.name | append: ','
+          break
+        endif
+      endfor
+    endfor
+  endif
+-%}
+
+
+
+<div
+  class="dpc"
+  data-dpc
+  data-bundle-key="{% if product.tags contains 'bundle_threepolo' %}3_Polo_Bundle{% elsif product.tags contains 'bundle_threepolo_ladies' %}bundle_threepolo_ladies{% elsif product.tags contains 'bundle_threepolo_kids' %}bundle_threepolo_kids{% endif %}"
+  {%- comment -%} Smart Cart: the SupaEasy deal key for this product, for the card's add-to-cart {%- endcomment -%}
+  {% render 'smart-cart-deal-key', product: product, as: 'attributes' %}
+  data-instock-sizes="{{ instock_sizes | escape }}"
+
+  {% if colour_opt %}
+    data-colour-pos="{{ colour_opt.position }}"
+  {% endif %}
+  {% if size_opt %}
+    data-size-pos="{{ size_opt.position }}"
+  {% endif %}
+>
+  <div class="dpc__media">
+    <div class="dpc__badges">
+      {%- render 'sport-badges', product: product -%}
+    </div>
+
+    {%- render 'sport-wardrobe-heart', product: product -%}
+
+    <a href="{{ product.url }}" class="dpc__imglink">
+      {%- if img_a -%}
+        <img
+          class="dpc__img dpc__img--a"
+          src="{{ img_a | image_url: width: 400 }}"
+          srcset="{{ img_a | image_url: width: 200 }} 200w, {{ img_a | image_url: width: 300 }} 300w, {{ img_a | image_url: width: 400 }} 400w, {{ img_a | image_url: width: 600 }} 600w, {{ img_a | image_url: width: 700 }} 700w"
+          sizes="(max-width: 480px) 45vw, (max-width: 768px) 30vw, (max-width: 1024px) 25vw, 340px"
+          alt="{{ product.title | escape }}"
+          loading="lazy"
+          width="{{ img_a.width }}"
+          height="{{ img_a.height }}"
+        >
+      {%- endif -%}
+      {%- if img_b -%}
+        <img
+          class="dpc__img dpc__img--b"
+          src="{{ img_b | image_url: width: 400 }}"
+          srcset="{{ img_b | image_url: width: 200 }} 200w, {{ img_b | image_url: width: 300 }} 300w, {{ img_b | image_url: width: 400 }} 400w, {{ img_b | image_url: width: 600 }} 600w, {{ img_b | image_url: width: 700 }} 700w"
+          sizes="(max-width: 480px) 45vw, (max-width: 768px) 30vw, (max-width: 1024px) 25vw, 340px"
+          alt=""
+          loading="lazy"
+          aria-hidden="true"
+          width="{{ img_b.width }}"
+          height="{{ img_b.height }}"
+        >
+      {%- endif -%}
+    </a>
+
+    {%- comment -%}
+      SIZE OVERLAY — transparent container over the image.
+      Only in-stock sizes are rendered; the first one starts selected.
+    {%- endcomment -%}
+    {%- if is_combo and first_size != '' -%}
+      <div class="dpc__sizes" data-sizes>
+        {%- for v in product.variants -%}
+          {%- if v.available -%}
+            {%- assign combo_label = v.options[spos] | append: ' / ' | append: v.options[spos2] -%}
+            <button
+              type="button"
+              class="dpc__size{% if v.id == first_variant_id %} is-on{% endif %}"
+              data-size="{{ combo_label | escape }}"
+              data-variant-id="{{ v.id }}"
+            >
+              {{ combo_label }}
+            </button>
+          {%- endif -%}
+        {%- endfor -%}
+      </div>
+    {%- elsif size_opt and first_size != '' -%}
+      <div class="dpc__sizes" data-sizes>
+        {%- for value in size_opt.values -%}
+          {%- assign in_stock = false -%}
+          {%- for v in product.variants -%}
+            {%- if v.options[spos] == value.name and v.available -%}
+              {%- assign in_stock = true -%}
+              {%- break -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {%- if in_stock -%}
+            <button
+              type="button"
+              class="dpc__size{% if value.name == first_size %} is-on{% endif %}"
+              data-size="{{ value.name | escape }}"
+            >
+              {{ value.name }}
+            </button>
+          {%- endif -%}
+        {%- endfor -%}
+      </div>
+    {%- endif -%}
+
+    {%- comment -%} ADDED CONFIRMATION — over the image, auto-hides {%- endcomment -%}
+    <div class="dpc__added" data-added>
+      <span class="dpc__added-check">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>
+        </svg>
+      </span>
+      <p class="dpc__added-text">Added to Bag</p>
+      <a class="dpc__added-link" href="{{ routes.cart_url }}">View bag (<span data-cart-count>1</span>)</a>
+    </div>
+  </div>
+
+  {%- comment -%} INFO — always visible, never altered by hover {%- endcomment -%}
+  <div class="dpc__info">
+    <a href="{{ product.url }}" class="dpc__title">{{ product.title }}</a>
+    {% comment %} {%- for tag in product.tags -%}
+      {%- if tag contains 'color-' -%}
+        <span style="display:block;font-size:11px;color:red;">{{ tag }}</span>
+      {%- endif -%}
+    {%- endfor -%} {% endcomment %}
+
+    <p class="dpc__price">
+      <span class="dpc__price-now">{{ product.price | money }}</span>
+      {%- if on_sale -%}
+        <s class="dpc__price-was">{{ product.compare_at_price_max | money }}</s>
+      {%- endif -%}
+    </p>
+    {% comment %} <div style="background: black;color:white;margin:10px">
+      Color Option:  {{  colour_opt }} <br>
+      Product Handle:  {{  product.handle }} <br>
+    </div> {% endcomment %}
+    {%- if colour_opt -%}
+      <div class="dpc__swatches">
+        {%- for value in colour_opt.values -%}
+          <span
+            class="dpc__swatch"
+            style="--sw: {{ value.swatch.color | default: '#cccccc' }};"
+            title="{{ value.name | escape }}"
+          ></span>
+        {%- endfor -%}
+      </div>
+    {%- else -%}
+      <div class="dpc__swatches dpc__swatches--lazy" data-swatch-handle="{{ product.handle }}"></div>
+    {%- endif -%}
+
+    {%- if rating -%}
+      <div class="dpc__rating" aria-label="{{ rating }} out of 5">
+        <span class="dpc__stars">
+          {%- for i in (1..5) -%}
+            {%- assign filled = false -%}
+            {%- if i <= rating -%}{%- assign filled = true -%}{%- endif -%}
+            <svg class="dpc__star{% unless filled %} is-empty{% endunless %}" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 16.8l-5.8 3.1 1.1-6.5L2.6 8.8l6.5-.9z"/>
+            </svg>
+          {%- endfor -%}
+        </span>
+        {%- if rating_count -%}
+          <span class="dpc__rating-count">({{ rating_count }})</span>
+        {%- endif -%}
+      </div>
+    {%- endif -%}
+
+    {%- comment -%} ADD TO BAG — always visible, defaults to first in-stock size {%- endcomment -%}
+    {%- if is_combo and first_size != '' -%}
+      <button type="button" class="dpc__atc" data-atc data-size="{{ first_size | escape }}" data-variant-id="{{ first_variant_id }}">Add to Bag</button>
+      <button type="button" class="dpc__quickadd" data-sheet-open>Add to Bag</button>
+    {%- elsif size_opt and first_size != '' -%}
+      <button type="button" class="dpc__atc" data-atc data-size="{{ first_size | escape }}">Add to Bag</button>
+      <button type="button" class="dpc__quickadd" data-sheet-open>Add to Bag</button>
+    {%- elsif product.available -%}
+      <button
+        type="button"
+        class="dpc__atc"
+        data-atc-simple
+        data-variant="{{ product.selected_or_first_available_variant.id }}"
+      >
+        Add to Bag
+      </button>
+    {%- else -%}
+      <button type="button" class="dpc__atc" disabled>Sold Out</button>
+    {%- endif -%}
+  </div>
+
+  <script type="application/json" data-variants>
+    [{%- for v in product.variants -%}{"id":{{ v.id }},"opts":{{ v.options | json }},"available":{{ v.available }}}{%- unless forloop.last -%},{%- endunless -%}{%- endfor -%}]
+  </script>
+
+  <script type="application/json" data-card-info>
+    {
+      "title": {{ product.title | json }},
+      "url": {{ product.url | json }},
+      "price": {{ product.price | money | json }},
+      "image": {% if img_a %}{{ img_a | image_url: width: 400 | json }}{% else %}""{% endif %},
+      "colourPos": {{ colour_opt.position | default: 0 }},
+      "sizePos": {{ size_opt.position | default: 0 }},
+      "isCombo": {% if is_combo %}true{% else %}false{% endif %},
+      "colours": [
+        {%- if colour_opt -%}
+          {%- for value in colour_opt.values -%}
+            {"name": {{ value.name | json }}, "hex": {{ value.swatch.color | default: '#cccccc' | json }}}{%- unless forloop.last -%},{%- endunless -%}
+          {%- endfor -%}
+        {%- endif -%}
+      ],
+      "sizes": [
+        {%- if is_combo -%}
+          {%- assign first_entry = true -%}
+          {%- for v in product.variants -%}
+            {%- if v.available -%}
+              {%- unless first_entry -%},{%- endunless -%}
+              {{ v.options[spos] | append: ' / ' | append: v.options[spos2] | json }}
+              {%- assign first_entry = false -%}
+            {%- endif -%}
+          {%- endfor -%}
+        {%- elsif size_opt -%}
+          {%- for value in size_opt.values -%}
+            {{ value.name | json }}{%- unless forloop.last -%},{%- endunless -%}
+          {%- endfor -%}
+        {%- endif -%}
+      ],
+      "sizeVariants": {
+        {%- if is_combo -%}
+          {%- assign first_entry = true -%}
+          {%- for v in product.variants -%}
+            {%- if v.available -%}
+              {%- unless first_entry -%},{%- endunless -%}
+              {{ v.options[spos] | append: ' / ' | append: v.options[spos2] | json }}: {{ v.id }}
+              {%- assign first_entry = false -%}
+            {%- endif -%}
+          {%- endfor -%}
+        {%- endif -%}
+      }
+    }
+  </script>
+</div>
+
+{%- unless dpc_assets_done -%}
+  {%- assign dpc_assets_done = true -%}
+{%- endunless -%}
