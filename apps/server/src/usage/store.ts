@@ -19,7 +19,7 @@ import { markRedisDown, redis, redisEnabled } from '../lib/redis.js';
  *    and count, in memory and in Redis.
  */
 
-export type UsageKind = 'chat' | 'guard' | 'transcribe' | 'read';
+export type UsageKind = 'chat' | 'guard' | 'transcribe' | 'speak' | 'read';
 
 export interface UsageEvent {
   at: number;

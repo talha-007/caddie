@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { stopReply } from './voiceReply.js';
 
 /**
  * Push to talk.
@@ -360,6 +361,8 @@ export function useVoice(onClip: (clip: Blob) => Promise<void>, options: VoiceOp
 
   const start = useCallback(async () => {
     if (!supported || recorder.current || opening.current) return;
+    // Listening again: the Caddie's spoken reply stops, or it would be recorded into this clip.
+    stopReply();
     setHint(null);
     opening.current = true;
     pending.current = null;

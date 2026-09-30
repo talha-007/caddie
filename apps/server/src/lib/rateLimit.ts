@@ -115,6 +115,9 @@ export const LIMITS = {
   perAddress: { max: 120, windowMs: 60 * 60 * 1000 },
   /** Voice costs more per request, so it gets its own, tighter, budget. */
   voicePerSession: { max: 30, windowMs: 60 * 60 * 1000 },
+  /** A spoken reply per voice turn, with room to replay a few. */
+  speakPerSession: { max: 60, windowMs: 60 * 60 * 1000 },
+  speakPerAddress: { max: 300, windowMs: 60 * 60 * 1000 },
   /*
    * The widget's own calls that change a session: a size tapped on a card,
    * the basket sync, the quick start, "New chat", and the direct tool calls a

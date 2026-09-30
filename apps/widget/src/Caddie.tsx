@@ -15,6 +15,7 @@ import type { WidgetContext } from './lib/context.js';
 import { onOpenRequest } from './lib/events.js';
 import { useCaddie } from './lib/useCaddie.js';
 import { useVoice } from './lib/useVoice.js';
+import { stopReply } from './lib/voiceReply.js';
 
 type Screen = 'chat' | 'basket';
 
@@ -53,6 +54,8 @@ export function Caddie({ context }: { context: WidgetContext }) {
   const close = useCallback(() => {
     // Closing mid-recording throws the clip away rather than sending it.
     if (voiceActive) cancelVoice();
+    // And a reply still being spoken stops with the panel.
+    stopReply();
     setOpen(false);
     setScreen('chat');
     // The launcher is re-rendered on close, so it may not be the same node we left.

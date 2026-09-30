@@ -293,6 +293,29 @@ export function syncBasket(sessionId: string, basket: BasketSync) {
   return post<BasketSyncResponse>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/basket`, basket);
 }
 
+/**
+ * The Caddie's reply, spoken - by its message id, never its words: the server
+ * speaks only what it said in this session. Null when spoken replies are off
+ * on this server (and it is not asked again), or the reply cannot be spoken.
+ */
+let speechOff = false;
+export async function speakMessage(sessionId: string, messageId: string): Promise<Blob | null> {
+  if (speechOff) return null;
+  const res = await authed(
+    sessionId,
+    `/api/session/${encodeURIComponent(sessionId)}/speak`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json', ...cartHeader() }, body: JSON.stringify({ messageId }) },
+    { ms: TIMEOUTS.chat, what: 'The spoken reply' },
+  );
+  if (res.status === 404) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    if (body.error === 'speech_off') speechOff = true;
+    return null;
+  }
+  if (!res.ok) return null;
+  return res.blob();
+}
+
 /** Qualifying products that would complete an offer the basket is part-way to - the Smart Cart preview's button. */
 export function suggestForOffer(sessionId: string, offerId: string) {
   return post<SmartCartSuggestResponse>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/smart-cart/suggest`, { offerId });

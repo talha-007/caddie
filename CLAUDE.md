@@ -316,6 +316,14 @@ About $3.20-$3.90 per thousand conversations on `gpt-4.1-mini`, plus $0.003 a
 minute for voice transcription. `openai.turn` logs the tokens for every turn,
 so this is measured rather than guessed.
 
+**Spoken replies are off until `OPENAI_VOICE_MODEL` is set** (`OPENAI_VOICE`
+picks the voice; `OPENAI_VOICE_INSTRUCTIONS` is sent only when set, because
+older models refuse it). The reply to a voice turn is then read aloud
+(`src/ai/speak.ts`). It is fetched by message id from `POST
+/api/session/:id/speak`, which only ever speaks a reply the Caddie gave in that
+session, never text from the request. Give the model a per-minute rate in
+`src/usage/pricing.ts`, or the dashboard shows speech at zero.
+
 **Do not shorten the system prompt to save money.** It was tried and measured:
 trimming 2,900 tokens made things ~40% *more* expensive. The prompt and tool
 schemas are identical on every call, so they cache at a quarter of the input

@@ -16,11 +16,12 @@ import type {
   SizeRecommendation,
   SmartCartView,
 } from '@caddie/shared';
-import { TimeoutError, addFromCard, addPackFromCard, changeCartLine, onSessionReplaced, openEventStream, reportCartOutcome, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, suggestForOffer, syncBasket } from './api.js';
+import { TimeoutError, addFromCard, addPackFromCard, changeCartLine, onSessionReplaced, openEventStream, reportCartOutcome, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, speakMessage, suggestForOffer, syncBasket } from './api.js';
 import { announceToTheme, basketForTurn, basketSync, observe, onStorefront, readCart, runActions, runOperation, watchThemeCart } from './themeCart.js';
 import { UNSUPPORTED_SERVER, alreadyRun, inFlight, noteDone, noteReported, noteStarted, sortActions } from './operations.js';
 import { announceCart } from './events.js';
 import { newerSmartCart } from './smartCart.js';
+import { playReply, stopReply } from './voiceReply.js';
 import { sameId } from './variants.js';
 
 /**
@@ -364,6 +365,7 @@ export function useCaddie(page: PageContext): CaddieState {
    */
   const newChat = useCallback(async () => {
     if (busyRef.current) return;
+    stopReply();
     setMessages([]);
     setError(null);
     recent.current = [];
@@ -937,6 +939,8 @@ export function useCaddie(page: PageContext): CaddieState {
             setMessages((prev) => prev.filter((m) => m.id !== heard.id));
           }
           deliver(reply.message.text, reply.message.attachment, reply.message);
+          // Asked aloud, answered aloud: the reply is spoken too, where the server has spoken replies on. Never waited for.
+          if (reply.message.text.trim()) void speakMessage(sessionId, reply.message.id).then((clip) => (clip ? playReply(clip) : undefined)).catch(() => undefined);
           await applyActions(reply.message.actions);
         } catch (err) {
           // Nothing was heard, so leave no gap behind.

@@ -5,6 +5,7 @@ import { semanticState } from '../catalog/semantic.js';
 import { redisState } from '../lib/redis.js';
 import { dealsState } from '../catalog/bundles.js';
 import { smartCartCollectionsState } from '../smartCart/index.js';
+import { speechEnabled } from '../ai/speak.js';
 import { modelLoad } from '../ai/openai.js';
 import { storefrontCartEnabled } from '../shopify/storefrontCart.js';
 import { env, envFile } from '../env.js';
@@ -34,6 +35,8 @@ healthRouter.get('/', (_req, res) => {
         ? 'vapi'
         : 'dev-keyword-router',
     voice: env.openai.apiKey ? `transcribe:${env.openai.transcribeModel}` : 'unavailable',
+    // Spoken replies (ai/speak.ts): off until OPENAI_VOICE_MODEL is set.
+    voiceReplies: speechEnabled() ? `speak:${env.openai.voiceModel}:${env.openai.voiceName}` : 'off',
     // Everything customer-facing searches this rather than Shopify.
     catalogue: catalogueState(),
     // The store's bundle deals, read from the live theme.

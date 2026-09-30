@@ -1,7 +1,9 @@
 import { Router, type RequestHandler } from 'express';
 import { CART_OPS_CONTRACT, type BasketSync, type BasketSyncResponse, type SmartCartSuggestRequest, type SmartCartSuggestResponse, type CardChoice, type CartAction, type CartOutcomeReport, type ProfileRequest, type SessionClaimResponse, type SessionRestartResponse, type UiActionResponse, type UiAddRequest, type UiCartLineRequest, type UiPackAddRequest } from '@caddie/shared';
 import { z } from 'zod';
-import { noteCartMode } from '../lib/request.js';
+import { clientKey, noteCartMode } from '../lib/request.js';
+import { speak, speechEnabled } from '../ai/speak.js';
+import { clientHash } from '../usage/identity.js';
 import { executeCommerceAction } from '../tools/actionGateway.js';
 import { basketPatch, settleOutcome } from '../tools/cartOperations.js';
 import { trustedShopperFacts } from '../shopper/facts.js';
@@ -266,6 +268,31 @@ sessionRouter.post('/:id/smart-cart/suggest', owner, writeLimit, async (req, res
     log.info('smart_cart.suggested', { sessionId: req.params.id, offerId: offer.id, floorPence: floor, candidates: candidates.length, shown: products.length });
     const reply: SmartCartSuggestResponse = { offerId: offer.id, products, message };
     return res.json(reply);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+/**
+ * POST /api/session/:id/speak - the Caddie's reply, spoken (ai/speak.ts).
+ *
+ * Only a reply the Caddie gave in this session, named by its message id: the
+ * words come from the session, never from the request, so this can never be
+ * used to have arbitrary text spoken on our account. Owner only, with its own
+ * budget - speech costs more than a tap. 404 when spoken replies are off.
+ */
+const speakLimit = limitRoute('speak', (req) => req.params.id, LIMITS.speakPerSession, LIMITS.speakPerAddress) as RequestHandler<{ id: string }>;
+
+sessionRouter.post('/:id/speak', owner, speakLimit, async (req, res, next) => {
+  try {
+    if (!speechEnabled()) return res.status(404).json({ error: 'speech_off' });
+    const messageId = typeof (req.body as { messageId?: unknown } | undefined)?.messageId === 'string' ? String((req.body as { messageId: string }).messageId).slice(0, 100) : '';
+    const session = await sessions.getOrCreate(req.params.id);
+    const said = session.messages.find((entry) => entry.id === messageId && entry.role === 'assistant');
+    if (!said || !said.text.trim()) return res.status(404).json({ error: 'unknown_message' });
+    const audio = await speak(said.text, { sessionId: req.params.id, client: clientHash(clientKey(req)) });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.type('audio/mpeg').send(audio);
   } catch (err) {
     return next(err);
   }

@@ -169,6 +169,18 @@ export const env = {
     /** Speech to text for the widget's mic, until Vapi handles voice. */
     transcribeModel: optional('OPENAI_TRANSCRIBE_MODEL', 'gpt-4o-mini-transcribe'),
     /**
+     * Text to speech for the Caddie's replies to a voice turn (ai/speak.ts).
+     * Empty by default, which keeps spoken replies off: set it to turn them on.
+     */
+    voiceModel: optional('OPENAI_VOICE_MODEL', ''),
+    /** Which of the model's voices speaks. */
+    voiceName: optional('OPENAI_VOICE', 'alloy'),
+    /**
+     * How to speak - accent, pace, tone - for models that take instructions.
+     * Empty sends none: an older model refuses the field.
+     */
+    voiceInstructions: optional('OPENAI_VOICE_INSTRUCTIONS', ''),
+    /**
      * Forces one language (ISO-639-1) for every clip. Empty by default: the
      * language is detected and checked against the customer's page, browser
      * and conversation instead - see ai/language.ts. Only set this for a store
