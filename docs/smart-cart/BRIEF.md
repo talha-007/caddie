@@ -43,10 +43,12 @@ Any 3 polos, any 2 trousers, any 2 shorts. Every qualifying item counts on its o
 | Any 2 Kids Trousers | `__kids-any-2-trousers` = `kids-any-2-trousers` | collection `kids-trousers` | £49 |
 | Any 2 Ladies Shorts | `__any-2-shorts` = **`ladies`** | collection `ladies-shorts` | £45 |
 | Any 2 Kids Shorts | `__any-2-shorts` = **`kids`** | collection `kids-shorts` | £45 |
+| Any 3 Ladies Polos | `__bundle_threepolo_ladies` = `bundle_threepolo_ladies` | tag `bundle_threepolo_ladies` | £59.99 |
 
 - **Ladies and kids shorts share one key.** SupaEasy tells them apart by the **value**, which must be exactly `ladies` or `kids`.
-- **A product matching two deals gets no key,** as a safety rule. A wrong key means a wrong price.
-- **Ladies polos are left out for now:** SupaEasy has two live ladies polo deals at different prices (£59.99 and £55), and Druids must choose one.
+- **A product matching two deals gets no key,** as a safety rule. A wrong key means a wrong price. One exception was decided on 1 Oct: ladies shorts are also in the `ladies-trousers` collection, and the **shorts deal wins** for them.
+- **Ladies polos use the £59.99 deal** (`__bundle_threepolo_ladies`, the key the product pages already write), decided on 1 Oct. The £55 discount (`__any-three-ladies-polos`) is not used.
+- **The UK deal price is only shown in a GBP basket.** SupaEasy charges other markets their own deal price, so elsewhere the deal is named without a price, and any saving is shown in that currency.
 
 ### Fixed packs: a set recipe
 
@@ -109,13 +111,12 @@ Also checked: product pages and collection cards on the preview now carry the ri
 1. **Four packs on the copied Ambassador page won't be discounted.** Ladies Mixed, Ladies Cool & Wet, Kids Mixed and Kids Cool & Wet write keys that no SupaEasy discount reads. **Fix before that theme goes live:** add the discounts in SupaEasy, or point those cards at existing keys.
 2. **Three SupaEasy packs can't be bought anywhere.** Caddy Club Ambassador, Caddy Club Rainsuit and Ladies Summer Bundle are active, but no page writes their keys.
 3. **Two copied-theme cards write the men's trousers key on women's and juniors' trousers.** It's the same £49 in the UK, but the wrong deal name.
-4. **27 ladies shorts are also in the `ladies-trousers` collection,** so they match two deals and currently get no key. Decision needed: should the shorts deal win?
-5. **Ladies polos:** choose £59.99 (`__bundle_threepolo_ladies`, used by the product pages today) or £55 (`__any-three-ladies-polos`).
+4. **27 ladies shorts are also in the `ladies-trousers` collection.** Decided: the shorts deal wins. Tidying the collection would still be cleaner.
+5. **Ladies polos:** decided, the £59.99 deal. The £55 discount (`LADIES ANY 3 POLO`) is still live in SupaEasy, and only one copied-theme card writes its key. Worth switching that discount off, or pointing that card at the £59.99 key.
 6. **Some deals are no longer worth much.** Many polos, trousers and shorts are already on sale close to or below the deal price, so a deal can save pennies or nothing. That's a pricing decision, not a technical one.
 
 ## 8. What's next
 
-- **Decisions 4 and 5 above**, then one small snippet update.
 - **Deploy the Caddie server** (`caddie.druids.online`) with this code, and upload the matching widget build, when approved.
 - **Before the copied theme is published:** fix problem 1, and remove the test flag `data-smart-cart-debug`.
 - **Tell Asim** that the 7 theme files changed, so his later edits don't overwrite them.

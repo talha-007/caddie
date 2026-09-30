@@ -99,8 +99,8 @@ describe('which products qualify - the theme\'s rule, never the name', () => {
     expect(offerForProduct(FLORAL)?.id).toBe('any-3-polos');
     expect(offerForProduct(EMOTIVE)?.id).toBe('any-3-polos');
   });
-  it('a ladies-tagged polo is not the men\'s offer; ladies stay out of V1', () => {
-    expect(offerForProduct(LADIES)).toBeNull();
+  it('a ladies-tagged polo is the ladies polo deal, never the men\'s', () => {
+    expect(offerForProduct(LADIES)?.id).toBe('any-3-polos-ladies');
   });
   it('a product whose name says "bundle" or "polo" but carries no tag does not qualify', () => {
     expect(offerForProduct(TRIGGER_POLO_NAMED)).toBeNull();
@@ -215,9 +215,10 @@ describe('whether the offer would lower the price - sale prices, SupaEasy\'s set
 describe('the basket route carries the gate', () => {
   const sync = async (lines: Line[], currency = 'GBP') =>
     (await (await fetch(`${base}/api/session/${id}/basket`, { method: 'POST', headers: await headers(true), body: JSON.stringify({ cartToken: 'c', currency, lines }) })).json()) as { smartCart: { offers: Array<{ offerId: string; worthwhile: boolean | null; canSuggest: boolean }> } };
-  it('two £24 polos, a £24 polo to be had: worthwhile and suggestible', async () => {
+  it('two £24 polos, a £24 polo to be had: worthwhile and suggestible, and the UK price named', async () => {
     const body = await sync([line('a', FLORAL, '710', 2, POLO_TRIGGER)]);
     expect(body.smartCart.offers[0]).toMatchObject({ offerId: 'any-3-polos', worthwhile: true, canSuggest: true });
+    expect((body.smartCart.offers[0] as unknown as { display: { deal: string } }).display.deal).toBe('3 for £59.99');
   });
   it('two £20 joggers: not worthwhile, not suggestible', async () => {
     // Only joggers in the collection, so nothing dearer would finish the pair above £49 either.
@@ -225,9 +226,10 @@ describe('the basket route carries the gate', () => {
     const body = await sync([line('a', JOGGER, '760', 1, TROUSER_TRIGGER)]);
     expect(body.smartCart.offers[1]).toMatchObject({ offerId: 'any-2-mens-trousers', worthwhile: false, canSuggest: false });
   });
-  it('a euro cart: not judged', async () => {
+  it('a euro cart: not judged, and the UK deal price is not named', async () => {
     const body = await sync([line('a', FLORAL, '710', 2, POLO_TRIGGER)], 'EUR');
     expect(body.smartCart.offers[0]).toMatchObject({ worthwhile: null, canSuggest: false });
+    expect((body.smartCart.offers[0] as unknown as { display: { deal: string; title: string } }).display).toMatchObject({ deal: '', title: 'Any 3 Polos' });
     expect((await sessions.getOrCreate(id)).cartCurrency).toBe('EUR');
   });
 });
@@ -295,7 +297,13 @@ describe('ladies and kids "any N" deals: the keys the copied theme\'s deal pages
     expect(action?.lines).toEqual([{ variantId: '900', quantity: 1, properties: { '__any-2-shorts': 'ladies' } }]);
   });
 
-  it('ladies polos are left alone until their price is decided', () => {
-    expect(triggerPropertiesFor(LADIES.id)).toBeUndefined();
+  it('ladies polos carry the £59.99 key the product pages already write', () => {
+    expect(triggerPropertiesFor(LADIES.id)).toEqual({ __bundle_threepolo_ladies: 'bundle_threepolo_ladies' });
+  });
+
+  it('a ladies short that is also in ladies-trousers counts for the shorts deal - the one meant', () => {
+    setSmartCartCollectionsForTests({ 'ladies-shorts': [LADIES_SHORT.id], 'ladies-trousers': [LADIES_TROUSER.id, LADIES_SHORT.id] });
+    expect(triggerPropertiesFor(LADIES_SHORT.id)).toEqual({ '__any-2-shorts': 'ladies' });
+    expect(triggerPropertiesFor(LADIES_TROUSER.id)).toEqual({ '__ladies-any-2-trousers': 'ladies-any-2-trousers' });
   });
 });

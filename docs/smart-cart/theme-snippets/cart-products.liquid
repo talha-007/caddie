@@ -209,10 +209,10 @@
                     </div>
                                        {%- comment -%} Smart Cart: the deal this line counts towards (its deal key), and whether SupaEasy has applied it. Same rules as snippets/sport-cart-progress.liquid. {%- endcomment -%}
                     {%- liquid
-                      assign sc_keys = '__3_Polo_Bundle|__any-2-trousers|__any-2-trouser-shorts|__bundle_threepolo_kids|__ladies-any-2-trousers|__kids-any-2-trousers|__any-2-shorts|__any-2-shorts' | split: '|'
-                      assign sc_match = '*|*|*|*|*|*|ladies|kids' | split: '|'
-                      assign sc_titles = 'ANY 3 POLO BUNDLE|ANY 2 TROUSERS|ANY 2 SHORTS|ANY 3 POLO KIDS BUNDLE|LADIES ANY 2 TROUSERS|KIDS ANY 2 TROUSERS|LADIES ANY 2 SHORTS|KIDS ANY 2 SHORTS' | split: '|'
-                      assign sc_names = 'Any 3 Polos|Any 2 Trousers|Any 2 Shorts|Any 3 Kids Polos|Any 2 Ladies Trousers|Any 2 Kids Trousers|Any 2 Ladies Shorts|Any 2 Kids Shorts' | split: '|'
+                      assign sc_keys = '__3_Polo_Bundle|__any-2-trousers|__any-2-trouser-shorts|__bundle_threepolo_kids|__bundle_threepolo_ladies|__ladies-any-2-trousers|__kids-any-2-trousers|__any-2-shorts|__any-2-shorts' | split: '|'
+                      assign sc_match = '*|*|*|*|*|*|*|ladies|kids' | split: '|'
+                      assign sc_titles = 'ANY 3 POLO BUNDLE|ANY 2 TROUSERS|ANY 2 SHORTS|ANY 3 POLO KIDS BUNDLE|ANY 3 POLO LADIES BUNDLE|LADIES ANY 2 TROUSERS|KIDS ANY 2 TROUSERS|LADIES ANY 2 SHORTS|KIDS ANY 2 SHORTS' | split: '|'
+                      assign sc_names = 'Any 3 Polos|Any 2 Trousers|Any 2 Shorts|Any 3 Kids Polos|Any 3 Ladies Polos|Any 2 Ladies Trousers|Any 2 Kids Trousers|Any 2 Ladies Shorts|Any 2 Kids Shorts' | split: '|'
                       assign deal_badge = ''
                       assign deal_applied = false
                       for sc_key in sc_keys

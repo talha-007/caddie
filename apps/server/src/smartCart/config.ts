@@ -14,8 +14,8 @@ import type { SmartCartOfferConfig } from './types.js';
  * own narrower step collections (Phase 2).
  *
  * Not here, on purpose: `__three-polo-deal` (stamped by a live page, read by
- * no active discount); ladies polos (two active ladies polo discounts at
- * different prices, £59.99 and £55 - waiting on which is meant); and every
+ * no active discount); `__any-three-ladies-polos` (the £55 ladies polo
+ * discount - £59.99 is the one meant); and every
  * fixed pack - Ambassador, Prestige, Players, Rainsuit, Layering duos,
  * condition packs. SupaEasy counts only units carrying a pack's key, not
  * its recipe, so a pack key on single adds would give six polos the
@@ -69,12 +69,24 @@ export const SMART_CART_OFFERS: readonly SmartCartOfferConfig[] = [
     display: { deal: '3 for £49', units: 'kids polos', one: 'kids polo', many: 'kids polos', title: 'Any 3 Kids Polos' },
   },
   {
+    // Two ladies polo discounts are live (£59.99 on this key, £55 on __any-three-ladies-polos); £59.99 is the one meant (decided 1 Oct) - the key the product pages already write.
+    id: 'any-3-polos-ladies',
+    name: 'Any 3 Polos (Ladies)',
+    triggerKey: '__bundle_threepolo_ladies',
+    triggerValue: 'bundle_threepolo_ladies',
+    threshold: 3,
+    qualifies: { tag: 'bundle_threepolo_ladies' },
+    gatePrice: { amount: 59.99, currency: 'GBP' },
+    display: { deal: '3 for £59.99', units: 'ladies polos', one: 'ladies polo', many: 'ladies polos', title: 'Any 3 Ladies Polos' },
+  },
+  {
     id: 'any-2-trousers-ladies',
     name: 'Any 2 Trousers (Ladies)',
     triggerKey: '__ladies-any-2-trousers',
     triggerValue: 'ladies-any-2-trousers',
     threshold: 2,
-    qualifies: { collections: ['ladies-trousers'] },
+    // Ladies shorts are merchandised into ladies-trousers too; for those the shorts deal is meant (decided 1 Oct).
+    qualifies: { collections: ['ladies-trousers'], exceptCollections: ['ladies-shorts'] },
     gatePrice: { amount: 49, currency: 'GBP' },
     display: { deal: '2 for £49', units: 'ladies trousers', one: 'pair of ladies trousers', many: 'pairs of ladies trousers', title: 'Any 2 Ladies Trousers' },
   },

@@ -10,6 +10,17 @@ import { offerValue, type PricedLine } from './value.js';
  * wording - no line keys, variant ids, trigger keys or prices. Null when
  * there is no state yet, never an empty one.
  */
+/**
+ * The display wording, without the UK deal price when the bag is in another
+ * currency: SupaEasy charges each market its own price, so "3 for £59.99" is
+ * only true in a GBP bag. The rest of the wording stands.
+ */
+function displayFor(config: SmartCartOfferConfig, currency: string | undefined): NonNullable<SmartCartOfferConfig['display']> {
+  const display = { ...config.display! };
+  if (currency && currency.toUpperCase() !== config.gatePrice.currency) display.deal = '';
+  return display;
+}
+
 export function smartCartView(
   state: SmartCartState | undefined,
   basket: { lines?: readonly PricedLine[]; currency?: string } = {},
@@ -32,7 +43,7 @@ export function smartCartView(
         remainingUnits: offer.remainingUnits,
         worthwhile: value.worthwhile,
         canSuggest: value.canSuggest,
-        ...(config?.display ? { display: { ...config.display } } : {}),
+        ...(config?.display ? { display: displayFor(config, basket.currency) } : {}),
       };
     }),
   };

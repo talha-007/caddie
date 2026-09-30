@@ -9,6 +9,7 @@ export type SmartCartOfferId =
   | 'any-2-mens-trousers'
   | 'any-2-shorts'
   | 'any-3-polos-kids'
+  | 'any-3-polos-ladies'
   | 'any-2-trousers-ladies'
   | 'any-2-trousers-kids'
   | 'any-2-shorts-ladies'
@@ -37,9 +38,11 @@ export interface SmartCartOfferConfig {
   /**
    * Which products the Caddie stamps: the same rule the theme's add path
    * uses - a product tag (polos), or membership of the collections the
-   * copied theme's deal pages pick from (trousers, shorts).
+   * copied theme's deal pages pick from (trousers, shorts). `exceptCollections`
+   * settles a product merchandised into two deals' collections: ladies shorts
+   * also sit in ladies-trousers, and the shorts deal is the one meant.
    */
-  qualifies: { tag: string } | { collections: string[] };
+  qualifies: { tag: string } | { collections: string[]; exceptCollections?: string[] };
   /**
    * The UK deal price in GBP. Used for one thing only: whether a nudge is
    * worth showing, because SupaEasy discounts nothing when the items already

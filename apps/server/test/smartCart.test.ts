@@ -34,6 +34,7 @@ describe('the offers', () => {
       ['any-2-mens-trousers', TROUSERS, null, 2],
       ['any-2-shorts', SHORTS, null, 2],
       ['any-3-polos-kids', '__bundle_threepolo_kids', null, 3],
+      ['any-3-polos-ladies', '__bundle_threepolo_ladies', null, 3],
       ['any-2-trousers-ladies', '__ladies-any-2-trousers', null, 2],
       ['any-2-trousers-kids', '__kids-any-2-trousers', null, 2],
       ['any-2-shorts-ladies', '__any-2-shorts', 'ladies', 2],
@@ -41,12 +42,12 @@ describe('the offers', () => {
     ]);
   });
 
-  it('never include __three-polo-deal, the ladies polo keys (price undecided) or any fixed pack', () => {
+  it('never include __three-polo-deal, the £55 ladies polo key or any fixed pack', () => {
     const keys = SMART_CART_OFFERS.map((o) => o.triggerKey);
-    for (const excluded of ['__three-polo-deal', '__bundle_threepolo_ladies', '__any-three-ladies-polos', '__golf-ambassador-pack', '__ladies-ambassador-pack', '__kids-ambassador', '__prestige-pack', '__players-bundle', '__any-rainsuit', '__layering-duo', '__amb-mens-condition']) {
+    for (const excluded of ['__three-polo-deal', '__any-three-ladies-polos', '__golf-ambassador-pack', '__ladies-ambassador-pack', '__kids-ambassador', '__prestige-pack', '__players-bundle', '__any-rainsuit', '__layering-duo', '__amb-mens-condition']) {
       expect(keys).not.toContain(excluded);
     }
-    const lines = [line(3, { '__three-polo-deal': 'three-polo-deal' }), line(3, { __bundle_threepolo_ladies: 'bundle_threepolo_ladies' }), line(6, { '__golf-ambassador-pack': 'golf-ambassador-pack' })];
+    const lines = [line(3, { '__three-polo-deal': 'three-polo-deal' }), line(3, { '__any-three-ladies-polos': 'any-three-ladies-polos' }), line(6, { '__golf-ambassador-pack': 'golf-ambassador-pack' })];
     expect(evaluateSmartCart(lines).offers.every((o) => o.status === 'INACTIVE')).toBe(true);
   });
 
@@ -265,6 +266,10 @@ describe('the view sent to the widget', () => {
 });
 
 describe('ladies and kids "any N" deals', () => {
+  it('ladies polos: __bundle_threepolo_ladies, 3 units, at £59.99 - the £55 key counts for nothing', () => {
+    expect(summary(offer([line(3, { __bundle_threepolo_ladies: 'bundle_threepolo_ladies' })], 'any-3-polos-ladies'))).toEqual(['QUALIFIED', 3, 0]);
+    expect(summary(offer([line(3, { '__any-three-ladies-polos': 'any-three-ladies-polos' })], 'any-3-polos-ladies'))).toEqual(['INACTIVE', 0, 3]);
+  });
   it('kids polos: __bundle_threepolo_kids, 3 units', () => {
     expect(summary(offer([line(2, { __bundle_threepolo_kids: 'bundle_threepolo_kids' })], 'any-3-polos-kids'))).toEqual(['ONE_AWAY', 2, 1]);
   });

@@ -28,7 +28,7 @@ export interface SmartCartOfferView {
   canSuggest: boolean;
   /** Display-only wording. Never parsed, never used in arithmetic. */
   display?: {
-    /** "3 for £59.99" */
+    /** "3 for £59.99" - empty outside a GBP bag: other markets pay their own deal price. */
     deal: string;
     /** "polos" - the short plural, for a button ("Show me polos"). */
     units: string;

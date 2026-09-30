@@ -116,7 +116,7 @@ describe('Smart Cart on the session, from each fresh cart read', () => {
     expect(body.ok).toBe(true);
     expect(body.lines).toBe(2);
     expect(body.smartCart?.evaluatedAt).toBe((await stored())?.evaluatedAt);
-    expect(body.smartCart?.offers).toHaveLength(8);
+    expect(body.smartCart?.offers).toHaveLength(9);
     expect(body.smartCart?.offers.slice(0, 3)).toEqual([
       // Two £20 polos, and no qualifying polo in this catalogue to finish the set above £59.99: the offer cannot lower the price.
       { offerId: 'any-3-polos', name: 'Any 3 Polos', status: 'ONE_AWAY', qualifyingUnits: 2, requiredUnits: 3, remainingUnits: 1, worthwhile: false, canSuggest: false, display: { deal: '3 for £59.99', units: 'polos', one: 'polo', many: 'polos', title: 'Any 3 Polos' } },
@@ -130,7 +130,7 @@ describe('Smart Cart on the session, from each fresh cart read', () => {
 
   it('an empty basket on the basket route answers with every offer inactive, not null', async () => {
     const body = (await (await syncBasket([])).json()) as { smartCart: { offers: Array<{ status: string }> } | null };
-    expect(body.smartCart?.offers.length).toBe(8);
+    expect(body.smartCart?.offers.length).toBe(9);
     expect(body.smartCart?.offers.every((o) => o.status === 'INACTIVE')).toBe(true);
   });
 

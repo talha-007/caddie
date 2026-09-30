@@ -9,9 +9,11 @@
 
     men's polos      tag bundle_threepolo        __3_Polo_Bundle = 3_Polo_Bundle
     kids polos       tag bundle_threepolo_kids   __bundle_threepolo_kids = bundle_threepolo_kids
+    ladies polos     tag bundle_threepolo_ladies __bundle_threepolo_ladies = bundle_threepolo_ladies (the £59.99 deal)
     men's trousers   in men-golf-trousers        __any-2-trousers = any-2-trousers
     men's shorts     in men-golf-shorts          __any-2-trouser-shorts = any-2-trouser-shorts
-    ladies trousers  in ladies-trousers          __ladies-any-2-trousers = ladies-any-2-trousers
+    ladies trousers  in ladies-trousers, but not ladies-shorts
+                                                 __ladies-any-2-trousers = ladies-any-2-trousers
     kids trousers    in kids-trousers            __kids-any-2-trousers = kids-any-2-trousers
     ladies shorts    in ladies-shorts            __any-2-shorts = ladies
     kids shorts      in kids-shorts              __any-2-shorts = kids
@@ -24,9 +26,11 @@
   which prints data-deal-key="..." data-deal-value="...".
 
   A product that matches more than one deal gets no key: SupaEasy checks only
-  the key, never the product, so a wrong key is a wrong price. Ladies polos
-  and every fixed pack (Ambassador, Prestige, Players, Rainsuit...) are left
-  out on purpose.
+  the key, never the product, so a wrong key is a wrong price. Ladies shorts
+  are merchandised into ladies-trousers as well; for those the shorts deal is
+  the one meant, so ladies-trousers leaves out anything in ladies-shorts.
+  Every fixed pack (Ambassador, Prestige, Players, Rainsuit...) is left out
+  on purpose, as is the £55 ladies polo discount.
 {%- endcomment -%}
 {%- liquid
   assign sc_handles = product.collections | map: 'handle'
@@ -44,6 +48,11 @@
     assign sc_key = '__bundle_threepolo_kids'
     assign sc_value = 'bundle_threepolo_kids'
   endif
+  if product.tags contains 'bundle_threepolo_ladies'
+    assign sc_matches = sc_matches | plus: 1
+    assign sc_key = '__bundle_threepolo_ladies'
+    assign sc_value = 'bundle_threepolo_ladies'
+  endif
   if sc_handles contains 'men-golf-trousers'
     assign sc_matches = sc_matches | plus: 1
     assign sc_key = '__any-2-trousers'
@@ -54,7 +63,11 @@
     assign sc_key = '__any-2-trouser-shorts'
     assign sc_value = 'any-2-trouser-shorts'
   endif
-  if sc_handles contains 'ladies-trousers'
+  assign sc_ladies_short = false
+  if sc_handles contains 'ladies-shorts'
+    assign sc_ladies_short = true
+  endif
+  if sc_handles contains 'ladies-trousers' and sc_ladies_short == false
     assign sc_matches = sc_matches | plus: 1
     assign sc_key = '__ladies-any-2-trousers'
     assign sc_value = 'ladies-any-2-trousers'

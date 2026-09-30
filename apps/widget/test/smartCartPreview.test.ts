@@ -245,6 +245,22 @@ describe('the basket screen still works', () => {
   });
 });
 
+describe('outside the UK', () => {
+  it('no UK price in the heading or the message - the deal is named without it', () => {
+    const state = view({ 'any-3-polos': 2 });
+    state.offers[0]!.display!.deal = '';
+    const html = render(state);
+    expect(text(html)).toContain('Any 3 Polos');
+    expect(text(html)).not.toContain('£');
+    expect(text(html)).toContain('Choose any 1 more polo to complete the deal');
+  });
+  it('a qualified bag outside the UK says it qualifies for "this deal"', () => {
+    const state = view({ 'any-3-polos': 3 });
+    state.offers[0]!.display!.deal = '';
+    expect(text(render(state))).toContain('Your polos qualify for this deal');
+  });
+});
+
 describe('only nudges that the checkout will honour', () => {
   it('a deal that would not lower the price (items already under it) shows no card', () => {
     expect(smartCartLines(view({ 'any-2-mens-trousers': 1 }, { 'any-2-mens-trousers': { worthwhile: false } }))).toEqual([]);

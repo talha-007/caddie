@@ -20,7 +20,7 @@ const members = new Map<string, Set<string>>();
 let loadedAt = 0;
 
 export async function loadSmartCartCollections(offers: readonly SmartCartOfferConfig[] = SMART_CART_OFFERS): Promise<number> {
-  const handles = [...new Set(offers.flatMap((offer) => ('collections' in offer.qualifies ? offer.qualifies.collections : [])))];
+  const handles = [...new Set(offers.flatMap((offer) => ('collections' in offer.qualifies ? [...offer.qualifies.collections, ...(offer.qualifies.exceptCollections ?? [])] : [])))];
   for (const handle of handles) {
     const ids = await collectionProducts(handle);
     // An empty read (a renamed collection, a failed page) keeps what was held rather than dropping every product from the offer.
@@ -47,7 +47,8 @@ export function qualifiesFor(product: Pick<Product, 'id' | 'tags'>, offer: Smart
     const tag = offer.qualifies.tag.toLowerCase();
     return (product.tags ?? []).some((own) => own.toLowerCase() === tag);
   }
-  return offer.qualifies.collections.some((handle) => members.get(handle)?.has(product.id) ?? false);
+  const inAny = (handles: readonly string[]) => handles.some((handle) => members.get(handle)?.has(product.id) ?? false);
+  return inAny(offer.qualifies.collections) && !inAny(offer.qualifies.exceptCollections ?? []);
 }
 
 /** The one offer a product is stamped for, if any. A product matching two would be ambiguous: it gets none, and is logged. */
