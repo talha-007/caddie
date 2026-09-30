@@ -13,7 +13,7 @@ Branch `smart-cart-phase-1`. Read-only investigation, 30 Sep 2026. **No code, th
 | Unpublished theme "Copy of  DRUIDS - SPORT TYPE - AsimAli" (`SHOPIFY_CONDITION_PACKS_THEME_ID`) | Admin theme files, read | 795 files |
 | Public storefront `www.druids.com` | Anonymous GET | Page HTML (confirms which theme and builder are live), empty `/cart.js` shape |
 
-Raw captures are in the session scratchpad, not the repository. The three `smart-cart-*-eligible.json` files in the repository root are the investigative product lists.
+Raw captures are in the session scratchpad, not the repository. The investigative product lists are `eligible/polos.json`, `eligible/trousers.json` and `eligible/shorts.json`, next to this report.
 
 ---
 
@@ -99,9 +99,9 @@ SupaEasy accepts **any** line carrying the trigger, so SupaEasy is never narrowe
 
 | Offer | Theme vs SupaEasy | Live vs unpublished product set | Evidence |
 | --- | --- | --- | --- |
-| Any 3 Polos | **MATCH** by construction (SupaEasy trusts the stamp); product rule = theme | **Live broader.** 590 active tagged polos vs 478 in `all-polos`. 476 in both, **114 live only** (e.g. Graduate, Academy, Napa, Pineapple Skullz, some Elite colourways), **2 unpublished only** (Dazzle Polo Sage/White, Block Pique Polo Blue/Navy, untagged) | `smart-cart-polos-eligible.json` |
-| Any 2 Men's Trousers | **MATCH** by construction | **Live narrower.** 25 vs 33; all 25 live are in `men-golf-trousers`; **8 unpublished only**, all thermal trousers and joggers (product type WINTER TROUSERS) | `smart-cart-trousers-eligible.json` |
-| Any 2 Shorts | **MATCH** by construction | **Live narrower.** 33 vs 39; **6 unpublished only** (Heritage Botanic Grey/Sage, Clima Tour Winner Sage, Heritage Tex Grey, Elements Sage, Birdie Sage) | `smart-cart-shorts-eligible.json` |
+| Any 3 Polos | **MATCH** by construction (SupaEasy trusts the stamp); product rule = theme | **Live broader.** 590 active tagged polos vs 478 in `all-polos`. 476 in both, **114 live only** (e.g. Graduate, Academy, Napa, Pineapple Skullz, some Elite colourways), **2 unpublished only** (Dazzle Polo Sage/White, Block Pique Polo Blue/Navy, untagged) | `eligible/polos.json` |
+| Any 2 Men's Trousers | **MATCH** by construction | **Live narrower.** 25 vs 33; all 25 live are in `men-golf-trousers`; **8 unpublished only**, all thermal trousers and joggers (product type WINTER TROUSERS) | `eligible/trousers.json` |
+| Any 2 Shorts | **MATCH** by construction | **Live narrower.** 33 vs 39; **6 unpublished only** (Heritage Botanic Grey/Sage, Clima Tour Winner Sage, Heritage Tex Grey, Elements Sage, Birdie Sage) | `eligible/shorts.json` |
 
 Products SupaEasy would accept but no path stamps: none can exist, because SupaEasy has no product list. Products a theme stamps that SupaEasy rejects: none for these three triggers. `__three-polo-deal` from the live three-polo pack page is the exception: stamped, but read by nothing.
 

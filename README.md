@@ -45,6 +45,7 @@ curl http://localhost:8787/health/shopify
 apps/server     Node + TypeScript. Vapi webhook, Shopify UCP client, recommendations. (Talha)
 apps/widget     React + Vite. The Caddie widget, embeddable in the Shopify theme.      (Amir)
 packages/shared TypeScript types both sides import. The contract between us.
+docs            Acceptance records, and Smart Cart (docs/smart-cart/README.md).
 ```
 
 Change a type in `packages/shared` and both sides see it immediately - that is

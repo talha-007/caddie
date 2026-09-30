@@ -1,9 +1,9 @@
 import type { SmartCartOfferConfig } from './types.js';
 
 /**
- * The V1 offers, as the live SupaEasy discounts read them (Smart Cart phase 2,
- * SMART_CART_PHASE_2_SUPAEASY_TRUTH.md): each counts units on lines carrying
- * its trigger property, and nothing else about the product.
+ * The V1 offers, as the live SupaEasy discounts read them
+ * (docs/smart-cart/research/supaeasy-and-theme.md): each counts units on
+ * lines carrying its trigger property, and nothing else about the product.
  *
  * Static for now. A reader of the live SupaEasy configuration can replace this
  * list without touching the evaluator, which takes the offers as an argument.
