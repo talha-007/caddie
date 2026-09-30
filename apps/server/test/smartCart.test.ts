@@ -22,34 +22,44 @@ const packOnly = (bundleId = 'amb-1') => ({ __bundle_id: bundleId, __Bundle_Name
 let n = 0;
 const line = (quantity: number, properties?: SmartCartLine['properties'], variantId = String(900 + n)): SmartCartLine => ({ key: `k${++n}`, variantId, quantity, ...(properties !== undefined ? { properties } : {}) });
 const offer = (lines: SmartCartLine[], id: SmartCartOfferId): SmartCartOfferState => evaluateSmartCart(lines).offers.find((o) => o.offerId === id)!;
+/** The men's three, the deals the older multi-offer checks were written for. */
+const MEN = new Set<string>(['any-3-polos', 'any-2-mens-trousers', 'any-2-shorts']);
+const men = (offers: readonly SmartCartOfferState[]) => offers.filter((o) => MEN.has(o.offerId));
 const summary = (state: SmartCartOfferState) => [state.status, state.qualifyingUnits, state.remainingUnits];
 
-describe('the V1 offers', () => {
-  it('are exactly the three live men\'s triggers, with their thresholds', () => {
-    expect(SMART_CART_OFFERS.map((o) => [o.id, o.triggerKey, o.threshold])).toEqual([
-      ['any-3-polos', POLO, 3],
-      ['any-2-mens-trousers', TROUSERS, 2],
-      ['any-2-shorts', SHORTS, 2],
+describe('the offers', () => {
+  it('are every live "any N" deal - men, ladies and kids - with its key, value and threshold', () => {
+    expect(SMART_CART_OFFERS.map((o) => [o.id, o.triggerKey, o.matchValue ?? null, o.threshold])).toEqual([
+      ['any-3-polos', POLO, null, 3],
+      ['any-2-mens-trousers', TROUSERS, null, 2],
+      ['any-2-shorts', SHORTS, null, 2],
+      ['any-3-polos-kids', '__bundle_threepolo_kids', null, 3],
+      ['any-2-trousers-ladies', '__ladies-any-2-trousers', null, 2],
+      ['any-2-trousers-kids', '__kids-any-2-trousers', null, 2],
+      ['any-2-shorts-ladies', '__any-2-shorts', 'ladies', 2],
+      ['any-2-shorts-kids', '__any-2-shorts', 'kids', 2],
     ]);
   });
 
-  it('never include __three-polo-deal or a ladies or kids trigger', () => {
+  it('never include __three-polo-deal, the ladies polo keys (price undecided) or any fixed pack', () => {
     const keys = SMART_CART_OFFERS.map((o) => o.triggerKey);
-    for (const excluded of ['__three-polo-deal', '__bundle_threepolo_ladies', '__any-three-ladies-polos', '__bundle_threepolo_kids', '__any-2-shorts', '__ladies-any-2-trousers', '__kids-any-2-trousers']) {
+    for (const excluded of ['__three-polo-deal', '__bundle_threepolo_ladies', '__any-three-ladies-polos', '__golf-ambassador-pack', '__ladies-ambassador-pack', '__kids-ambassador', '__prestige-pack', '__players-bundle', '__any-rainsuit', '__layering-duo', '__amb-mens-condition']) {
       expect(keys).not.toContain(excluded);
     }
-    const lines = [line(3, { '__three-polo-deal': 'three-polo-deal' }), line(3, { __bundle_threepolo_ladies: 'bundle_threepolo_ladies' }), line(2, { '__any-2-shorts': 'ladies' })];
+    const lines = [line(3, { '__three-polo-deal': 'three-polo-deal' }), line(3, { __bundle_threepolo_ladies: 'bundle_threepolo_ladies' }), line(6, { '__golf-ambassador-pack': 'golf-ambassador-pack' })];
     expect(evaluateSmartCart(lines).offers.every((o) => o.status === 'INACTIVE')).toBe(true);
   });
 
   it('every offer is reported, in config order, for any basket - including an empty one', () => {
     const state = evaluateSmartCart([], SMART_CART_OFFERS, 1234);
     expect(state.evaluatedAt).toBe(1234);
-    expect(state.offers.map((o) => [o.offerId, o.status, o.qualifyingUnits, o.requiredUnits, o.remainingUnits, o.matchedLineKeys, o.matchedVariantIds])).toEqual([
+    expect(state.offers).toHaveLength(SMART_CART_OFFERS.length);
+    expect(men(state.offers).map((o) => [o.offerId, o.status, o.qualifyingUnits, o.requiredUnits, o.remainingUnits, o.matchedLineKeys, o.matchedVariantIds])).toEqual([
       ['any-3-polos', 'INACTIVE', 0, 3, 3, [], []],
       ['any-2-mens-trousers', 'INACTIVE', 0, 2, 2, [], []],
       ['any-2-shorts', 'INACTIVE', 0, 2, 2, [], []],
     ]);
+    expect(state.offers.every((o) => o.status === 'INACTIVE' && o.qualifyingUnits === 0)).toBe(true);
   });
 });
 
@@ -202,7 +212,7 @@ describe('several offers in one basket', () => {
   it('polos and trousers: each counts its own lines only', () => {
     const lines = [line(2, poloProps), line(1, v4Props('any-2-trousers'))];
     const state = evaluateSmartCart(lines);
-    expect(state.offers.map((o) => [o.offerId, o.status, o.qualifyingUnits])).toEqual([
+    expect(men(state.offers).map((o) => [o.offerId, o.status, o.qualifyingUnits])).toEqual([
       ['any-3-polos', 'ONE_AWAY', 2],
       ['any-2-mens-trousers', 'ONE_AWAY', 1],
       ['any-2-shorts', 'INACTIVE', 0],
@@ -210,7 +220,7 @@ describe('several offers in one basket', () => {
   });
   it('all three offers active at once, independently', () => {
     const lines = [line(3, poloProps), line(1, v4Props('any-2-trousers')), line(1, v4Props('any-2-trousers')), line(1, v4Props('any-2-trouser-shorts')), line(1, undefined)];
-    expect(evaluateSmartCart(lines).offers.map((o) => [o.offerId, o.status, o.qualifyingUnits, o.remainingUnits])).toEqual([
+    expect(men(evaluateSmartCart(lines).offers).map((o) => [o.offerId, o.status, o.qualifyingUnits, o.remainingUnits])).toEqual([
       ['any-3-polos', 'QUALIFIED', 3, 0],
       ['any-2-mens-trousers', 'QUALIFIED', 2, 0],
       ['any-2-shorts', 'ONE_AWAY', 1, 1],
@@ -219,7 +229,7 @@ describe('several offers in one basket', () => {
   it('one line carrying two triggers counts for both - no exclusion is invented (no known live path writes this)', () => {
     const both = line(2, { [POLO]: '3_Polo_Bundle', [TROUSERS]: 'any-2-trousers' });
     const state = evaluateSmartCart([both]);
-    expect(state.offers.map((o) => [o.offerId, o.qualifyingUnits, o.matchedLineKeys])).toEqual([
+    expect(men(state.offers).map((o) => [o.offerId, o.qualifyingUnits, o.matchedLineKeys])).toEqual([
       ['any-3-polos', 2, [both.key]],
       ['any-2-mens-trousers', 2, [both.key]],
       ['any-2-shorts', 0, []],
@@ -249,7 +259,39 @@ describe('the view sent to the widget', () => {
     const view = smartCartView(evaluateSmartCart([line(2, poloProps, '611')], SMART_CART_OFFERS, 5))!;
     expect(view.evaluatedAt).toBe(5);
     // No basket prices given: whether the offer lowers the price cannot be told.
-    expect(view.offers[0]).toEqual({ offerId: 'any-3-polos', name: 'Any 3 Polos', status: 'ONE_AWAY', qualifyingUnits: 2, requiredUnits: 3, remainingUnits: 1, worthwhile: null, canSuggest: false, display: { deal: '3 for £59.99', units: 'polos', one: 'polo', many: 'polos', title: 'Polo deal' } });
+    expect(view.offers[0]).toEqual({ offerId: 'any-3-polos', name: 'Any 3 Polos', status: 'ONE_AWAY', qualifyingUnits: 2, requiredUnits: 3, remainingUnits: 1, worthwhile: null, canSuggest: false, display: { deal: '3 for £59.99', units: 'polos', one: 'polo', many: 'polos', title: 'Any 3 Polos' } });
     expect(JSON.stringify(view)).not.toMatch(/matchedLineKeys|matchedVariantIds|triggerKey|611|__3_Polo_Bundle/);
+  });
+});
+
+describe('ladies and kids "any N" deals', () => {
+  it('kids polos: __bundle_threepolo_kids, 3 units', () => {
+    expect(summary(offer([line(2, { __bundle_threepolo_kids: 'bundle_threepolo_kids' })], 'any-3-polos-kids'))).toEqual(['ONE_AWAY', 2, 1]);
+  });
+  it("ladies and kids trousers each read their own key, never the men's", () => {
+    const lines = [line(1, { '__ladies-any-2-trousers': 'ladies-any-2-trousers' }), line(2, { '__kids-any-2-trousers': 'kids-any-2-trousers' })];
+    expect(summary(offer(lines, 'any-2-trousers-ladies'))).toEqual(['ONE_AWAY', 1, 1]);
+    expect(summary(offer(lines, 'any-2-trousers-kids'))).toEqual(['QUALIFIED', 2, 0]);
+    expect(summary(offer(lines, 'any-2-mens-trousers'))).toEqual(['INACTIVE', 0, 2]);
+  });
+  it('ladies and kids shorts share one key, __any-2-shorts, and are told apart by its trimmed value - as SupaEasy does', () => {
+    const lines = [line(1, { '__any-2-shorts': 'ladies' }), line(1, { '__any-2-shorts': 'kids' }), line(1, { '__any-2-shorts': ' ladies ' })];
+    expect(summary(offer(lines, 'any-2-shorts-ladies'))).toEqual(['QUALIFIED', 2, 0]);
+    expect(summary(offer(lines, 'any-2-shorts-kids'))).toEqual(['ONE_AWAY', 1, 1]);
+  });
+  it('a value that is neither "ladies" nor "kids" (or differs in case) counts for neither shorts deal', () => {
+    const lines = [line(2, { '__any-2-shorts': 'any-2-shorts' }), line(2, { '__any-2-shorts': 'Ladies' })];
+    expect(summary(offer(lines, 'any-2-shorts-ladies'))).toEqual(['INACTIVE', 0, 2]);
+    expect(summary(offer(lines, 'any-2-shorts-kids'))).toEqual(['INACTIVE', 0, 2]);
+  });
+  it("the men's shorts key is a different deal from the ladies & kids one", () => {
+    const lines = [line(2, { '__any-2-trouser-shorts': 'any-2-trouser-shorts' })];
+    expect(summary(offer(lines, 'any-2-shorts'))).toEqual(['QUALIFIED', 2, 0]);
+    expect(summary(offer(lines, 'any-2-shorts-ladies'))).toEqual(['INACTIVE', 0, 2]);
+  });
+  it('exact value matching still refuses an empty value', () => {
+    expect(hasTrigger(line(1, { '__any-2-shorts': '' }), '__any-2-shorts', 'ladies')).toBe(false);
+    expect(hasTrigger(line(1, { '__any-2-shorts': 'ladies' }), '__any-2-shorts', 'ladies')).toBe(true);
+    expect(hasTrigger(line(1, { '__any-2-shorts': 'ladies' }), '__any-2-shorts', 'kids')).toBe(false);
   });
 });

@@ -18,9 +18,9 @@ import { QUALIFIED_NOTE, newerSmartCart, smartCartLines } from '../src/lib/smart
  */
 
 const DEALS = {
-  'any-3-polos': { name: 'Any 3 Polos', required: 3, display: { deal: '3 for £59.99', units: 'polos', one: 'polo', many: 'polos', title: 'Polo deal' } },
-  'any-2-mens-trousers': { name: "Any 2 Men's Trousers", required: 2, display: { deal: '2 for £49', units: 'trousers', one: 'pair of trousers', many: 'pairs of trousers', title: 'Trouser deal' } },
-  'any-2-shorts': { name: 'Any 2 Shorts', required: 2, display: { deal: '2 for £45', units: 'shorts', one: 'pair of shorts', many: 'pairs of shorts', title: 'Shorts deal' } },
+  'any-3-polos': { name: 'Any 3 Polos', required: 3, display: { deal: '3 for £59.99', units: 'polos', one: 'polo', many: 'polos', title: 'Any 3 Polos' } },
+  'any-2-mens-trousers': { name: "Any 2 Men's Trousers", required: 2, display: { deal: '2 for £49', units: 'trousers', one: 'pair of trousers', many: 'pairs of trousers', title: 'Any 2 Trousers' } },
+  'any-2-shorts': { name: 'Any 2 Shorts', required: 2, display: { deal: '2 for £45', units: 'shorts', one: 'pair of shorts', many: 'pairs of shorts', title: 'Any 2 Shorts' } },
 } as const;
 type Id = keyof typeof DEALS;
 
@@ -80,8 +80,8 @@ describe('nothing to show', () => {
 describe('what the customer reads', () => {
   it('1 of 3 polos: the deal, one dot of three, and what is left', () => {
     const html = render(view({ 'any-3-polos': 1 }));
-    expect(text(html)).toContain('Polo deal · 3 for £59.99');
-    expect(text(html)).toContain('Add 2 more polos to complete the deal');
+    expect(text(html)).toContain('Any 3 Polos · 3 for £59.99');
+    expect(text(html)).toContain('Choose any 2 more polos to complete the deal');
     expect(html.match(/caddie-deal__dot--on/g)).toHaveLength(1);
     expect(html.match(/class="caddie-deal__dot[ "]/g)).toHaveLength(3);
     expect(html).toContain('caddie-deal--open');
@@ -89,7 +89,7 @@ describe('what the customer reads', () => {
   });
   it('2 of 3 polos: one away, the stronger look', () => {
     const html = render(view({ 'any-3-polos': 2 }));
-    expect(text(html)).toContain('Just 1 more polo to complete the deal');
+    expect(text(html)).toContain('Choose any 1 more polo to complete the deal');
     expect(html).toContain('caddie-deal--close');
     expect(html.match(/caddie-deal__dot--on/g)).toHaveLength(2);
     forCustomers(html);
@@ -109,8 +109,8 @@ describe('what the customer reads', () => {
   });
   it('trousers, one away: "pair of trousers", singular', () => {
     const html = render(view({ 'any-2-mens-trousers': 1 }));
-    expect(text(html)).toContain('Trouser deal · 2 for £49');
-    expect(text(html)).toContain('Just 1 more pair of trousers to complete the deal');
+    expect(text(html)).toContain('Any 2 Trousers · 2 for £49');
+    expect(text(html)).toContain('Choose any 1 more pair of trousers to complete the deal');
     forCustomers(html);
   });
   it('trousers, qualified: "pairs of trousers", plural', () => {
@@ -118,13 +118,13 @@ describe('what the customer reads', () => {
   });
   it('shorts, one away', () => {
     const html = render(view({ 'any-2-shorts': 1 }));
-    expect(text(html)).toContain('Shorts deal · 2 for £45');
-    expect(text(html)).toContain('Just 1 more pair of shorts to complete the deal');
+    expect(text(html)).toContain('Any 2 Shorts · 2 for £45');
+    expect(text(html)).toContain('Choose any 1 more pair of shorts to complete the deal');
     forCustomers(html);
   });
   it('several deals: a card each, in the server\'s order, none made the main one', () => {
     const lines = smartCartLines(view({ 'any-3-polos': 2, 'any-2-shorts': 1 }));
-    expect(lines.map((line) => line.title)).toEqual(['Polo deal', 'Shorts deal']);
+    expect(lines.map((line) => line.title)).toEqual(['Any 3 Polos', 'Any 2 Shorts']);
     const html = render(view({ 'any-3-polos': 2, 'any-2-shorts': 1 }));
     expect(cards(html)).toBe(2);
     expect(text(html)).not.toContain('Trouser');
@@ -254,7 +254,7 @@ describe('only nudges that the checkout will honour', () => {
     expect(text(render(view({ 'any-3-polos': 3 }, { 'any-3-polos': { worthwhile: false } })))).not.toContain('qualify');
   });
   it('could not tell (another currency): the neutral wording stands', () => {
-    expect(smartCartLines(view({ 'any-3-polos': 2 }, { 'any-3-polos': { worthwhile: null } })).map((line) => line.message)).toEqual(['Just 1 more polo to complete the deal']);
+    expect(smartCartLines(view({ 'any-3-polos': 2 }, { 'any-3-polos': { worthwhile: null } })).map((line) => line.message)).toEqual(['Choose any 1 more polo to complete the deal']);
   });
   it('something worth suggesting: a "Show me polos" button', () => {
     const lines = smartCartLines(view({ 'any-3-polos': 2 }, { 'any-3-polos': { canSuggest: true } }));

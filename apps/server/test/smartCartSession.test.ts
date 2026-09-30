@@ -89,7 +89,9 @@ beforeEach(async () => {
 const headers = async () => ({ 'Content-Type': 'application/json', 'x-caddie-cart': 'theme', 'x-caddie-widget': CART_OPS_CONTRACT, ...(await ownerHeaders(id)) });
 const chat = async (body: Record<string, unknown>) => fetch(`${base}/api/chat`, { method: 'POST', headers: await headers(), body: JSON.stringify({ sessionId: id, ...body }) });
 const syncBasket = async (lines: Line[]) => fetch(`${base}/api/session/${id}/basket`, { method: 'POST', headers: await headers(), body: JSON.stringify({ cartToken: 'c1', lines }) });
-const progress = (state: SmartCartState | undefined) => state?.offers.map((o) => `${o.offerId}:${o.status}:${o.qualifyingUnits}`);
+/** The men's three, which these checks were written for; the ladies and kids deals are covered in smartCart.test.ts. */
+const MEN = new Set<string>(['any-3-polos', 'any-2-mens-trousers', 'any-2-shorts']);
+const progress = (state: SmartCartState | undefined) => state?.offers.filter((o) => MEN.has(o.offerId)).map((o) => `${o.offerId}:${o.status}:${o.qualifyingUnits}`);
 const stored = async () => (await sessions.getOrCreate(id)).smartCart;
 
 describe('Smart Cart on the session, from each fresh cart read', () => {
@@ -114,11 +116,12 @@ describe('Smart Cart on the session, from each fresh cart read', () => {
     expect(body.ok).toBe(true);
     expect(body.lines).toBe(2);
     expect(body.smartCart?.evaluatedAt).toBe((await stored())?.evaluatedAt);
-    expect(body.smartCart?.offers).toEqual([
+    expect(body.smartCart?.offers).toHaveLength(8);
+    expect(body.smartCart?.offers.slice(0, 3)).toEqual([
       // Two £20 polos, and no qualifying polo in this catalogue to finish the set above £59.99: the offer cannot lower the price.
-      { offerId: 'any-3-polos', name: 'Any 3 Polos', status: 'ONE_AWAY', qualifyingUnits: 2, requiredUnits: 3, remainingUnits: 1, worthwhile: false, canSuggest: false, display: { deal: '3 for £59.99', units: 'polos', one: 'polo', many: 'polos', title: 'Polo deal' } },
-      { offerId: 'any-2-mens-trousers', name: "Any 2 Men's Trousers", status: 'ONE_AWAY', qualifyingUnits: 1, requiredUnits: 2, remainingUnits: 1, worthwhile: false, canSuggest: false, display: { deal: '2 for £49', units: 'trousers', one: 'pair of trousers', many: 'pairs of trousers', title: 'Trouser deal' } },
-      { offerId: 'any-2-shorts', name: 'Any 2 Shorts', status: 'INACTIVE', qualifyingUnits: 0, requiredUnits: 2, remainingUnits: 2, worthwhile: null, canSuggest: false, display: { deal: '2 for £45', units: 'shorts', one: 'pair of shorts', many: 'pairs of shorts', title: 'Shorts deal' } },
+      { offerId: 'any-3-polos', name: 'Any 3 Polos', status: 'ONE_AWAY', qualifyingUnits: 2, requiredUnits: 3, remainingUnits: 1, worthwhile: false, canSuggest: false, display: { deal: '3 for £59.99', units: 'polos', one: 'polo', many: 'polos', title: 'Any 3 Polos' } },
+      { offerId: 'any-2-mens-trousers', name: "Any 2 Men's Trousers", status: 'ONE_AWAY', qualifyingUnits: 1, requiredUnits: 2, remainingUnits: 1, worthwhile: false, canSuggest: false, display: { deal: '2 for £49', units: 'trousers', one: 'pair of trousers', many: 'pairs of trousers', title: 'Any 2 Trousers' } },
+      { offerId: 'any-2-shorts', name: 'Any 2 Shorts', status: 'INACTIVE', qualifyingUnits: 0, requiredUnits: 2, remainingUnits: 2, worthwhile: null, canSuggest: false, display: { deal: '2 for £45', units: 'shorts', one: 'pair of shorts', many: 'pairs of shorts', title: 'Any 2 Shorts' } },
     ]);
     // Nothing of the cart's internals goes back: no line keys, variant ids or trigger keys.
     const sent = JSON.stringify(body);
@@ -127,7 +130,8 @@ describe('Smart Cart on the session, from each fresh cart read', () => {
 
   it('an empty basket on the basket route answers with every offer inactive, not null', async () => {
     const body = (await (await syncBasket([])).json()) as { smartCart: { offers: Array<{ status: string }> } | null };
-    expect(body.smartCart?.offers.map((o) => o.status)).toEqual(['INACTIVE', 'INACTIVE', 'INACTIVE']);
+    expect(body.smartCart?.offers.length).toBe(8);
+    expect(body.smartCart?.offers.every((o) => o.status === 'INACTIVE')).toBe(true);
   });
 
   it('untriggered lines on the basket route leave every offer inactive', async () => {

@@ -258,3 +258,44 @@ describe('suggestions that complete an offer', () => {
     expect((await suggest('any-3-ladies-polos')).status).toBe(400);
   });
 });
+
+describe('ladies and kids "any N" deals: the keys the copied theme\'s deal pages write', () => {
+  const LADIES_SHORT = product('90', 'LADIES GOLF SHORTS - NAVY', 'SHORTS', ['10'], 25); // 900
+  const KIDS_SHORT = product('91', 'JUNIOR GOLF SHORTS - NAVY', 'SHORTS', ['9-10'], 18); // 910
+  const LADIES_TROUSER = product('92', 'LADIES GOLF TROUSERS - BLACK', 'TROUSERS', ['10'], 30); // 920
+  const KIDS_TROUSER = product('93', 'JUNIOR GOLF TROUSERS - BLACK', 'TROUSERS', ['9-10'], 22); // 930
+  const KIDS_POLO = product('94', 'JUNIOR POLO - WHITE', 'POLOS', ['9-10'], 16, ['bundle_threepolo_kids']); // 940
+  const UNISEX_SHORT = product('95', 'UNISEX SHORTS - GREY', 'SHORTS', ['S'], 20); // 950
+  beforeEach(() => {
+    setCatalogueForTests([...ALL, LADIES_SHORT, KIDS_SHORT, LADIES_TROUSER, KIDS_TROUSER, KIDS_POLO, UNISEX_SHORT]);
+    setSmartCartCollectionsForTests({
+      'men-golf-trousers': [CLIMA.id],
+      'men-golf-shorts': [COMFORT.id],
+      'ladies-shorts': [LADIES_SHORT.id, UNISEX_SHORT.id],
+      'kids-shorts': [KIDS_SHORT.id, UNISEX_SHORT.id],
+      'ladies-trousers': [LADIES_TROUSER.id],
+      'kids-trousers': [KIDS_TROUSER.id],
+    });
+  });
+
+  it('each product gets its own deal\'s key and value', () => {
+    expect(triggerPropertiesFor(LADIES_SHORT.id)).toEqual({ '__any-2-shorts': 'ladies' });
+    expect(triggerPropertiesFor(KIDS_SHORT.id)).toEqual({ '__any-2-shorts': 'kids' });
+    expect(triggerPropertiesFor(LADIES_TROUSER.id)).toEqual({ '__ladies-any-2-trousers': 'ladies-any-2-trousers' });
+    expect(triggerPropertiesFor(KIDS_TROUSER.id)).toEqual({ '__kids-any-2-trousers': 'kids-any-2-trousers' });
+    expect(triggerPropertiesFor(KIDS_POLO.id)).toEqual({ __bundle_threepolo_kids: 'bundle_threepolo_kids' });
+  });
+
+  it('a product in both the ladies and the kids shorts collections is stamped for neither', () => {
+    expect(triggerPropertiesFor(UNISEX_SHORT.id)).toBeUndefined();
+  });
+
+  it('a Caddie add of a ladies short carries __any-2-shorts=ladies, and is judged on that line', async () => {
+    const action = await add(LADIES_SHORT, '10', true);
+    expect(action?.lines).toEqual([{ variantId: '900', quantity: 1, properties: { '__any-2-shorts': 'ladies' } }]);
+  });
+
+  it('ladies polos are left alone until their price is decided', () => {
+    expect(triggerPropertiesFor(LADIES.id)).toBeUndefined();
+  });
+});

@@ -9,9 +9,11 @@ import type { SmartCartLine, SmartCartOfferConfig, SmartCartOfferState, SmartCar
  * theme never writes one. Only a string is a value: BasketSync carries the
  * theme's properties as strings, and anything else did not come from a cart.
  */
-export function hasTrigger(line: SmartCartLine, triggerKey: string): boolean {
+export function hasTrigger(line: SmartCartLine, triggerKey: string, matchValue?: string): boolean {
   const value = line.properties?.[triggerKey];
-  return typeof value === 'string' && value !== '';
+  if (typeof value !== 'string' || value === '') return false;
+  // An offer read by its value as well (Ladies & Kids Any 2 Shorts): SupaEasy trims, then compares exactly.
+  return matchValue === undefined || value.trim() === matchValue;
 }
 
 function unitsOf(line: SmartCartLine): number {
@@ -37,7 +39,7 @@ export function progressStatus(units: number, threshold: number): SmartCartProgr
 export function evaluateSmartCart(lines: readonly SmartCartLine[], offers: readonly SmartCartOfferConfig[] = SMART_CART_OFFERS, now = Date.now()): SmartCartState {
   return {
     offers: offers.map((offer): SmartCartOfferState => {
-      const matched = lines.filter((line) => hasTrigger(line, offer.triggerKey) && unitsOf(line) > 0);
+      const matched = lines.filter((line) => hasTrigger(line, offer.triggerKey, offer.matchValue) && unitsOf(line) > 0);
       const qualifyingUnits = matched.reduce((sum, line) => sum + unitsOf(line), 0);
       return {
         offerId: offer.id,

@@ -14,11 +14,11 @@ import type { SmartCartOfferView, SmartCartView } from '@caddie/shared';
 export interface SmartCartLine {
   offerId: string;
   status: SmartCartOfferView['status'];
-  /** "Polo deal" */
+  /** "Any 3 Polos" - the deal's own name */
   title: string;
   /** "3 for £59.99" */
   deal: string;
-  /** "Add 2 more polos to complete the deal" */
+  /** "Choose any 2 more polos to complete the deal" - any qualifying item counts, which is the point of the deal */
   message: string;
   /** Under a qualified basket: where the price is decided. */
   note?: string;
@@ -62,9 +62,7 @@ export function smartCartLines(view: SmartCartView | null | undefined): SmartCar
       const close = offer.status === 'ONE_AWAY';
       const message = qualified
         ? `Your ${words.many} qualify for ${words.deal || 'this deal'}`
-        : close
-          ? `Just 1 more ${words.one} to complete the deal`
-          : `Add ${left} more ${left === 1 ? words.one : words.many} to complete the deal`;
+        : `Choose any ${left} more ${left === 1 ? words.one : words.many} to complete the deal`;
       return {
         offerId: offer.offerId,
         status: offer.status,

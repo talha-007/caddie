@@ -4,7 +4,15 @@
  * claim that a discount has been applied.
  */
 
-export type SmartCartOfferId = 'any-3-polos' | 'any-2-mens-trousers' | 'any-2-shorts';
+export type SmartCartOfferId =
+  | 'any-3-polos'
+  | 'any-2-mens-trousers'
+  | 'any-2-shorts'
+  | 'any-3-polos-kids'
+  | 'any-2-trousers-ladies'
+  | 'any-2-trousers-kids'
+  | 'any-2-shorts-ladies'
+  | 'any-2-shorts-kids';
 
 import type { SmartCartProgressStatus } from '@caddie/shared';
 
@@ -17,8 +25,15 @@ export interface SmartCartOfferConfig {
   triggerKey: string;
   /** Units needed for one set. */
   threshold: number;
-  /** The value stamped with the trigger on the Caddie's own adds - what the theme's own add writes. SupaEasy reads only that it is not empty. */
+  /** The value stamped with the trigger on the Caddie's own adds - what the theme's own add writes. */
   triggerValue: string;
+  /**
+   * Set when SupaEasy counts a line only for this exact value, not for any
+   * value. Ladies & Kids Any 2 Shorts is one discount on one key,
+   * __any-2-shorts, that prices "ladies" and "kids" lines as separate deals
+   * (it compares the trimmed value). Unset: any non-empty value counts.
+   */
+  matchValue?: string;
   /**
    * Which products the Caddie stamps: the same rule the theme's add path
    * uses - a product tag (polos), or membership of the collections the
@@ -32,7 +47,7 @@ export interface SmartCartOfferConfig {
    * saving - the saving is SupaEasy's, read from the cart.
    */
   gatePrice: { amount: number; currency: 'GBP' };
-  /** Display-only wording ("3 for £59.99", "polos", "Polo deal"). Never parsed, never used in arithmetic. */
+  /** Display-only wording ("3 for £59.99", "polos", "Any 3 Polos"). Never parsed, never used in arithmetic. */
   display?: { deal: string; units: string; one: string; many: string; title: string };
 }
 
