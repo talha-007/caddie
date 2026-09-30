@@ -157,6 +157,7 @@ export async function readCart(): Promise<Cart> {
 export function basketSync(raw: AjaxCart | null = lastRaw): BasketSync {
   return {
     ...(raw?.token ? { cartToken: raw.token } : {}),
+    ...(raw?.currency ? { currency: raw.currency } : {}),
     lines: (raw?.items ?? []).map((item) => ({
       key: item.key,
       productId: gid('Product', item.product_id),
@@ -267,6 +268,126 @@ export async function runOperation(action: Extract<CartAction, { type: 'add' | '
 }
 
 /** A read of the cart for an operation whose outcome was never reported (a refresh, a lost answer): what the cart shows now. */
+/** How long a chat turn waits for its basket read before it is sent without one. */
+export const TURN_BASKET_MS = 2500;
+
+/**
+ * The cart as it is now, for the chat turn about to be sent: read fresh from
+ * /cart.js and converted exactly as the basket route takes it (basketSync).
+ * Only on the storefront (the caller checks onStorefront). Null when the read fails or takes longer than `ms` - never an empty basket
+ * standing in for one we could not read: the server then keeps the copy it
+ * had, and the message still goes (Smart Cart phase 1).
+ */
+export async function basketForTurn(ms = TURN_BASKET_MS): Promise<BasketSync | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  const raw = await Promise.race([readRaw(), late]);
+  clearTimeout(timer);
+  if (!raw) {
+    console.warn('[caddie] could not read the cart before sending; sending without it');
+    return null;
+  }
+  return basketSync(raw);
+}
+
+/**
+ * Set while Caddie itself asks the theme to re-render its drawer
+ * (announceToTheme), so its own change is not taken for the theme's.
+ */
+let ownRender = false;
+
+/** How long rapid theme re-renders are gathered into one basket read. */
+export const THEME_CART_DEBOUNCE_MS = 400;
+
+const WATCHED = '__caddieWatched';
+type RenderFn = ((...args: unknown[]) => unknown) & { [WATCHED]?: true; __caddieOriginal?: (...args: unknown[]) => unknown };
+
+/**
+ * How long after Caddie's own change a redraw of the theme's drawer is taken
+ * for that change (the theme fetching its drawer section in answer to our
+ * cart:refresh), not for one of the theme's own.
+ */
+export const OWN_DRAWER_QUIET_MS = 2500;
+let ownUntil = 0;
+
+/** The id Caddie's own cart events carry, so they are never read back as the theme's. */
+const OWN_SOURCE = 'druids-caddie';
+
+/**
+ * Changes to the cart made by the rest of the theme. Themes say so in
+ * different ways, and each is watched; the theme's own behaviour is
+ * unchanged, and every signal not caused by Caddie schedules one debounced
+ * change. No polling.
+ *
+ * - The live Druids theme ("Autumn 2026", snippets/application_script.liquid)
+ *   dispatches no cart events; every one of its cart paths calls the global
+ *   RE_RENDER_DRAWER() on success - QUICK_CART, the drawer's UPDATE_QTY /
+ *   UPDATE_LINE_ITEM / REMOVE_BUNDLES, the cart page, bundle builder v4. So
+ *   that function is wrapped (again on window load, if defined later).
+ * - The sport theme (the copy Smart Cart is previewed on) has no
+ *   RE_RENDER_DRAWER and dispatches no cart events either: its adds and its
+ *   drawer controls end by redrawing #cart-drawer from the Section Rendering
+ *   API (assets/sport-quick-cart.js). A redraw there is its cart changing -
+ *   the theme's own header count watches the same element the same way. So
+ *   #cart-drawer's children are observed, and nothing else.
+ * - A theme that does announce (cart:refresh, cart:update) is heard, unless
+ *   the announcement is Caddie's own.
+ */
+export function watchThemeCart(onChange: () => void, debounceMs = THEME_CART_DEBOUNCE_MS): () => void {
+  const w = window as unknown as { RE_RENDER_DRAWER?: RenderFn };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let installed: RenderFn | undefined;
+  let observer: MutationObserver | undefined;
+  const schedule = () => {
+    clearTimeout(timer);
+    timer = setTimeout(onChange, debounceMs);
+  };
+  const onEvent = (event: Event) => {
+    const detail = (event as CustomEvent<{ sourceId?: string } | undefined>).detail;
+    if (detail?.sourceId !== OWN_SOURCE) schedule();
+  };
+  const observeDrawer = () => {
+    const drawer = document.getElementById('cart-drawer');
+    if (observer || !drawer || typeof MutationObserver === 'undefined') return;
+    observer = new MutationObserver(() => {
+      // The redraw our own cart:refresh asked for is not the theme's change.
+      if (Date.now() >= ownUntil) schedule();
+    });
+    observer.observe(drawer, { childList: true, subtree: true });
+  };
+  const install = () => {
+    const current = w.RE_RENDER_DRAWER;
+    if (typeof current !== 'function' || current[WATCHED]) return;
+    const wrapped: RenderFn = function (this: unknown, ...args: unknown[]) {
+      // The cart has already changed when the theme calls this (its success callbacks).
+      if (!ownRender) schedule();
+      return current.apply(this, args);
+    };
+    wrapped[WATCHED] = true;
+    wrapped.__caddieOriginal = current;
+    w.RE_RENDER_DRAWER = wrapped;
+    installed = wrapped;
+  };
+  const onLoad = () => {
+    install();
+    observeDrawer();
+  };
+  onLoad();
+  window.addEventListener('load', onLoad);
+  document.addEventListener('cart:refresh', onEvent);
+  document.addEventListener('cart:update', onEvent);
+  return () => {
+    clearTimeout(timer);
+    window.removeEventListener('load', onLoad);
+    document.removeEventListener('cart:refresh', onEvent);
+    document.removeEventListener('cart:update', onEvent);
+    observer?.disconnect();
+    if (installed && w.RE_RENDER_DRAWER === installed && installed.__caddieOriginal) w.RE_RENDER_DRAWER = installed.__caddieOriginal as RenderFn;
+  };
+}
+
 export async function observe(operationId: string): Promise<CartOutcomeReport> {
   const after = await readRaw();
   return { operationId, status: 'uncertain', before: null, after: after ? basketSync(after) : null, evidence: 'ajax-cart-read' };
@@ -279,21 +400,27 @@ export async function observe(operationId: string): Promise<CartOutcomeReport> {
  * older ones for cart:refresh. Each is harmless where it is not heard.
  */
 export function announceToTheme(cart: AjaxCart | null = lastRaw): void {
+  // Caddie's own re-render: not a theme change to read back (watchThemeCart) - nor the drawer redraw it sets off.
+  ownRender = true;
+  ownUntil = Date.now() + OWN_DRAWER_QUIET_MS;
   try {
     (window as unknown as { RE_RENDER_DRAWER?: () => void }).RE_RENDER_DRAWER?.();
   } catch {
     // The theme's own function failing is not ours to surface.
+  } finally {
+    ownRender = false;
   }
-  const detail = { resource: cart, sourceId: 'druids-caddie', data: { itemCount: cart?.item_count ?? 0, source: 'druids-caddie' } };
+  const detail = { resource: cart, sourceId: OWN_SOURCE, data: { itemCount: cart?.item_count ?? 0, source: OWN_SOURCE } };
   document.dispatchEvent(new CustomEvent('cart:update', { bubbles: true, detail }));
   document.dispatchEvent(new CustomEvent('cart:refresh', { bubbles: true, detail }));
 }
 
-async function addLines(lines: Array<{ variantId: string; quantity: number }>): Promise<void> {
+async function addLines(lines: Array<{ variantId: string; quantity: number; properties?: Record<string, string> }>): Promise<void> {
   await ajax('/cart/add.js', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items: lines.map((line) => ({ id: Number(line.variantId), quantity: line.quantity })) }),
+    // Properties only when the server sent them: a Smart Cart offer trigger, written as the theme's own Add button writes it.
+    body: JSON.stringify({ items: lines.map((line) => ({ id: Number(line.variantId), quantity: line.quantity, ...(line.properties && Object.keys(line.properties).length ? { properties: line.properties } : {}) })) }),
   });
 }
 

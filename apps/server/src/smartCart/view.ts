@@ -1,0 +1,39 @@
+import type { SmartCartView } from '@caddie/shared';
+import { SMART_CART_OFFERS } from './config.js';
+import { qualifyingProducts } from './eligibility.js';
+import type { SmartCartOfferConfig, SmartCartState } from './types.js';
+import { offerValue, type PricedLine } from './value.js';
+
+/**
+ * What the widget is sent of the session's Smart Cart state: the progress,
+ * whether the offer would lower the price at all, and the offer's display
+ * wording - no line keys, variant ids, trigger keys or prices. Null when
+ * there is no state yet, never an empty one.
+ */
+export function smartCartView(
+  state: SmartCartState | undefined,
+  basket: { lines?: readonly PricedLine[]; currency?: string } = {},
+  offers: readonly SmartCartOfferConfig[] = SMART_CART_OFFERS,
+): SmartCartView | null {
+  if (!state) return null;
+  return {
+    evaluatedAt: state.evaluatedAt,
+    offers: state.offers.map((offer) => {
+      const config = offers.find((entry) => entry.id === offer.offerId);
+      const value = config
+        ? offerValue(offer, config, basket.lines ?? [], basket.currency, offer.qualifyingUnits > 0 && offer.status !== 'QUALIFIED' ? qualifyingProducts(config) : [])
+        : { worthwhile: null, canSuggest: false };
+      return {
+        offerId: offer.offerId,
+        name: config?.name ?? offer.offerId,
+        status: offer.status,
+        qualifyingUnits: offer.qualifyingUnits,
+        requiredUnits: offer.requiredUnits,
+        remainingUnits: offer.remainingUnits,
+        worthwhile: value.worthwhile,
+        canSuggest: value.canSuggest,
+        ...(config?.display ? { display: { ...config.display } } : {}),
+      };
+    }),
+  };
+}

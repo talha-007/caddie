@@ -1,0 +1,378 @@
+{
+ "offer": "Any 2 Shorts (mens)",
+ "generated": "2026-09-30",
+ "status": "INVESTIGATIVE ARTIFACT - not wired into Caddie",
+ "supaeasy": {
+  "discount": "ANY 2 SHORTS",
+  "status": "ACTIVE",
+  "trigger_key": "__any-2-trouser-shorts",
+  "set_size": 2,
+  "uk_price_gbp": 45
+ },
+ "eligibility_truth": "SupaEasy qualifies a cart line only by the presence of the trigger line property with a non-empty value. It performs no product, collection or tag check. The lists below are therefore the products each THEME PATH stamps the trigger on, not a SupaEasy product list.",
+ "sources": {
+  "live_theme": "collections 'any-2-trouser-shorts-1' and '-2' (identical), bundle-builder-v4 on /pages/any-2-trouser-shorts",
+  "unpublished_theme": "collection 'men-golf-shorts' (sport-deal-bundle builder on page.choose-two-short-temp, unpublished)"
+ },
+ "note": "The live product page / quick add never stamps this trigger; only the pack page does.",
+ "counts": {
+  "live_theme_active": 33,
+  "unpublished_theme_active": 39,
+  "both": 33,
+  "live_only": 0,
+  "unpublished_only": 6
+ },
+ "products": [
+  {
+   "id": "gid://shopify/Product/7905195491428",
+   "title": "BIRDIE SHORTS - SAGE",
+   "handle": "birdie-shorts-sage",
+   "productType": "SHORTS",
+   "live_theme_stamps": false,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7764456603748",
+   "title": "CLIMA GOLF SHORTS - CHARCOAL",
+   "handle": "clima-golf-shorts-charcoal",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/8078629929060",
+   "title": "CLIMA GOLF SHORTS - CORAL",
+   "handle": "clima-golf-shorts-coral",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7764451623012",
+   "title": "CLIMA GOLF SHORTS - GREEN",
+   "handle": "clima-golf-shorts-green",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/1862927548477",
+   "title": "CLIMA GOLF SHORTS - GREY",
+   "handle": "mens-clima-shorts-grey",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7255600824420",
+   "title": "CLIMA GOLF SHORTS - LEMON",
+   "handle": "mens-clima-golf-shorts-lemon",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7764452343908",
+   "title": "CLIMA GOLF SHORTS - LIME",
+   "handle": "clima-golf-shorts-lime",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/1862926827581",
+   "title": "CLIMA GOLF SHORTS - NAVY",
+   "handle": "mens-clima-shorts-navy",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7764452311140",
+   "title": "CLIMA GOLF SHORTS - ORANGE",
+   "handle": "clima-golf-shorts-orange",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7764452278372",
+   "title": "CLIMA GOLF SHORTS - PINK",
+   "handle": "clima-golf-shorts-pink",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7764451524708",
+   "title": "CLIMA GOLF SHORTS - RED",
+   "handle": "clima-golf-shorts-red",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7764451786852",
+   "title": "CLIMA GOLF SHORTS - ROYAL",
+   "handle": "clima-golf-shorts-royal",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7246844624996",
+   "title": "CLIMA GOLF SHORTS - SAGE",
+   "handle": "clima-golf-shorts-sage",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/6547655098468",
+   "title": "CLIMA GOLF SHORTS - TEAL",
+   "handle": "mens-clima-shorts-teal",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/1862927220797",
+   "title": "CLIMA GOLF SHORTS - WHITE",
+   "handle": "mens-clima-shorts-white",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7905194868836",
+   "title": "CLIMA TOUR WINNER SHORTS - SAGE",
+   "handle": "clima-tour-winner-shorts-sage",
+   "productType": "SHORTS",
+   "live_theme_stamps": false,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/8110830682212",
+   "title": "COMFORT SHORTS - BLACK",
+   "handle": "comfort-shorts-black",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/8110831370340",
+   "title": "COMFORT SHORTS - CHARCOAL",
+   "handle": "comfort-shorts-charcoal",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/8110831992932",
+   "title": "COMFORT SHORTS - DENIM",
+   "handle": "comfort-shorts-denim",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/8110830944356",
+   "title": "COMFORT SHORTS - GREY",
+   "handle": "comfort-shorts-grey",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/8110819410020",
+   "title": "COMFORT SHORTS - NAVY",
+   "handle": "comfort-shorts-navy",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/8110832255076",
+   "title": "COMFORT SHORTS - STONE",
+   "handle": "comfort-shorts-stone",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/8110831632484",
+   "title": "COMFORT SHORTS - WHITE",
+   "handle": "comfort-shorts-white",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7905196015716",
+   "title": "ELEMENTS SHORTS - SAGE",
+   "handle": "elements-shorts-sage",
+   "productType": "SHORTS",
+   "live_theme_stamps": false,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7908735058020",
+   "title": "HERITAGE BOTANIC SHORTS - GREY",
+   "handle": "heritage-botanic-shorts-grey",
+   "productType": "SHORTS",
+   "live_theme_stamps": false,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7908734730340",
+   "title": "HERITAGE BOTANIC SHORTS - SAGE",
+   "handle": "heritage-botanic-shorts-sage",
+   "productType": "SHORTS",
+   "live_theme_stamps": false,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7908743118948",
+   "title": "HERITAGE JUMBLE SHORTS - BLACK",
+   "handle": "heritage-jumble-shorts-black",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7908745904228",
+   "title": "HERITAGE JUMBLE SHORTS - DENIM",
+   "handle": "heritage-jumble-shorts-denim",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7908745314404",
+   "title": "HERITAGE JUMBLE SHORTS - GREY",
+   "handle": "heritage-jumble-shorts-grey",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7908744396900",
+   "title": "HERITAGE JUMBLE SHORTS - NAVY",
+   "handle": "heritage-jumble-shorts-navy",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7908729290852",
+   "title": "HERITAGE TEX SHORTS - GREY",
+   "handle": "heritage-tex-shorts-grey",
+   "productType": "SHORTS",
+   "live_theme_stamps": false,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/4795843706980",
+   "title": "MEN'S CLIMA GOLF SHORTS - BLACK",
+   "handle": "mens-clima-shorts-black",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7981414187108",
+   "title": "PREMIUM TOUR SHORTS - BLACK",
+   "handle": "premium-tour-shorts-black",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7981417365604",
+   "title": "PREMIUM TOUR SHORTS - CHARCOAL",
+   "handle": "premium-tour-shorts-charcoal",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7981415235684",
+   "title": "PREMIUM TOUR SHORTS - GREY",
+   "handle": "premium-tour-shorts-grey",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7981417005156",
+   "title": "PREMIUM TOUR SHORTS - JADE",
+   "handle": "premium-tour-shorts-jade",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7981415628900",
+   "title": "PREMIUM TOUR SHORTS - NAVY",
+   "handle": "premium-tour-shorts-navy",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7981416677476",
+   "title": "PREMIUM TOUR SHORTS - SAGE",
+   "handle": "premium-tour-shorts-sage",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7981415956580",
+   "title": "PREMIUM TOUR SHORTS - WHITE",
+   "handle": "premium-tour-shorts-white",
+   "productType": "SHORTS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  }
+ ]
+}

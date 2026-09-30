@@ -52,8 +52,12 @@ export type ProfileRequest = ShopperSizes;
  * quantity rising by the amount asked for does.
  */
 export interface CartExpectation {
-  /** Lines whose quantity must rise by this much (numeric variant ids). */
-  add?: Array<{ variantId: string; quantity: number }>;
+  /**
+   * Lines whose quantity must rise by this much (numeric variant ids), on the
+   * line carrying exactly these properties - none, unless the add stamped a
+   * Smart Cart offer trigger.
+   */
+  add?: Array<{ variantId: string; quantity: number; properties?: Record<string, string> }>;
   /** Lines that must be gone, or reduced by this much - the old size of a replacement. Keyed as held; re-resolved by variant when the cart re-keys. */
   remove?: Array<{ key: string; variantId: string; quantity: number }>;
 }
@@ -74,7 +78,12 @@ export interface CartOperationRef {
 export type CartAction =
   | ({
       type: 'add';
-      lines: Array<{ variantId: string; quantity: number }>;
+      /**
+       * `properties`: line item properties to add with the line - only ever a
+       * Smart Cart offer trigger the server chose (e.g. __3_Polo_Bundle), so
+       * SupaEasy prices the line as part of that offer. Never a price.
+       */
+      lines: Array<{ variantId: string; quantity: number; properties?: Record<string, string> }>;
       /** Cart line keys to remove once the add has succeeded - a swap. */
       removeKeys?: string[];
     } & Partial<CartOperationRef>)
@@ -109,6 +118,8 @@ export const CART_OPS_CONTRACT = 'cart-ops/1';
 export interface BasketSync {
   /** The theme cart's own token, so an operation is judged against the cart it was made for and no other. */
   cartToken?: string;
+  /** The cart's currency (ISO code), as /cart.js reports it - which market's prices the lines are in. */
+  currency?: string;
   lines: Array<{
     key: string;
     productId: string;

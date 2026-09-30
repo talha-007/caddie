@@ -4,6 +4,7 @@ import { redisEnabled, redisUsable } from '../lib/redis.js';
 import type { SizeRecommendationRecord } from '../shopper/facts.js';
 import type { ShopperProfile } from '../shopper/profile.js';
 import type { ShoppingFocus } from './focus.js';
+import type { SmartCartState } from '../smartCart/types.js';
 
 /** A basket action waiting on the customer's next answer (see tools/actionGateway.ts). */
 /** What a waiting action still needs from the customer. */
@@ -128,6 +129,22 @@ export interface CaddieSession {
     /** Which deal that pack is, by page handle. */
     bundleName?: string;
   }>;
+  /**
+   * Progress towards each Smart Cart offer, worked out from the same cart read
+   * as `basket`, whenever one is applied (tools/cartOperations.ts basketPatch).
+   * Never from a read that failed: then both are as stale as each other.
+   * Read-only - nothing says it to the customer yet.
+   */
+  smartCart?: SmartCartState;
+  /** The theme cart's currency, from the same read - Smart Cart gates its nudges on UK prices only. */
+  cartCurrency?: string;
+  /**
+   * The widget on this request is on a theme with the Smart Cart preview on
+   * (x-caddie-smart-cart: preview). Only then do the Caddie's own adds carry
+   * an offer trigger. Recorded per request, so the same session on the live
+   * theme stops stamping at once.
+   */
+  smartCartPreview?: boolean;
   /** Packs the Caddie has put in the store cart, so a change replaces one rather than adding another. */
   packsAdded?: Array<{ handle: string; bundleId: string }>;
   /**

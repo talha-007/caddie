@@ -1,9 +1,9 @@
 import { Router, type RequestHandler } from 'express';
-import { CART_OPS_CONTRACT, type BasketSync, type CardChoice, type CartAction, type CartOutcomeReport, type ProfileRequest, type SessionClaimResponse, type SessionRestartResponse, type UiActionResponse, type UiAddRequest, type UiCartLineRequest, type UiPackAddRequest } from '@caddie/shared';
+import { CART_OPS_CONTRACT, type BasketSync, type BasketSyncResponse, type SmartCartSuggestRequest, type SmartCartSuggestResponse, type CardChoice, type CartAction, type CartOutcomeReport, type ProfileRequest, type SessionClaimResponse, type SessionRestartResponse, type UiActionResponse, type UiAddRequest, type UiCartLineRequest, type UiPackAddRequest } from '@caddie/shared';
 import { z } from 'zod';
 import { noteCartMode } from '../lib/request.js';
 import { executeCommerceAction } from '../tools/actionGateway.js';
-import { basketFromSync, settleOutcome } from '../tools/cartOperations.js';
+import { basketPatch, settleOutcome } from '../tools/cartOperations.js';
 import { trustedShopperFacts } from '../shopper/facts.js';
 import type { ShopperProfile } from '../shopper/profile.js';
 import { rememberShopper } from '../shopper/remember.js';
@@ -12,6 +12,7 @@ import { LIMITS } from '../lib/rateLimit.js';
 import { limitRoute } from '../lib/routeLimit.js';
 import { productById } from '../catalog/sync.js';
 import { sessions, type CaddieSession } from '../session/store.js';
+import { SMART_CART_OFFERS, cheapestAvailablePence, offerValue, qualifyingProducts, smartCartView } from '../smartCart/index.js';
 import { customerTurn, describeFocus, focusFromCard } from '../session/focus.js';
 import { claimSession, requireSessionOwner } from '../session/ownership.js';
 import { runTool } from '../tools/index.js';
@@ -222,13 +223,53 @@ sessionRouter.post('/:id/basket', owner, writeLimit, async (req, res, next) => {
     await sessions.getOrCreate(req.params.id);
     // Names from our own catalogue, never from the request (tools/cartOperations.ts basketFromSync): these lines go into the model's instructions.
     const token = typeof body?.cartToken === 'string' ? body.cartToken.slice(0, 120) : undefined;
-    await sessions.patch(req.params.id, { cartMode: 'theme', basket: basketFromSync(lines), ...(token ? { cartToken: token } : {}) });
-    res.json({ ok: true, lines: lines.length });
+    const fresh = basketPatch(lines, typeof body?.currency === 'string' ? body.currency : undefined);
+    await sessions.patch(req.params.id, { cartMode: 'theme', ...fresh, ...(token ? { cartToken: token } : {}) });
+    // Smart Cart progress from this very read, for the widget's preview: the server stays its only author.
+    const reply: BasketSyncResponse = { ok: true, lines: lines.length, smartCart: smartCartView(fresh.smartCart, { lines: fresh.basket ?? [], ...(fresh.cartCurrency ? { currency: fresh.cartCurrency } : {}) }) };
+    res.json(reply);
   } catch (err) {
     next(err);
   }
 });
 
+
+/**
+ * POST /api/session/:id/smart-cart/suggest - products that would complete an
+ * offer the basket is part-way to, for the Smart Cart preview's "find me"
+ * button. Deterministic, no model: qualifying by the theme's own rule, in
+ * stock, not already in the basket, and priced above what the finished set
+ * needs for SupaEasy to discount anything (smartCart/value.ts) - cheapest of
+ * those first. Adding one goes through the gateway like any card, and is
+ * stamped there.
+ */
+sessionRouter.post('/:id/smart-cart/suggest', owner, writeLimit, async (req, res, next) => {
+  try {
+    const offer = SMART_CART_OFFERS.find((entry) => entry.id === (req.body as Partial<SmartCartSuggestRequest> | undefined)?.offerId);
+    if (!offer) return res.status(400).json({ error: 'unknown_offer' });
+    const session = await sessions.getOrCreate(req.params.id);
+    const inBasket = new Set((session.basket ?? []).map((line) => line.productId));
+    const candidates = qualifyingProducts(offer).filter((product) => !inBasket.has(product.id));
+    const state = session.smartCart?.offers.find((entry) => entry.offerId === offer.id);
+    const value = state ? offerValue(state, offer, session.basket ?? [], session.cartCurrency, candidates) : null;
+    const floor = value?.floorPence ?? 0;
+    const products = candidates
+      .map((product) => ({ product, price: cheapestAvailablePence(product) }))
+      .filter((entry): entry is { product: typeof entry.product; price: number } => entry.price !== null && entry.price > floor)
+      .sort((a, b) => a.price - b.price)
+      .slice(0, 6)
+      .map((entry) => entry.product);
+    const units = offer.display?.units ?? 'items';
+    const message = products.length
+      ? `${units.charAt(0).toUpperCase()}${units.slice(1)} that complete the ${offer.display?.deal ?? offer.name} offer`
+      : `I couldn't find more ${units} for the ${offer.display?.deal ?? offer.name} offer just now.`;
+    log.info('smart_cart.suggested', { sessionId: req.params.id, offerId: offer.id, floorPence: floor, candidates: candidates.length, shown: products.length });
+    const reply: SmartCartSuggestResponse = { offerId: offer.id, products, message };
+    return res.json(reply);
+  } catch (err) {
+    return next(err);
+  }
+});
 
 /*
  * The widget's own basket changes - a card's Add button, a pack's Add button,
@@ -293,7 +334,7 @@ const syncLineSchema = z.object({
   properties: z.record(z.string().max(200)).optional(),
   sellingPlanId: z.string().max(100).optional(),
 });
-const syncSchema = z.object({ cartToken: z.string().max(120).optional(), lines: z.array(syncLineSchema).max(100) });
+const syncSchema = z.object({ cartToken: z.string().max(120).optional(), currency: z.string().max(8).optional(), lines: z.array(syncLineSchema).max(100) });
 const outcomeSchema = z.object({
   operationId: z.string().min(1).max(80),
   status: z.enum(['applied', 'failed', 'partial', 'uncertain']),
@@ -309,7 +350,7 @@ sessionRouter.post('/:id/cart-outcome', owner, writeLimit, async (req, res, next
     const parsed = outcomeSchema.safeParse(req.body ?? {});
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
     const sync = (value: z.infer<typeof syncSchema> | null): BasketSync | null =>
-      value ? { ...(value.cartToken ? { cartToken: value.cartToken } : {}), lines: value.lines.map((line) => ({ ...line, title: line.title ?? '', variantTitle: line.variantTitle ?? '' })) } : null;
+      value ? { ...(value.cartToken ? { cartToken: value.cartToken } : {}), ...(value.currency ? { currency: value.currency } : {}), lines: value.lines.map((line) => ({ ...line, title: line.title ?? '', variantTitle: line.variantTitle ?? '' })) } : null;
     const report: CartOutcomeReport = { ...parsed.data, before: sync(parsed.data.before), after: sync(parsed.data.after) };
     const result = await settleOutcome(req.params.id, report);
     return res.status(result.status === 'unknown' ? 404 : 200).json(result);

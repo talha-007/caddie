@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  BasketSync,
   BundleDeal,
   CaddieAttachment,
   CaddieMessage,
@@ -13,11 +14,13 @@ import type {
   ShopperSizes,
   SizeInput,
   SizeRecommendation,
+  SmartCartView,
 } from '@caddie/shared';
-import { TimeoutError, addFromCard, addPackFromCard, changeCartLine, onSessionReplaced, openEventStream, reportCartOutcome, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, syncBasket } from './api.js';
-import { announceToTheme, basketSync, observe, onStorefront, readCart, runActions, runOperation } from './themeCart.js';
+import { TimeoutError, addFromCard, addPackFromCard, changeCartLine, onSessionReplaced, openEventStream, reportCartOutcome, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, suggestForOffer, syncBasket } from './api.js';
+import { announceToTheme, basketForTurn, basketSync, observe, onStorefront, readCart, runActions, runOperation, watchThemeCart } from './themeCart.js';
 import { UNSUPPORTED_SERVER, alreadyRun, inFlight, noteDone, noteReported, noteStarted, sortActions } from './operations.js';
 import { announceCart } from './events.js';
+import { newerSmartCart } from './smartCart.js';
 import { sameId } from './variants.js';
 
 /**
@@ -92,6 +95,10 @@ export interface CaddieState {
   addPack: (bundle: BundleDeal, items: BasketItem[]) => Promise<boolean>;
   changeQuantity: (lineId: string, quantity: number) => Promise<void>;
   refreshCart: () => Promise<void>;
+  /** Smart Cart progress the server evaluated from the last basket sync that answered; null before any. Read-only. */
+  smartCart: SmartCartView | null;
+  /** Qualifying products that would complete an offer, posted to the thread as cards (Smart Cart preview). */
+  suggestOffer: (offerId: string) => Promise<void>;
   /** Posts a recorded clip; the transcript comes back as the customer's own message. */
   sendClip: (clip: Blob) => Promise<void>;
   clearError: () => void;
@@ -260,6 +267,20 @@ export function useCaddie(page: PageContext): CaddieState {
   const stored = useMemo(readThread, []);
 
   const [messages, setMessages] = useState<ThreadMessage[]>(stored?.messages ?? []);
+  const [smartCart, setSmartCart] = useState<SmartCartView | null>(null);
+  /**
+   * Every basket report goes through here: the server answers with the Smart
+   * Cart progress it evaluated from that basket, and that is kept - unless a
+   * newer evaluation already arrived. A sync that fails keeps what we had.
+   */
+  const pushBasket = useCallback(
+    async (basket: BasketSync) => {
+      const reply = await syncBasket(sessionId, basket);
+      setSmartCart((current) => newerSmartCart(current, reply?.smartCart));
+      return reply;
+    },
+    [sessionId],
+  );
   const [cart, setCart] = useState<Cart | null>(stored?.cart ?? null);
   const [size, setSize] = useState<SizeRecommendation | null>(stored?.size ?? null);
   const [sizes, setSizes] = useState<ShopperSizes | null>(stored?.sizes ?? null);
@@ -308,7 +329,7 @@ export function useCaddie(page: PageContext): CaddieState {
         .then((current) => {
           if (stale) return;
           updateCart(current);
-          void syncBasket(sessionId, basketSync()).catch(() => undefined);
+          void pushBasket(basketSync()).catch(() => undefined);
         })
         .catch(() => undefined);
       return () => {
@@ -351,7 +372,7 @@ export function useCaddie(page: PageContext): CaddieState {
         // On the storefront the server does not hold the cart; the store does.
         if (onStorefront()) {
           updateCart(await readCart());
-          await syncBasket(sessionId, basketSync());
+          await pushBasket(basketSync());
           return;
         }
         if (carried) updateCart(carried);
@@ -419,7 +440,7 @@ export function useCaddie(page: PageContext): CaddieState {
   const showStoreCart = useCallback(
     (current: Cart) => {
       deliver('', { kind: 'cart', cart: current });
-      void syncBasket(sessionId, basketSync()).catch(() => undefined);
+      void pushBasket(basketSync()).catch(() => undefined);
     },
     [deliver, sessionId],
   );
@@ -491,7 +512,7 @@ export function useCaddie(page: PageContext): CaddieState {
       if (unsupported.length) setError(UNSUPPORTED_SERVER);
       for (const operation of operations) await carryOut(operation);
       if (!rest.length) {
-        if (operations.length) void syncBasket(sessionId, basketSync()).catch(() => undefined);
+        if (operations.length) void pushBasket(basketSync()).catch(() => undefined);
         return;
       }
       try {
@@ -609,7 +630,9 @@ export function useCaddie(page: PageContext): CaddieState {
       if (!trimmed || busyRef.current) return;
       setMessages((prev) => [...prev, message('user', trimmed)]);
       await withBusy(guessJourney(trimmed), async () => {
-        const reply = await sendMessage(sessionId, trimmed, page);
+        // The real cart, read now, goes with the message: the turn is about the basket as it is, not as it was last reported.
+        const basket = onStorefront() ? await basketForTurn() : null;
+        const reply = await sendMessage(sessionId, trimmed, page, undefined, basket);
         deliver(reply.message.text, reply.message.attachment, reply.message);
         await applyActions(reply.message.actions);
       });
@@ -741,10 +764,10 @@ export function useCaddie(page: PageContext): CaddieState {
           } else if (operations.length && onStorefront()) {
             // Confirmed by the cart's read-back; the server's own words say what went in (carryOut).
             for (const operation of operations) await carryOut(operation);
-            void syncBasket(sessionId, basketSync()).catch(() => undefined);
+            void pushBasket(basketSync()).catch(() => undefined);
           } else if (legacy.length && onStorefront()) {
             current = await runActions(legacy);
-            void syncBasket(sessionId, basketSync()).catch(() => undefined);
+            void pushBasket(basketSync()).catch(() => undefined);
           } else if (reply.cart) {
             current = reply.cart;
           }
@@ -824,17 +847,17 @@ export function useCaddie(page: PageContext): CaddieState {
       quietCart.current += 1;
       try {
         // The server checks the line against the basket as it is right now.
-        if (onStorefront()) await syncBasket(sessionId, basketSync());
+        if (onStorefront()) await pushBasket(basketSync());
         const reply = await changeCartLine(sessionId, { lineId, quantity });
         const { operations, legacy, unsupported } = sortActions(reply.actions);
         if (unsupported.length && onStorefront()) {
           setError(UNSUPPORTED_SERVER);
         } else if (operations.length && onStorefront()) {
           for (const operation of operations) await carryOut(operation);
-          void syncBasket(sessionId, basketSync()).catch(() => undefined);
+          void pushBasket(basketSync()).catch(() => undefined);
         } else if (legacy.length && onStorefront()) {
           updateCart(await runActions(legacy));
-          void syncBasket(sessionId, basketSync()).catch(() => undefined);
+          void pushBasket(basketSync()).catch(() => undefined);
         } else if (reply.cart) {
           updateCart(reply.cart);
         }
@@ -855,11 +878,40 @@ export function useCaddie(page: PageContext): CaddieState {
     try {
       // The theme may have changed it since - its own Add buttons, another tab.
       updateCart(await readCart());
-      void syncBasket(sessionId, basketSync()).catch(() => undefined);
+      void pushBasket(basketSync()).catch(() => undefined);
     } catch {
       // Keep what we had.
     }
   }, [quietCartCall, sessionId, updateCart]);
+
+  /*
+   * The Smart Cart preview's "Show me polos": qualifying products the server
+   * chose (in stock, priced so the offer lowers the price), posted to the
+   * thread as ordinary cards. Adding one goes through the gateway, which
+   * stamps the offer's trigger - nothing here writes to the cart.
+   */
+  const suggestOffer = useCallback(
+    async (offerId: string) => {
+      setError(null);
+      try {
+        const reply = await suggestForOffer(sessionId, offerId);
+        setMessages((prev) => [...prev, message('assistant', reply.message, reply.products.length ? { attachment: { kind: 'products', products: reply.products } } : {})]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Those could not be found just now.');
+      }
+    },
+    [sessionId],
+  );
+
+  /*
+   * Cart changes made by the rest of the theme - its Add buttons, the cart
+   * drawer, the pack pages - are read back and reported, so the basket the
+   * Caddie holds is the one the customer sees (themeCart.ts watchThemeCart).
+   */
+  useEffect(() => {
+    if (!onStorefront()) return undefined;
+    return watchThemeCart(() => void refreshCart());
+  }, [refreshCart]);
 
   const sendClip = useCallback(
     async (clip: Blob) => {
@@ -874,6 +926,9 @@ export function useCaddie(page: PageContext): CaddieState {
         const heard = message('user', '');
         setMessages((prev) => [...prev, heard]);
         try {
+          // A voice turn carries raw audio, not JSON: its basket is reported just before it instead.
+          const basket = onStorefront() ? await basketForTurn() : null;
+          if (basket) await pushBasket(basket).catch(() => undefined);
           const reply = await sendVoice(sessionId, clip);
           // Show what the Caddie heard, so a misheard word is obvious on screen.
           if (reply.transcript) {
@@ -935,6 +990,8 @@ export function useCaddie(page: PageContext): CaddieState {
     picked,
     changeQuantity,
     refreshCart,
+    smartCart,
+    suggestOffer,
     sendClip,
     clearError: useCallback(() => setError(null), []),
     newChat,

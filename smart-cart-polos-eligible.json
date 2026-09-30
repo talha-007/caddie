@@ -1,0 +1,6536 @@
+{
+ "offer": "Any 3 Polos (mens)",
+ "generated": "2026-09-30",
+ "status": "INVESTIGATIVE ARTIFACT - not wired into Caddie",
+ "supaeasy": {
+  "discount": "ANY 3 POLO COLLECTION",
+  "id": "gid://shopify/DiscountAutomaticNode/1162170957924",
+  "status": "ACTIVE",
+  "trigger_key": "__3_Polo_Bundle",
+  "set_size": 3,
+  "uk_price_gbp": 59.99
+ },
+ "eligibility_truth": "SupaEasy qualifies a cart line only by the presence of the trigger line property with a non-empty value. It performs no product, collection or tag check. The lists below are therefore the products each THEME PATH stamps the trigger on, not a SupaEasy product list.",
+ "sources": {
+  "live_theme": "product tag 'bundle_threepolo' (QUICK_CART from product page, collection and product cards)",
+  "unpublished_theme": "collection 'all-polos', mens filter (sport-deal-bundle builder on page.choose-three-polo-temp, theme 'Copy of DRUIDS - SPORT TYPE - AsimAli')"
+ },
+ "note": "Live v4 page /pages/three-polo-deal stamps __three-polo-deal, which no active SupaEasy discount reads; it is excluded here.",
+ "counts": {
+  "live_theme_active": 590,
+  "unpublished_theme_active": 478,
+  "both": 476,
+  "live_only": 114,
+  "unpublished_only": 2
+ },
+ "products": [
+  {
+   "id": "gid://shopify/Product/8068346937444",
+   "title": "365 POLO - PINK",
+   "handle": "365-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107365302372",
+   "title": "ABSTRACT EMOTIVE POLO - BLACK",
+   "handle": "abstract-emotive-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107365793892",
+   "title": "ABSTRACT EMOTIVE POLO - CHARCOAL",
+   "handle": "abstract-emotive-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107365924964",
+   "title": "ABSTRACT EMOTIVE POLO - PINK",
+   "handle": "abstract-emotive-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107365564516",
+   "title": "ABSTRACT EMOTIVE POLO - WHITE",
+   "handle": "abstract-emotive-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8169507356772",
+   "title": "ABSTRACT FLOWER POLO - BLUE",
+   "handle": "abstract-flower-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8169509126244",
+   "title": "ABSTRACT FLOWER POLO - CORAL",
+   "handle": "abstract-flower-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8169510010980",
+   "title": "ABSTRACT FLOWER POLO - MINT",
+   "handle": "abstract-flower-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8169509617764",
+   "title": "ABSTRACT FLOWER POLO - PURPLE",
+   "handle": "abstract-flower-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/6994460770404",
+   "title": "ACADEMY POLO - BLUE",
+   "handle": "academy-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/6994458148964",
+   "title": "ACADEMY POLO - CHARCOAL",
+   "handle": "academy-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/6994459623524",
+   "title": "ACADEMY POLO - RED",
+   "handle": "academy-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/6994455789668",
+   "title": "ACADEMY POLO - WHITE",
+   "handle": "academy-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8058566606948",
+   "title": "ADAM PRIME POLO - BLACK",
+   "handle": "adam-prime-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514742419556",
+   "title": "ADAM PRIME POLO - CHARCOAL",
+   "handle": "adam-prime-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8058566934628",
+   "title": "ADAM PRIME POLO - DENIM",
+   "handle": "adam-prime-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8058567458916",
+   "title": "ADAM PRIME POLO - NAVY",
+   "handle": "adam-prime-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514742386788",
+   "title": "ADAM PRIME POLO - PURPLE",
+   "handle": "adam-prime-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514742288484",
+   "title": "ADAM PRIME POLO - STONE",
+   "handle": "adam-prime-polo-stone",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896863244388",
+   "title": "ALPHA POLO - BLUE",
+   "handle": "alpha-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8295210877028",
+   "title": "ALPHA POLO - MINT",
+   "handle": "alpha-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8295211008100",
+   "title": "ALPHA POLO - MULBERRY",
+   "handle": "alpha-polo-mulberry",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896863113316",
+   "title": "ALPHA POLO - NAVY",
+   "handle": "alpha-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896862851172",
+   "title": "ALPHA POLO - PURPLE",
+   "handle": "alpha-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896863015012",
+   "title": "ALPHA POLO - WHITE",
+   "handle": "alpha-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7473196695652",
+   "title": "AQUA POLO - BLUE",
+   "handle": "aqua-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8104382234724",
+   "title": "ARDENT FLEECE LINED POLO - BLACK",
+   "handle": "ardent-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8104382267492",
+   "title": "ARDENT FLEECE LINED POLO - BURGUNDY",
+   "handle": "ardent-polo-burgundy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8104382136420",
+   "title": "ARDENT FLEECE LINED POLO - GREY",
+   "handle": "ardent-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8104382005348",
+   "title": "ARDENT FLEECE LINED POLO - NAVY",
+   "handle": "ardent-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7878757449828",
+   "title": "ARECA POLO - WHITE",
+   "handle": "areca-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7473204297828",
+   "title": "ATHLETICA POLO - BLUE",
+   "handle": "athletica-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8015217492068",
+   "title": "ATHLETICA POLO - CHARCOAL",
+   "handle": "athletica-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7473203839076",
+   "title": "ATHLETICA POLO - NAVY",
+   "handle": "athletica-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7473204723812",
+   "title": "ATHLETICA POLO - WHITE",
+   "handle": "athletica-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292726669412",
+   "title": "AWAKEN POLO - BLACK",
+   "handle": "awaken-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292726538340",
+   "title": "AWAKEN POLO - BLUE",
+   "handle": "awaken-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292725456996",
+   "title": "AWAKEN POLO - NAVY",
+   "handle": "awaken-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292726767716",
+   "title": "AWAKEN POLO - TEAL",
+   "handle": "awaken-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292726440036",
+   "title": "AWAKEN POLO - WHITE",
+   "handle": "awaken-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080397271140",
+   "title": "AXE POLO - BLUE",
+   "handle": "axe-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080397074532",
+   "title": "AXE POLO - CHARCOAL",
+   "handle": "axe-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080397434980",
+   "title": "AXE POLO - SAGE",
+   "handle": "axe-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7978702241892",
+   "title": "BACKNINE POLO - BLACK",
+   "handle": "belfry-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7978704404580",
+   "title": "BACKNINE POLO - CHARCOAL",
+   "handle": "belfry-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7978704633956",
+   "title": "BACKNINE POLO - RED",
+   "handle": "belfry-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7978704699492",
+   "title": "BACKNINE POLO - SAGE",
+   "handle": "belfry-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7978704535652",
+   "title": "BACKNINE POLO - WHITE",
+   "handle": "belfry-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7499160387684",
+   "title": "BAND POLO - GREEN",
+   "handle": "band-polo-green",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7243917688932",
+   "title": "BLACKJACK POLO - WHITE / LIME",
+   "handle": "blackjack-polo-white-lime",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7243918082148",
+   "title": "BLACKJACK POLO - WHITE / ORANGE",
+   "handle": "blackjack-polo-white-orange",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107813699684",
+   "title": "BLACKJACK POLO - WHITE/ LAVENDER",
+   "handle": "blackjack-polo-white-lavender",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7243918180452",
+   "title": "BLACKJACK POLO - WHITE/ PINK",
+   "handle": "blackjack-polo-white-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8177952129124",
+   "title": "BLACKOUT POLO - CHARCOAL",
+   "handle": "blackout-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8177952456804",
+   "title": "BLACKOUT POLO - GREY",
+   "handle": "blackout-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8177949507684",
+   "title": "BLACKOUT POLO - NAVY",
+   "handle": "blackout-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8177952292964",
+   "title": "BLACKOUT POLO - WHITE",
+   "handle": "blackout-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8177966317668",
+   "title": "BLISS POLO - CORAL/RED",
+   "handle": "bliss-polo-coral-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8177968414820",
+   "title": "BLISS POLO - DENIM",
+   "handle": "bliss-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8177968185444",
+   "title": "BLISS POLO - NAVY",
+   "handle": "bliss-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8177968545892",
+   "title": "BLISS POLO - PURPLE",
+   "handle": "bliss-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8463728083044",
+   "title": "BLISS POLO - STONE",
+   "handle": "bliss-polo-stone",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8177968676964",
+   "title": "BLISS POLO - WHITE/GREY",
+   "handle": "bliss-polo-white-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7650089271396",
+   "title": "BLOCK PIQUE LONG SLEEVE POLO -  WHITE/TEAL",
+   "handle": "block-pique-long-sleeve-polo-white-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7245100646500",
+   "title": "BLOCK PIQUE POLO - BLUE / LIME",
+   "handle": "block-pique-polo-2",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7245100974180",
+   "title": "BLOCK PIQUE POLO - BLUE / NAVY",
+   "handle": "block-pique-polo-3",
+   "productType": "POLOS",
+   "live_theme_stamps": false,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7379047972964",
+   "title": "BLOCK PIQUE POLO - LIME",
+   "handle": "block-pique-polo-lime",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7379045580900",
+   "title": "BLOCK PIQUE POLO - SAGE",
+   "handle": "block-pique-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7245101105252",
+   "title": "BLOCK PIQUE POLO - WHITE",
+   "handle": "block-pique-polo-4",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7247881076836",
+   "title": "BLOSSOM POLO - BLACK",
+   "handle": "blossom-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7854440743012",
+   "title": "BLOSSOM POLO - CORAL",
+   "handle": "blossom-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7247881797732",
+   "title": "BLOSSOM POLO - GREY",
+   "handle": "blossom-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141924794468",
+   "title": "BLOSSOM POLO - LAVENDER",
+   "handle": "blossom-polo-lavendar",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7854440808548",
+   "title": "BLOSSOM POLO - MINT",
+   "handle": "blossom-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7247882027108",
+   "title": "BLOSSOM POLO - NAVY",
+   "handle": "blossom-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141925449828",
+   "title": "BLOSSOM POLO - ORANGE",
+   "handle": "blossom-polo-orange",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7854440611940",
+   "title": "BLOSSOM POLO - WHITE",
+   "handle": "blossom-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7817631989860",
+   "title": "BOARDER POLO - BLACK",
+   "handle": "boarder-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7817633628260",
+   "title": "BOARDER POLO - WHITE",
+   "handle": "boarder-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8259255926884",
+   "title": "BOUNCER POLO - DENIM",
+   "handle": "bouncer-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276524957796",
+   "title": "BOUNCER POLO - NAVY",
+   "handle": "bouncer-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8259255468132",
+   "title": "BOUNCER POLO - TEAL",
+   "handle": "bouncer-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8259255861348",
+   "title": "BOUNCER POLO - WHITE",
+   "handle": "bouncer-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276524925028",
+   "title": "BOUNCER POLO - YELLOW",
+   "handle": "bouncer-polo-yellow",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080442425444",
+   "title": "BRIS POLO - BLACK",
+   "handle": "bris-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080442196068",
+   "title": "BRIS POLO - BLUE",
+   "handle": "bris-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080442327140",
+   "title": "BRIS POLO - PURPLE",
+   "handle": "bris-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080438493284",
+   "title": "BRIS POLO - SAGE",
+   "handle": "bris-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701403271268",
+   "title": "CALIFORNIA POLO - BLACK",
+   "handle": "california-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701403140196",
+   "title": "CALIFORNIA POLO - BLUE",
+   "handle": "california-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701403697252",
+   "title": "CALIFORNIA POLO - CORAL",
+   "handle": "california-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141906411620",
+   "title": "CALIFORNIA POLO - LAVENDER",
+   "handle": "california-polo-lavender",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701402845284",
+   "title": "CALIFORNIA POLO - NAVY",
+   "handle": "california-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701403500644",
+   "title": "CALIFORNIA POLO - WHITE",
+   "handle": "california-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292723196004",
+   "title": "CELESTE POLO - BLUE",
+   "handle": "celeste-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292908138596",
+   "title": "CELESTE POLO - MINT",
+   "handle": "celeste-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292719657060",
+   "title": "CELESTE POLO - PINK",
+   "handle": "celeste-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292723523684",
+   "title": "CELESTE POLO - PURPLE",
+   "handle": "celeste-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292723621988",
+   "title": "CELESTE POLO - TEAL",
+   "handle": "celeste-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7888950067300",
+   "title": "CHEVRON POLO - DENIM",
+   "handle": "chevron-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7888949837924",
+   "title": "CHEVRON POLO - MINT",
+   "handle": "chevron-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8332440371300",
+   "title": "CHEVRON POLO - MULBERRY",
+   "handle": "chevron-polo-mulberry",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420293709924",
+   "title": "CHEVRON POLO - NAVY",
+   "handle": "chevron-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420293546084",
+   "title": "CHEVRON POLO - WHITE",
+   "handle": "chevron-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468853915748",
+   "title": "CIRCUIT POLO - BLACK",
+   "handle": "circuit-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027906736228",
+   "title": "CIRCUIT POLO - BLUE",
+   "handle": "circuit-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468853850212",
+   "title": "CIRCUIT POLO - CHARCOAL",
+   "handle": "circuit-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027906801764",
+   "title": "CIRCUIT POLO - GREY",
+   "handle": "circuit-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027906637924",
+   "title": "CIRCUIT POLO - MINT",
+   "handle": "circuit-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027906834532",
+   "title": "CIRCUIT POLO - NAVY",
+   "handle": "circuit-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468853817444",
+   "title": "CIRCUIT POLO - PURPLE",
+   "handle": "circuit-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468853784676",
+   "title": "CIRCUIT POLO - STONE",
+   "handle": "circuit-polo-stone",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468853751908",
+   "title": "CIRCUIT POLO - WHITE",
+   "handle": "circuit-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420288139364",
+   "title": "CLASSIC POLO - BLACK",
+   "handle": "classic-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420289089636",
+   "title": "CLASSIC POLO - BLUE",
+   "handle": "classic-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420288598116",
+   "title": "CLASSIC POLO - GREY",
+   "handle": "classic-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420288991332",
+   "title": "CLASSIC POLO - NAVY",
+   "handle": "classic-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420289450084",
+   "title": "CLASSIC POLO - PINK",
+   "handle": "classic-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420289220708",
+   "title": "CLASSIC POLO - RED",
+   "handle": "classic-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420289384548",
+   "title": "CLASSIC POLO - SAGE",
+   "handle": "classic-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420288761956",
+   "title": "CLASSIC POLO - WHITE",
+   "handle": "classic-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7245111427172",
+   "title": "CLUB POLO 2.0 - BLACK",
+   "handle": "club-polo-2-0-4",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7245110968420",
+   "title": "CLUB POLO 2.0 - BLUE",
+   "handle": "club-polo-2-0-2",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420276179044",
+   "title": "CLUB POLO 2.0 - CORAL",
+   "handle": "club-polo-2-0-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7245110706276",
+   "title": "CLUB POLO 2.0 - NAVY",
+   "handle": "club-polo-2-0-1",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420278931556",
+   "title": "CLUB POLO 2.0 - PINK",
+   "handle": "club-polo-2-0-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420277784676",
+   "title": "CLUB POLO 2.0 - RED",
+   "handle": "club-polo-2-0-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500998672484",
+   "title": "CLUB POLO 2.0 - SAGE",
+   "handle": "club-polo-2-0-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8463681159268",
+   "title": "CLUB POLO 2.0 - STONE",
+   "handle": "club-polo-2-0-stone",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7245111197796",
+   "title": "CLUB POLO 2.0 - WHITE",
+   "handle": "club-polo-2-0-3",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292716150884",
+   "title": "COURSE LINE POLO - BLUE",
+   "handle": "course-line-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292716413028",
+   "title": "COURSE LINE POLO - MULBERRY",
+   "handle": "course-line-polo-mulberry",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292715331684",
+   "title": "COURSE LINE POLO - NAVY",
+   "handle": "course-line-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292715823204",
+   "title": "COURSE LINE POLO - SAGE",
+   "handle": "course-line-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7848765096036",
+   "title": "DAVINCI POLO - BLUE",
+   "handle": "davinci-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7848765259876",
+   "title": "DAVINCI POLO - GREY",
+   "handle": "davinci-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8052294713444",
+   "title": "DAVINCI POLO - LAVENDER",
+   "handle": "davinci-polo-lavendar",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7848765063268",
+   "title": "DAVINCI POLO - NAVY",
+   "handle": "davinci-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7848764670052",
+   "title": "DAVINCI POLO - WHITE",
+   "handle": "davinci-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068354375780",
+   "title": "DAZZLE POLO - FOREST",
+   "handle": "dazzle-polo-forest",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500953649252",
+   "title": "DAZZLE POLO - GREY",
+   "handle": "dazzle-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500954075236",
+   "title": "DAZZLE POLO - PINK",
+   "handle": "dazzle-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500953452644",
+   "title": "DAZZLE POLO - SAGE/WHITE",
+   "handle": "dazzle-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": false,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": []
+  },
+  {
+   "id": "gid://shopify/Product/7944868790372",
+   "title": "DECK POLO - LAVENDER",
+   "handle": "deck-polo-lavendar",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7270926221412",
+   "title": "DIAMOND 2.0 POLO - BLACK",
+   "handle": "diamond-2-0-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7270926057572",
+   "title": "DIAMOND 2.0 POLO - BLUE",
+   "handle": "diamond-2-0-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7270926123108",
+   "title": "DIAMOND 2.0 POLO - NAVY",
+   "handle": "diamond-2-0-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7270926188644",
+   "title": "DIAMOND 2.0 POLO - WHITE",
+   "handle": "diamond-2-0-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292190322788",
+   "title": "DINGLE POLO - BLUE",
+   "handle": "dingle-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292189831268",
+   "title": "DINGLE POLO - LAVENDER",
+   "handle": "dingle-polo-lavender",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7859143901284",
+   "title": "DINGLE POLO - NAVY",
+   "handle": "dingle-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7859143966820",
+   "title": "DINGLE POLO - TEAL",
+   "handle": "dingle-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7813247500388",
+   "title": "DIRTY POLO - BLACK",
+   "handle": "dirty-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7813245927524",
+   "title": "DIRTY POLO - BLUE",
+   "handle": "dirty-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7813247696996",
+   "title": "DIRTY POLO - CHARCOAL",
+   "handle": "dirty-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7813248254052",
+   "title": "DIRTY POLO - LIME",
+   "handle": "dirty-polo-lime",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514737176676",
+   "title": "DIRTY POLO - MINT",
+   "handle": "dirty-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514737209444",
+   "title": "DIRTY POLO - NAVY",
+   "handle": "dirty-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7813247991908",
+   "title": "DIRTY POLO - PINK",
+   "handle": "dirty-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514737242212",
+   "title": "DIRTY POLO - STONE",
+   "handle": "dirty-polo-stone",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070491111524",
+   "title": "DOODLE POLO - DENIM",
+   "handle": "doodle-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7978707681380",
+   "title": "DOODLE POLO - GREEN",
+   "handle": "doodle-polo-green",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7978707255396",
+   "title": "DOODLE POLO - LIME",
+   "handle": "doodle-polo-lime",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7978707484772",
+   "title": "DOODLE POLO - NAVY",
+   "handle": "doodle-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070491013220",
+   "title": "DOODLE POLO - PINK",
+   "handle": "doodle-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070490947684",
+   "title": "DOODLE POLO - WHITE",
+   "handle": "doodle-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068446060644",
+   "title": "DOTRON POLO - KHAKI",
+   "handle": "dotron-polo-khkai",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276528169060",
+   "title": "DOWNTOWN POLO - BLACK",
+   "handle": "downtown-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276528300132",
+   "title": "DOWNTOWN POLO - DENIM",
+   "handle": "downtown-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276528234596",
+   "title": "DOWNTOWN POLO - NAVY",
+   "handle": "downtown-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276528332900",
+   "title": "DOWNTOWN POLO - ORANGE",
+   "handle": "downtown-polo-orange",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276528136292",
+   "title": "DOWNTOWN POLO - WHITE",
+   "handle": "downtown-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107367202916",
+   "title": "DYNAMIC POLO - BLUE",
+   "handle": "dynamic-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107367104612",
+   "title": "DYNAMIC POLO - MULBERRY",
+   "handle": "dynamic-polo-mulberry",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107367661668",
+   "title": "DYNAMIC POLO - TEAL",
+   "handle": "dynamic-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7379075956836",
+   "title": "ELEMENTS POLO - BLUE",
+   "handle": "elements-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7813086412900",
+   "title": "ELEMENTS POLO - CHARCOAL",
+   "handle": "elements-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7379071172708",
+   "title": "ELEMENTS POLO - CORAL",
+   "handle": "elements-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7813086969956",
+   "title": "ELEMENTS POLO - NAVY",
+   "handle": "elements-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7379072024676",
+   "title": "ELEMENTS POLO - ORANGE",
+   "handle": "elements-polo-orange",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7379069468772",
+   "title": "ELEMENTS POLO - PURPLE",
+   "handle": "elements-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7813087166564",
+   "title": "ELEMENTS POLO - WHITE",
+   "handle": "elements-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7243980931172",
+   "title": "ELITE POLO - BLACK",
+   "handle": "elite-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7243982930020",
+   "title": "ELITE POLO - BLUE",
+   "handle": "elite-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7904702759012",
+   "title": "ELITE POLO - GREEN",
+   "handle": "elite-polo-green",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7243983290468",
+   "title": "ELITE POLO - GREY",
+   "handle": "elite-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7904702791780",
+   "title": "ELITE POLO - JADE",
+   "handle": "elite-polo-jade",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7904702726244",
+   "title": "ELITE POLO - LAVENDER",
+   "handle": "elite-polo-lavendar",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7243981946980",
+   "title": "ELITE POLO - NAVY",
+   "handle": "elite-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7904702660708",
+   "title": "ELITE POLO - PINK",
+   "handle": "elite-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7243982372964",
+   "title": "ELITE POLO - RED",
+   "handle": "elite-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7904702431332",
+   "title": "ELITE POLO - SAGE",
+   "handle": "elite-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7243982504036",
+   "title": "ELITE POLO - WHITE",
+   "handle": "elite-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276526956644",
+   "title": "ELYSIAN POLO - DENIM",
+   "handle": "elysian-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276526923876",
+   "title": "ELYSIAN POLO - GREY",
+   "handle": "elysian-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276526891108",
+   "title": "ELYSIAN POLO - MINT",
+   "handle": "elysian-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276526858340",
+   "title": "ELYSIAN POLO - NAVY",
+   "handle": "elysian-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027900084324",
+   "title": "EXA POLO - BLUE",
+   "handle": "exa-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027900018788",
+   "title": "EXA POLO - GREEN",
+   "handle": "exa-polo-green",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027899953252",
+   "title": "EXA POLO - PINK",
+   "handle": "exa-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762881380452",
+   "title": "EXECUTIVE POLO - BLUE",
+   "handle": "executive-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762881249380",
+   "title": "EXECUTIVE POLO - GREY",
+   "handle": "executive-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762881413220",
+   "title": "EXECUTIVE POLO - LIME",
+   "handle": "executive-polo-lime",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762881347684",
+   "title": "EXECUTIVE POLO - NAVY",
+   "handle": "executive-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762881478756",
+   "title": "EXECUTIVE POLO - SAGE",
+   "handle": "executive-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762881314916",
+   "title": "EXECUTIVE POLO - WHITE",
+   "handle": "executive-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8177979064420",
+   "title": "EXOTIC POLO - MINT",
+   "handle": "exotic-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8177977917540",
+   "title": "EXOTIC POLO - PINK",
+   "handle": "exotic-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080298967140",
+   "title": "FAUNA POLO - BLUE",
+   "handle": "fauna-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080298770532",
+   "title": "FAUNA POLO - NAVY",
+   "handle": "fauna-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080297918564",
+   "title": "FAUNA POLO - WHITE",
+   "handle": "fauna-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7951818784868",
+   "title": "FIESTA POLO - BLUE",
+   "handle": "fiesta-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080285401188",
+   "title": "FIESTA POLO - LAVENDER",
+   "handle": "fiesta-polo-lavendar",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7951818719332",
+   "title": "FIESTA POLO - NAVY",
+   "handle": "fiesta-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7951818883172",
+   "title": "FIESTA POLO - PINK",
+   "handle": "fiesta-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7951818653796",
+   "title": "FIESTA POLO - WHITE",
+   "handle": "fiesta-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8062594973796",
+   "title": "FLAMINGO FLAG POLO - DENIM",
+   "handle": "flamingo-flag-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8061941514340",
+   "title": "FLAMINGO FLAG POLO - NAVY",
+   "handle": "flamingo-flag-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8061941678180",
+   "title": "FLAMINGO FLAG POLO - TEAL",
+   "handle": "flamingo-flag-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027904868452",
+   "title": "FLASH POLO - SAGE",
+   "handle": "flash-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027901296740",
+   "title": "FLO POLO - NAVY",
+   "handle": "flo-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027901886564",
+   "title": "FLO POLO - PINK",
+   "handle": "flo-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027901755492",
+   "title": "FLO POLO - WHITE",
+   "handle": "flo-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762881511524",
+   "title": "FLORAL PANEL POLO - BLACK",
+   "handle": "floral-panel-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514800025700",
+   "title": "FLORAL PANEL POLO - BLUE",
+   "handle": "floral-panel-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514800353380",
+   "title": "FLORAL PANEL POLO - MINT",
+   "handle": "floral-panel-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762881675364",
+   "title": "FLORAL PANEL POLO - NAVY",
+   "handle": "floral-panel-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514846457956",
+   "title": "FLORAL PANEL POLO - PURPLE",
+   "handle": "floral-panel-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762881708132",
+   "title": "FLORAL PANEL POLO - SAGE",
+   "handle": "floral-panel-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762881544292",
+   "title": "FLORAL PANEL POLO - WHITE",
+   "handle": "floral-panel-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701401600100",
+   "title": "FLORAL TECH POLO - NAVY",
+   "handle": "floral-tech-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467914522724",
+   "title": "GARDEN POLO - BLUE",
+   "handle": "garden-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467914358884",
+   "title": "GARDEN POLO - MINT",
+   "handle": "garden-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467914424420",
+   "title": "GARDEN POLO - MULBERRY",
+   "handle": "garden-polo-mulberry",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467914293348",
+   "title": "GARDEN POLO - NAVY",
+   "handle": "garden-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467914489956",
+   "title": "GARDEN POLO - PURPLE",
+   "handle": "garden-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068459397220",
+   "title": "GERALD POLO - GREEN",
+   "handle": "gerald-polo-green",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068462379108",
+   "title": "GERALD POLO - WHITE",
+   "handle": "gerald-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276526137444",
+   "title": "GOLF TEE POLO - BLACK",
+   "handle": "golf-tee-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944869118052",
+   "title": "GOLF TEE POLO - BLUE",
+   "handle": "golf-tee-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070462472292",
+   "title": "GOLF TEE POLO - CORAL",
+   "handle": "golf-tee-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944869052516",
+   "title": "GOLF TEE POLO - NAVY",
+   "handle": "golf-tee-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467912196196",
+   "title": "GOLF TEE POLO - PURPLE",
+   "handle": "golf-tee-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944869085284",
+   "title": "GOLF TEE POLO - SAGE",
+   "handle": "golf-tee-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944869019748",
+   "title": "GOLF TEE POLO - WHITE",
+   "handle": "golf-tee-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500996739172",
+   "title": "GRADIENT STRIPE POLO - GREY",
+   "handle": "gradient-stripe-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896861278308",
+   "title": "GRADUATE POLO - BLUE",
+   "handle": "graduate-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896861966436",
+   "title": "GRADUATE POLO - SAGE",
+   "handle": "graduate-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896860688484",
+   "title": "GRADUATE POLO - WHITE",
+   "handle": "graduate-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078129725540",
+   "title": "HALF LINE POLO - GREY",
+   "handle": "half-line-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078129627236",
+   "title": "HALF LINE POLO - NAVY",
+   "handle": "half-line-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078128939108",
+   "title": "HALF LINE POLO - SAGE",
+   "handle": "half-line-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8151953965156",
+   "title": "HALLIE POLO - LIGHT BLUE",
+   "handle": "hallie-polo-light-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292688920676",
+   "title": "HAO POLO - DENIM",
+   "handle": "hao-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292687315044",
+   "title": "HAO POLO - MINT",
+   "handle": "hao-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292689051748",
+   "title": "HAO POLO - MULBERRY",
+   "handle": "hao-polo-mulberry",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292689608804",
+   "title": "HAO POLO - NAVY",
+   "handle": "hao-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292689215588",
+   "title": "HAO POLO - WHITE",
+   "handle": "hao-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141729955940",
+   "title": "HERITAGE POLO - NAVY",
+   "handle": "heritage-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7848760049764",
+   "title": "HEX POLO - BLUE",
+   "handle": "hex-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7848760016996",
+   "title": "HEX POLO - GREEN",
+   "handle": "hex-polo-green",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7848759951460",
+   "title": "HEX POLO - NAVY",
+   "handle": "hex-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080415391844",
+   "title": "HEXA PERFORMANCE POLO - GREY",
+   "handle": "hexa-performance-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080415916132",
+   "title": "HEXA PERFORMANCE POLO - NAVY",
+   "handle": "hexa-performance-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080414867556",
+   "title": "HEXA PERFORMANCE POLO - SAGE",
+   "handle": "hexa-performance-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078125531236",
+   "title": "HEXA PREPPY POLO - WHITE/ BLUE",
+   "handle": "hexa-polo-white-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078125891684",
+   "title": "HEXA PREPPY POLO - WHITE/ LAVENDER",
+   "handle": "hexa-polo-white-lavender",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078125760612",
+   "title": "HEXA PREPPY POLO - WHITE/ LIME",
+   "handle": "hexa-polo-white-lime",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8058583416932",
+   "title": "HEXIE POLO - CHARCOAL",
+   "handle": "hexie-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8058583154788",
+   "title": "HEXIE POLO - SAGE",
+   "handle": "hexie-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/6882658549860",
+   "title": "HONEYCOMB POLO - BLACK",
+   "handle": "honeycomb-polo-black-1",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/6882656911460",
+   "title": "HONEYCOMB POLO - BLUE",
+   "handle": "honeycomb-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7188755120228",
+   "title": "HONEYCOMB POLO - BURGUNDY",
+   "handle": "honeycomb-polo-burgundy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/6882656583780",
+   "title": "HONEYCOMB POLO - GREY",
+   "handle": "honeycomb-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7188755382372",
+   "title": "HONEYCOMB POLO - KHAKI",
+   "handle": "honeycomb-polo-khaki",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/6882658189412",
+   "title": "HONEYCOMB POLO - NAVY",
+   "handle": "honeycomb-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/6882656616548",
+   "title": "HONEYCOMB POLO - OCEAN",
+   "handle": "honeycomb-polo-ocean",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/6882656485476",
+   "title": "HONEYCOMB POLO - WHITE",
+   "handle": "honeycomb-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7813253431396",
+   "title": "HOPS N BARLEY POLO - BLACK",
+   "handle": "hops-n-barley-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7247883567204",
+   "title": "HOPS N BARLEY POLO - BLUE",
+   "handle": "hops-n-barley-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7247882879076",
+   "title": "HOPS N BARLEY POLO - GREEN",
+   "handle": "hops-n-barley-polo-green",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7813253005412",
+   "title": "HOPS N BARLEY POLO - LIME",
+   "handle": "hops-n-barley-polo-lime",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7247883731044",
+   "title": "HOPS N BARLEY POLO - NAVY",
+   "handle": "hops-n-barley-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7813252087908",
+   "title": "HOPS N BARLEY POLO - PINK",
+   "handle": "hops-n-barley-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7247883173988",
+   "title": "HOPS N BARLEY POLO - WHITE",
+   "handle": "hops-n-barley-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7261095854180",
+   "title": "HORIZON POLO - CORAL",
+   "handle": "horizon-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7116687573092",
+   "title": "HORIZON POLO - GREEN",
+   "handle": "horizon-polo-green",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7116686786660",
+   "title": "HORIZON POLO - GREY",
+   "handle": "horizon-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7116685639780",
+   "title": "HORIZON POLO - NAVY",
+   "handle": "horizon-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7261095624804",
+   "title": "HORIZON POLO - PINK",
+   "handle": "horizon-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7261095723108",
+   "title": "HORIZON POLO - SAGE",
+   "handle": "horizon-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7116688621668",
+   "title": "HORIZON POLO - WHITE",
+   "handle": "horizon-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7763888439396",
+   "title": "INKED POLO - SAGE",
+   "handle": "inked-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8071330267236",
+   "title": "KADEN POLO - BLUE",
+   "handle": "kaden-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027907260516",
+   "title": "KAPALUA POLO - BLUE",
+   "handle": "kapalua-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027907391588",
+   "title": "KAPALUA POLO - GREY",
+   "handle": "kapalua-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027907326052",
+   "title": "KAPALUA POLO - JADE",
+   "handle": "kapalua-polo-jade",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8071156695140",
+   "title": "KAPALUA POLO - MINT",
+   "handle": "kapalua-polo-tiffany",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8071156465764",
+   "title": "KAPALUA POLO - NAVY",
+   "handle": "kapalua-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027907194980",
+   "title": "KAPALUA POLO - PINK",
+   "handle": "kapalua-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8071156596836",
+   "title": "KAPALUA POLO - SAGE",
+   "handle": "kapalua-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911494844516",
+   "title": "KENNY POLO - BLACK",
+   "handle": "kenny-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911494942820",
+   "title": "KENNY POLO - DENIM",
+   "handle": "kenny-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911494778980",
+   "title": "KENNY POLO - GREEN",
+   "handle": "kenny-polo-green",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911494910052",
+   "title": "KENNY POLO - JADE",
+   "handle": "kenny-polo-jade",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911494811748",
+   "title": "KENNY POLO - NAVY",
+   "handle": "kenny-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911494877284",
+   "title": "KENNY POLO - WHITE",
+   "handle": "kenny-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7650090385508",
+   "title": "LEADER LONG SLEEVE POLO - WHITE/TEAL",
+   "handle": "leader-long-sleeve-polo-white-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7473200169060",
+   "title": "LEADER POLO - BLACK",
+   "handle": "leader-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7473199906916",
+   "title": "LEADER POLO - BLUE",
+   "handle": "leader-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7473200267364",
+   "title": "LEADER POLO - CHARCOAL",
+   "handle": "leader-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7473199612004",
+   "title": "LEADER POLO - NAVY",
+   "handle": "leader-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7473200562276",
+   "title": "LEADER POLO - SAGE",
+   "handle": "leader-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7473200365668",
+   "title": "LEADER POLO - WHITE",
+   "handle": "leader-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107374444644",
+   "title": "LEAVES POLO - BLUE",
+   "handle": "leaves-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107374280804",
+   "title": "LEAVES POLO - CHARCOAL",
+   "handle": "leaves-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107373985892",
+   "title": "LEAVES POLO - CORAL",
+   "handle": "leaves-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107373592676",
+   "title": "LEAVES POLO - NAVY",
+   "handle": "leaves-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8016075456612",
+   "title": "LEGACY POLO - BLACK",
+   "handle": "legacy-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8016076013668",
+   "title": "LEGACY POLO - BLUE",
+   "handle": "legacy-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8016075784292",
+   "title": "LEGACY POLO - CHARCOAL",
+   "handle": "legacy-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8016075882596",
+   "title": "LEGACY POLO - GREY",
+   "handle": "legacy-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8610420424804",
+   "title": "LEGACY POLO - GREY STONE",
+   "handle": "legacy-polo-grey-1",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8016075620452",
+   "title": "LEGACY POLO - NAVY",
+   "handle": "legacy-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8016076177508",
+   "title": "LEGACY POLO - PINK",
+   "handle": "legacy-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8016076111972",
+   "title": "LEGACY POLO - RED",
+   "handle": "legacy-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8016076275812",
+   "title": "LEGACY POLO - SAGE",
+   "handle": "legacy-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8016076374116",
+   "title": "LEGACY POLO - WHITE",
+   "handle": "legacy-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292704157796",
+   "title": "LINKS EDITION POLO - BLACK",
+   "handle": "links-edition-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292703928420",
+   "title": "LINKS EDITION POLO - CORAL",
+   "handle": "links-edition-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292703797348",
+   "title": "LINKS EDITION POLO - DENIM",
+   "handle": "links-edition-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292704059492",
+   "title": "LINKS EDITION POLO - LAVENDER",
+   "handle": "links-edition-polo-lavender",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292703666276",
+   "title": "LINKS EDITION POLO - NAVY",
+   "handle": "links-edition-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292703371364",
+   "title": "LINKS EDITION POLO - WHITE",
+   "handle": "links-edition-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8151976411236",
+   "title": "MARQUEZ POLO - WHITE",
+   "handle": "marquez-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027894841444",
+   "title": "MATISSE POLO - BLACK",
+   "handle": "matisse-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027894284388",
+   "title": "MATISSE POLO - TEAL",
+   "handle": "matisse-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7978704961636",
+   "title": "NAPA POLO - NAVY",
+   "handle": "napa-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7978705092708",
+   "title": "NAPA POLO - PINK",
+   "handle": "napa-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8332439847012",
+   "title": "NAPA POLO - WHITE",
+   "handle": "napa-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8169506078820",
+   "title": "NAVIGATOR POLO - CORAL",
+   "handle": "navigator-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8169500967012",
+   "title": "NAVIGATOR POLO - LAVENDER",
+   "handle": "navigator-polo-lavender",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8169508339812",
+   "title": "NAVIGATOR POLO - MINT",
+   "handle": "navigator-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8169497526372",
+   "title": "NAVIGATOR POLO - WHITE",
+   "handle": "navigator-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027896152164",
+   "title": "NEON DESERT POLO - BLACK",
+   "handle": "neon-desert-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027895955556",
+   "title": "NEON DESERT POLO - NAVY",
+   "handle": "neon-desert-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420284010596",
+   "title": "NEON TROPIC POLO - BLUE",
+   "handle": "neon-tropic-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080437313636",
+   "title": "NIVARA POLO - NAVY",
+   "handle": "nivara-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500993790052",
+   "title": "OPEN POLO - BLUE",
+   "handle": "open-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500993232996",
+   "title": "OPEN POLO - GREY",
+   "handle": "open-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500994248804",
+   "title": "OPEN POLO - NAVY",
+   "handle": "open-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500993953892",
+   "title": "OPEN POLO - WHITE",
+   "handle": "open-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468643250276",
+   "title": "OPLO POLO - BLACK",
+   "handle": "oplo-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468643381348",
+   "title": "OPLO POLO - BLUE",
+   "handle": "oplo-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468643119204",
+   "title": "OPLO POLO - MULBERRY",
+   "handle": "oplo-polo-mulberry",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468643184740",
+   "title": "OPLO POLO - NAVY",
+   "handle": "oplo-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468637679716",
+   "title": "OPLO POLO - STONE",
+   "handle": "oplo-polo-stone",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468643315812",
+   "title": "OPLO POLO - WHITE",
+   "handle": "oplo-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911037403236",
+   "title": "ORIENT POLO - BLACK",
+   "handle": "orient-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911038681188",
+   "title": "ORIENT POLO - BLUE",
+   "handle": "orient-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911039008868",
+   "title": "ORIENT POLO - CHARCOAL",
+   "handle": "orient-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911040221284",
+   "title": "ORIENT POLO - CORAL",
+   "handle": "orient-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911039696996",
+   "title": "ORIENT POLO - LAVENDER",
+   "handle": "orient-polo-lavendar",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911038386276",
+   "title": "ORIENT POLO - NAVY",
+   "handle": "orient-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7911039926372",
+   "title": "ORIENT POLO - SAGE",
+   "handle": "orient-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8468783530084",
+   "title": "ORIENT POLO - WHITE",
+   "handle": "orient-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8169495593060",
+   "title": "PALM POLO - MINT",
+   "handle": "palm-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8169495691364",
+   "title": "PALM POLO - WHITE",
+   "handle": "palm-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068434788452",
+   "title": "PALMLINE POLO - BURGUNDY",
+   "handle": "palmline-polo-burgundy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8151987978340",
+   "title": "PANDA POLO - MINT",
+   "handle": "panda-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896859672676",
+   "title": "PANEL POLO - BLACK",
+   "handle": "panel-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896858853476",
+   "title": "PANEL POLO - BLUE",
+   "handle": "panel-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8056626085988",
+   "title": "PANEL POLO - DENIM / WHITE",
+   "handle": "panel-polo-denim-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467913113700",
+   "title": "PANEL POLO - GREEN",
+   "handle": "panel-polo-green",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896859279460",
+   "title": "PANEL POLO - NAVY",
+   "handle": "panel-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8056625922148",
+   "title": "PANEL POLO - NAVY / RED",
+   "handle": "panel-polo-navy-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467913080932",
+   "title": "PANEL POLO - PURPLE",
+   "handle": "panel-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896859902052",
+   "title": "PANEL POLO - SAGE",
+   "handle": "panel-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8056625987684",
+   "title": "PANEL POLO - SAGE / WHITE",
+   "handle": "panel-polo-sage-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467913048164",
+   "title": "PANEL POLO - STONE",
+   "handle": "panel-polo-stone",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070498582628",
+   "title": "PARALLEL POLO - DENIM",
+   "handle": "parallel-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070498254948",
+   "title": "PARALLEL POLO - GREY",
+   "handle": "parallel-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070499696740",
+   "title": "PARALLEL POLO - LIME",
+   "handle": "parallel-polo-lime",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070497828964",
+   "title": "PARALLEL POLO - NAVY",
+   "handle": "parallel-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070498975844",
+   "title": "PARALLEL POLO - SAGE",
+   "handle": "parallel-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8107369562212",
+   "title": "PARTINI POLO - LAVENDER",
+   "handle": "partini-polo-lavender",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7507575308388",
+   "title": "PEAK POLO - GREY",
+   "handle": "peak-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7507578421348",
+   "title": "PEAK POLO - RED",
+   "handle": "peak-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070437568612",
+   "title": "PENTA POLO - BLACK",
+   "handle": "penta-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070437470308",
+   "title": "PENTA POLO - NAVY",
+   "handle": "penta-polo-navy-1",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8070437601380",
+   "title": "PENTA POLO - SAGE",
+   "handle": "penta-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8074914398308",
+   "title": "PENTA POLO - WHITE",
+   "handle": "penta-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078121435236",
+   "title": "PHILA POLO - SAGE",
+   "handle": "phila-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7262098456676",
+   "title": "PINEAPPLE SKULLZ 2.0 POLO - BLACK",
+   "handle": "pineapple-skulls-2-0-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7262098620516",
+   "title": "PINEAPPLE SKULLZ 2.0 POLO - NAVY",
+   "handle": "pineapple-skulls-2-0-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7339738169444",
+   "title": "PINEAPPLE SKULLZ 2.0 POLO - NAVY / CORAL",
+   "handle": "pineapple-skulls-2-0-polo-navy-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7339734597732",
+   "title": "PINEAPPLE SKULLZ 2.0 POLO - NAVY / ORANGE",
+   "handle": "pineapple-skulls-2-0-polo-navy-orange",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7243928600676",
+   "title": "PINEAPPLE SKULLZ POLO - BLACK / PINK",
+   "handle": "pineapple-skull-polo-3",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7179756240996",
+   "title": "PINEAPPLE SKULLZ POLO - BLACK/ ORANGE",
+   "handle": "pineapple-skull-polo-black-orange",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7179755847780",
+   "title": "PINEAPPLE SKULLZ POLO - BLUE / ORANGE",
+   "handle": "pineapple-skull-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7243928830052",
+   "title": "PINEAPPLE SKULLZ POLO - NAVY / LIME",
+   "handle": "pineapple-skull-polo-4",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944868495460",
+   "title": "PINNACLE POLO - BLACK",
+   "handle": "pinnacle-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944868397156",
+   "title": "PINNACLE POLO - BLUE",
+   "handle": "pinnacle-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068372725860",
+   "title": "PINNACLE POLO - BURGUNDY",
+   "handle": "pinnacle-polo-burgundy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068373512292",
+   "title": "PINNACLE POLO - CHOCOLATE",
+   "handle": "pinnacle-polo-chocolate",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944868429924",
+   "title": "PINNACLE POLO - CORAL",
+   "handle": "pinnacle-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8178008359012",
+   "title": "PINNACLE POLO - NAVY",
+   "handle": "pinnacle-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944868462692",
+   "title": "PINNACLE POLO - SAGE",
+   "handle": "pinnacle-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944868364388",
+   "title": "PINNACLE POLO - TEAL",
+   "handle": "pinnacle-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8178007933028",
+   "title": "PINNACLE POLO - WHITE",
+   "handle": "pinnacle-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068410376292",
+   "title": "PINNACLE PRIME - BLACK",
+   "handle": "pinnacle-prime-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068412244068",
+   "title": "PINNACLE PRIME - BLUE",
+   "handle": "pinnacle-prime-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068412735588",
+   "title": "PINNACLE PRIME - CORAL",
+   "handle": "pinnacle-prime-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068413292644",
+   "title": "PINNACLE PRIME - SAGE",
+   "handle": "pinnacle-prime-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292218175588",
+   "title": "PLAYERS POLO - MULBERRY",
+   "handle": "players-polo-mulberry",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7764264484964",
+   "title": "PLAYERS POLO - PURPLE",
+   "handle": "players-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7764264812644",
+   "title": "PLAYERS POLO - TEAL",
+   "handle": "players-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762880888932",
+   "title": "PLAYOFF POLO - BLUE",
+   "handle": "playoff-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762880856164",
+   "title": "PLAYOFF POLO - NAVY",
+   "handle": "playoff-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762880757860",
+   "title": "PLAYOFF POLO - RED",
+   "handle": "playoff-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762880921700",
+   "title": "PLAYOFF POLO - SAGE",
+   "handle": "playoff-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7762880790628",
+   "title": "PLAYOFF POLO - WHITE",
+   "handle": "playoff-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7878760431716",
+   "title": "POPPY POLO - GREY",
+   "handle": "poppy-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7878759972964",
+   "title": "POPPY POLO - WHITE",
+   "handle": "poppy-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701407039588",
+   "title": "PRIME PIQUE POLO - BLACK",
+   "handle": "prime-pique-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701406220388",
+   "title": "PRIME PIQUE POLO - BLUE",
+   "handle": "prime-pique-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701406482532",
+   "title": "PRIME PIQUE POLO - MINT",
+   "handle": "prime-pique-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701405859940",
+   "title": "PRIME PIQUE POLO - NAVY",
+   "handle": "prime-pique-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8108074500196",
+   "title": "PRIME PIQUE POLO - ORANGE",
+   "handle": "prime-pique-polo-orange",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701407170660",
+   "title": "PRIME PIQUE POLO - WHITE",
+   "handle": "prime-pique-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7245114703972",
+   "title": "PRIME POLO - BLACK",
+   "handle": "prime-polo-1",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420280471652",
+   "title": "PRIME POLO - LEMON/YELLOW",
+   "handle": "prime-polo-lemon",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7245115785316",
+   "title": "PRIME POLO - NAVY",
+   "handle": "prime-polo-2",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7245119258724",
+   "title": "PRIME POLO - RED",
+   "handle": "prime-polo-5",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7420279947364",
+   "title": "PRIME POLO - SAGE",
+   "handle": "prime-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7245115981924",
+   "title": "PRIME POLO - WHITE",
+   "handle": "prime-polo-3",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7764266582116",
+   "title": "PRINT-TEK POLO - LIME",
+   "handle": "print-tek-polo-lime",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078126481508",
+   "title": "REPHYNE POLO - BLUE",
+   "handle": "rephyne-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8116070776932",
+   "title": "REPHYNE POLO - CORAL",
+   "handle": "rephyne-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078127235172",
+   "title": "REPHYNE POLO - NAVY",
+   "handle": "rephyne-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8116092862564",
+   "title": "REPHYNE POLO - PINK",
+   "handle": "rephyne-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8116070613092",
+   "title": "REPHYNE POLO - PURPLE",
+   "handle": "rephyne-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078127399012",
+   "title": "REPHYNE POLO - SAGE",
+   "handle": "rephyne-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8104341733476",
+   "title": "RIBBED PRIME POLO - DENIM",
+   "handle": "ribbed-prime-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8102581960804",
+   "title": "RIBBED PRIME POLO - MULBERRY",
+   "handle": "ribbed-prime-polo-mulberry",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8104343928932",
+   "title": "RIBBED PRIME POLO - NAVY",
+   "handle": "ribbed-prime-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8104345272420",
+   "title": "RIBBED PRIME POLO - RED",
+   "handle": "ribbed-prime-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8104344551524",
+   "title": "RIBBED PRIME POLO - SAGE",
+   "handle": "ribbed-prime-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8104343208036",
+   "title": "RIBBED PRIME POLO - WHITE",
+   "handle": "ribbed-prime-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8102585303140",
+   "title": "ROTOR POLO - CHARCOAL",
+   "handle": "rotor-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8102585434212",
+   "title": "ROTOR POLO - NAVY",
+   "handle": "rotor-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8102584385636",
+   "title": "ROTOR POLO - SAGE",
+   "handle": "rotor-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8016048619620",
+   "title": "SANTA FE POLO - LAVENDER",
+   "handle": "santa-fe-polo-lavendar",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8016048324708",
+   "title": "SANTA FE POLO - MULBERRY",
+   "handle": "santa-fe-polo-mulberry",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8178014388324",
+   "title": "SILURO POLO - BLACK",
+   "handle": "siluro-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8071361003620",
+   "title": "SILURO POLO - BLUE",
+   "handle": "siluro-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8570198982756",
+   "title": "SILURO POLO - BRIGHT PINK",
+   "handle": "siluro-polo-bright-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8474114916452",
+   "title": "SILURO POLO - GREY",
+   "handle": "siluro-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8071360741476",
+   "title": "SILURO POLO - MINT",
+   "handle": "siluro-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8178014486628",
+   "title": "SILURO POLO - NAVY",
+   "handle": "siluro-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8071361069156",
+   "title": "SILURO POLO - PINK",
+   "handle": "siluro-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8178014617700",
+   "title": "SILURO POLO - RED",
+   "handle": "siluro-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8178014290020",
+   "title": "SILURO POLO - WHITE",
+   "handle": "siluro-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078095908964",
+   "title": "SIX GRID POLO - BLUE",
+   "handle": "six-grid-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078096138340",
+   "title": "SIX GRID POLO - JADE",
+   "handle": "six-grid-polo-jade",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078096072804",
+   "title": "SIX GRID POLO - LAVENDER",
+   "handle": "six-grid-polo-lavender",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8078096367716",
+   "title": "SIX GRID POLO - NAVY",
+   "handle": "six-grid-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8062605459556",
+   "title": "SKETCH SHOT POLO - BLUE",
+   "handle": "sketch-shot-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8062609195108",
+   "title": "SKETCH SHOT POLO - GREY",
+   "handle": "sketch-shot-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8062610210916",
+   "title": "SKETCH SHOT POLO - SAGE",
+   "handle": "sketch-shot-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080303194212",
+   "title": "SKETRA POLO - NAVY",
+   "handle": "sketra-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080302932068",
+   "title": "SKETRA POLO - WHITE",
+   "handle": "sketra-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068381868132",
+   "title": "SLATE POLO - CHARCOAL",
+   "handle": "slate-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944869314660",
+   "title": "SOLITAIRE POLO - BLACK",
+   "handle": "solitare-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944869412964",
+   "title": "SOLITAIRE POLO - NAVY",
+   "handle": "solitare-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944869576804",
+   "title": "SOLITAIRE POLO - PINK",
+   "handle": "solitare-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944869478500",
+   "title": "SOLITAIRE POLO - SAGE",
+   "handle": "solitare-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944869347428",
+   "title": "SOLITAIRE POLO - WHITE",
+   "handle": "solitare-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292699996260",
+   "title": "SPARK POLO - BLUE",
+   "handle": "spark-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292700094564",
+   "title": "SPARK POLO - CHARCOAL",
+   "handle": "spark-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292696391780",
+   "title": "SPARK POLO - NAVY",
+   "handle": "spark-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8292699865188",
+   "title": "SPARK POLO - WHITE",
+   "handle": "spark-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7763953746020",
+   "title": "SPEED POLO - SAGE",
+   "handle": "speed-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7763953221732",
+   "title": "SPEED POLO - WHITE",
+   "handle": "speed-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7764264321124",
+   "title": "SPRING POLO - BLACK",
+   "handle": "spring-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7764264157284",
+   "title": "SPRING POLO - NAVY",
+   "handle": "spring-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7764263960676",
+   "title": "SPRING POLO - PINK",
+   "handle": "spring-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7764264222820",
+   "title": "SPRING POLO - TEAL",
+   "handle": "spring-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7650089893988",
+   "title": "STRIPE PERFORMANCE LONG SLEEVE POLO - SAGE",
+   "handle": "stripe-performance-long-sleeve-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7650089926756",
+   "title": "STRIPE PERFORMANCE LONG SLEEVE POLO - WHITE",
+   "handle": "stripe-performance-long-sleeve-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080290971748",
+   "title": "STRIPE PERFORMANCE POLO - BLACK",
+   "handle": "stripe-performance-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080288579684",
+   "title": "STRIPE PERFORMANCE POLO - BLUE",
+   "handle": "stripe-performance-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8122574078052",
+   "title": "STRIPE PERFORMANCE POLO - CHARCOAL",
+   "handle": "stripe-performance-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080291102820",
+   "title": "STRIPE PERFORMANCE POLO - CORAL",
+   "handle": "stripe-performance-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8122551402596",
+   "title": "STRIPE PERFORMANCE POLO - DENIM",
+   "handle": "stripe-performance-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8122552746084",
+   "title": "STRIPE PERFORMANCE POLO - GOLD",
+   "handle": "stripe-performance-polo-gold",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7260953378916",
+   "title": "STRIPE PERFORMANCE POLO - PINK / BLACK",
+   "handle": "stripe-performance-polo-pink-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080290873444",
+   "title": "STRIPE PERFORMANCE POLO - SAGE",
+   "handle": "stripe-performance-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7260953608292",
+   "title": "STRIPE PERFORMANCE POLO - SAGE / CHARCOAL",
+   "handle": "stripe-performance-polo-sage-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8122552451172",
+   "title": "STRIPE PERFORMANCE POLO - TEAL",
+   "handle": "stripe-performance-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896857313380",
+   "title": "STRIPE POLO - LIME",
+   "handle": "stripe-polo-lime",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896857084004",
+   "title": "STRIPE POLO - NAVY",
+   "handle": "stripe-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276525776996",
+   "title": "STRIPE POLO - ORANGE",
+   "handle": "stripe-polo-orange",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7896857477220",
+   "title": "STRIPE POLO - PINK",
+   "handle": "stripe-polo-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8276525842532",
+   "title": "STRIPE POLO - WHITE",
+   "handle": "stripe-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7701397569636",
+   "title": "STROKE POLO - WHITE",
+   "handle": "stroke-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500989923428",
+   "title": "TECH DROP POLO - BLACK",
+   "handle": "tech-drop-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068335698020",
+   "title": "TECH DROP POLO - BURGUNDY",
+   "handle": "tech-drop-polo-burgundy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8068335599716",
+   "title": "TECH DROP POLO - DENIM",
+   "handle": "tech-drop-polo-denim",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500991463524",
+   "title": "TECH DROP POLO - GREEN",
+   "handle": "tech-drop-polo-green",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500990906468",
+   "title": "TECH DROP POLO - GREY",
+   "handle": "tech-drop-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500991103076",
+   "title": "TECH DROP POLO - NAVY",
+   "handle": "tech-drop-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8627394216036",
+   "title": "TECH DROP POLO - TEAL",
+   "handle": "tech-drop-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7500991037540",
+   "title": "TECH DROP POLO - WHITE",
+   "handle": "tech-drop-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514810118244",
+   "title": "TEE 2.0 POLO - BLACK",
+   "handle": "tee-2-0-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514800877668",
+   "title": "TEE 2.0 POLO - BLUE",
+   "handle": "tee-2-0-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514810642532",
+   "title": "TEE 2.0 POLO - GREY",
+   "handle": "tee-2-0-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514808414308",
+   "title": "TEE 2.0 POLO - NAVY",
+   "handle": "tee-2-0-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514808807524",
+   "title": "TEE 2.0 POLO - PURPLE",
+   "handle": "tee-2-0-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8514809462884",
+   "title": "TEE 2.0 POLO - WHITE",
+   "handle": "tee-2-0-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141751189604",
+   "title": "TERAZZO POLO - BLUE",
+   "handle": "terazzo-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141757087844",
+   "title": "TERAZZO POLO - PURPLE",
+   "handle": "terazzo-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141752959076",
+   "title": "TERAZZO POLO - TEAL",
+   "handle": "terazzo-polo-teal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8151896621156",
+   "title": "TERRA POLO - BLACK",
+   "handle": "terra-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8151893868644",
+   "title": "TERRA POLO - BLUE",
+   "handle": "terra-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8151904551012",
+   "title": "TERRA POLO - CORAL",
+   "handle": "terra-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8151907827812",
+   "title": "TERRA POLO - MINT",
+   "handle": "terra-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8151900029028",
+   "title": "TERRA POLO - WHITE",
+   "handle": "terra-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7888950984804",
+   "title": "THE 19TH POLO - BLUE",
+   "handle": "the-19th-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7888952000612",
+   "title": "THE 19TH POLO - PURPLE",
+   "handle": "the-19th-polo-purple",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7888950526052",
+   "title": "THE 19TH POLO - SAGE",
+   "handle": "the-19th-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7888950788196",
+   "title": "THE 19TH POLO - WHITE",
+   "handle": "the-19th-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7262097244260",
+   "title": "TIKI POLO - BLUE / YELLOW",
+   "handle": "tiki-polo-blue-yellow",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7262097735780",
+   "title": "TIKI POLO - CHARCOAL / ORANGE",
+   "handle": "tiki-polo-charcoal-orange",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7339798036580",
+   "title": "TIKI POLO - CHARCOAL / RED",
+   "handle": "tiki-polo-charcoal-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7339797381220",
+   "title": "TIKI POLO - NAVY / ORANGE",
+   "handle": "tiki-polo-navy-orange",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7262097506404",
+   "title": "TIKI POLO - NAVY / PINK",
+   "handle": "tiki-polo-navy-pink",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8062620336228",
+   "title": "TOREZ POLO - GREY",
+   "handle": "torez-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8139625988196",
+   "title": "TOREZ POLO - NAVY",
+   "handle": "torez-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8062621384804",
+   "title": "TOREZ POLO - SAGE",
+   "handle": "torez-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8052292812900",
+   "title": "TOUR TEAM POLO - BLACK",
+   "handle": "tour-team-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8052292845668",
+   "title": "TOUR TEAM POLO - BLUE",
+   "handle": "tour-team-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7763903873124",
+   "title": "TOUR TEAM POLO - CHARCOAL",
+   "handle": "tour-team-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7763904069732",
+   "title": "TOUR TEAM POLO - NAVY",
+   "handle": "tour-team-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7763904233572",
+   "title": "TOUR TEAM POLO - RED",
+   "handle": "tour-team-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7763904168036",
+   "title": "TOUR TEAM POLO - SAGE",
+   "handle": "tour-team-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7763904004196",
+   "title": "TOUR TEAM POLO - WHITE",
+   "handle": "tour-team-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027890745444",
+   "title": "TRIGG POLO - BLUE",
+   "handle": "trigg-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027890483300",
+   "title": "TRIGG POLO - CORAL",
+   "handle": "trigg-polo-coral",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027890516068",
+   "title": "TRIGG POLO - MINT",
+   "handle": "trigg-polo-mint",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8027890614372",
+   "title": "TRIGG POLO - WHITE",
+   "handle": "trigg-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7944867840100",
+   "title": "TRIGGER POLO - SAGE",
+   "handle": "trigger-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7817613377636",
+   "title": "TWILIGHT POLO - CHARCOAL",
+   "handle": "twilight-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7817612886116",
+   "title": "TWILIGHT POLO - NAVY",
+   "handle": "twilight-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7817614557284",
+   "title": "TWILIGHT POLO - SAGE",
+   "handle": "twilight-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141777076324",
+   "title": "TWIST POLO - BLUE",
+   "handle": "twist-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141777043556",
+   "title": "TWIST POLO - CHARCOAL",
+   "handle": "twist-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141776978020",
+   "title": "TWIST POLO - GREY",
+   "handle": "twist-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141771702372",
+   "title": "TWIST POLO - NAVY",
+   "handle": "twist-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8141777633380",
+   "title": "TWIST POLO - RED",
+   "handle": "twist-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8071374635108",
+   "title": "VENTO POLO - CHARCOAL/ BLACK",
+   "handle": "vento-polo-charcoal-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467912917092",
+   "title": "VENTO POLO - GREY/ CHARCOAL",
+   "handle": "vento-polo-grey-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8071375913060",
+   "title": "VENTO POLO - MULBERRY/WHITE",
+   "handle": "vento-polo-mulberry-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8071375192164",
+   "title": "VENTO POLO - NAVY/ BLUE",
+   "handle": "vento-polo-navy-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467912884324",
+   "title": "VENTO POLO - NAVY/ WHITE",
+   "handle": "vento-polo-navy-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467912851556",
+   "title": "VENTO POLO - PURPLE/ WHITE",
+   "handle": "vento-polo-purple-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467912327268",
+   "title": "VENTO POLO - STONE/ WHITE",
+   "handle": "vento-polo-stone-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8071375421540",
+   "title": "VENTO POLO - WHITE/ BLUE",
+   "handle": "vento-polo-white-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467912818788",
+   "title": "VENTO POLO - WHITE/ LIME",
+   "handle": "vento-polo-white-lime",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8467919175780",
+   "title": "VENTO POLO - WHITE/ ORANGE",
+   "handle": "vento-polo-white-orange",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8015991111780",
+   "title": "WAVEFORM POLO - BLACK",
+   "handle": "waveform-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8015991439460",
+   "title": "WAVEFORM POLO - BLUE",
+   "handle": "waveform-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8015991210084",
+   "title": "WAVEFORM POLO - CHARCOAL",
+   "handle": "waveform-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8015990685796",
+   "title": "WAVEFORM POLO - NAVY",
+   "handle": "waveform-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8015991275620",
+   "title": "WAVEFORM POLO - SAGE",
+   "handle": "waveform-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8015991341156",
+   "title": "WAVEFORM POLO - WHITE",
+   "handle": "waveform-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7859143311460",
+   "title": "WAVES POLO - BLUE",
+   "handle": "waves-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7878694273124",
+   "title": "XO POLO - BLUE",
+   "handle": "xo-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7878695649380",
+   "title": "XO POLO - GREY",
+   "handle": "xo-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7878693748836",
+   "title": "XO POLO - NAVY",
+   "handle": "xo-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7878694797412",
+   "title": "XO POLO - RED",
+   "handle": "xo-polo-red",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7878695157860",
+   "title": "XO POLO - SAGE",
+   "handle": "xo-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/7878688800868",
+   "title": "XO POLO - WHITE",
+   "handle": "xo-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080442982500",
+   "title": "ZED Z POLO - BLACK",
+   "handle": "zed-z-polo-black",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080443244644",
+   "title": "ZED Z POLO - CHARCOAL",
+   "handle": "zed-z-polo-charcoal",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080443113572",
+   "title": "ZED Z POLO - GREY",
+   "handle": "zed-z-polo-grey",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080442720356",
+   "title": "ZED Z POLO - NAVY",
+   "handle": "zed-z-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080443342948",
+   "title": "ZED Z POLO - SAGE",
+   "handle": "zed-z-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": false,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080450060388",
+   "title": "ZENVORA POLO - BLUE",
+   "handle": "zenvora-polo-blue",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080448421988",
+   "title": "ZENVORA POLO - NAVY",
+   "handle": "zenvora-polo-navy",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080448258148",
+   "title": "ZENVORA POLO - SAGE",
+   "handle": "zenvora-polo-sage",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  },
+  {
+   "id": "gid://shopify/Product/8080449929316",
+   "title": "ZENVORA POLO - WHITE",
+   "handle": "zenvora-polo-white",
+   "productType": "POLOS",
+   "live_theme_stamps": true,
+   "unpublished_theme_stamps": true,
+   "tags_relevant": [
+    "bundle_threepolo"
+   ]
+  }
+ ]
+}

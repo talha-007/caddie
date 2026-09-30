@@ -2392,3 +2392,114 @@
   background: rgba(var(--caddie-accent-rgb), 0.18);
 }
 
+
+/*
+ * Smart Cart preview (copied theme only): a deal card above the basket. The
+ * customer sees the deal, how far along they are, and what is left - the
+ * tester's line only with data-smart-cart-debug. Read-only; see lib/smartCart.ts.
+ */
+.caddie-smartcart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.caddie-deal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(var(--caddie-accent-rgb), 0.25);
+  border-radius: var(--caddie-radius);
+  background: var(--caddie-accent-soft);
+}
+.caddie-deal--close {
+  border-color: var(--caddie-accent);
+  box-shadow: 0 0 0 1px var(--caddie-accent) inset;
+}
+.caddie-deal--done {
+  border-color: var(--caddie-accent-strong);
+  background: var(--caddie-accent-strong);
+  color: var(--caddie-accent-fg);
+}
+.caddie-deal__top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.caddie-deal__dots {
+  display: inline-flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.caddie-deal__dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1.5px solid var(--caddie-accent);
+  background: transparent;
+}
+.caddie-deal__dot--on {
+  background: var(--caddie-accent);
+}
+.caddie-deal--done .caddie-deal__dot {
+  border-color: var(--caddie-accent-fg);
+}
+.caddie-deal--done .caddie-deal__dot--on {
+  background: var(--caddie-accent-fg);
+}
+.caddie-deal__title {
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--caddie-accent-strong);
+}
+.caddie-deal--done .caddie-deal__title {
+  color: var(--caddie-accent-fg);
+}
+.caddie-deal__price {
+  font-weight: 600;
+}
+.caddie-deal__message {
+  margin: 0;
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.caddie-deal__note {
+  margin: 0;
+  font-size: 0.85em;
+  opacity: 0.85;
+}
+.caddie-deal__action {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--caddie-accent);
+  color: var(--caddie-accent-fg);
+  font: inherit;
+  font-size: 0.88em;
+  font-weight: 600;
+  cursor: pointer;
+}
+.caddie-deal__action:hover {
+  background: var(--caddie-accent-strong);
+}
+.caddie-deal__action:focus-visible {
+  outline: 2px solid var(--caddie-accent-strong);
+  outline-offset: 2px;
+}
+.caddie-smartcart__debug {
+  padding: 8px 10px;
+  border: 1px dashed var(--caddie-line-strong);
+  border-radius: 6px;
+  font-size: 0.72em;
+  color: var(--caddie-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.caddie-smartcart__debug p {
+  margin: 0;
+}

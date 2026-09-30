@@ -26,6 +26,14 @@ export interface WidgetContext {
   productImage?: string;
   /** Hide the floating launcher when the theme places its own buttons. */
   showLauncher: boolean;
+  /**
+   * Smart Cart preview (offer progress in the basket screen). Off unless the
+   * theme's mount node says data-smart-cart-preview="true" - set only on the
+   * copied, unpublished theme while it is tested. The live theme never sets it.
+   */
+  smartCartPreview: boolean;
+  /** The tester's line under the preview (status, units, evaluation time): data-smart-cart-debug="true", and only with the preview on. */
+  smartCartDebug: boolean;
 }
 
 interface ShopifyMeta {
@@ -67,5 +75,7 @@ export function readPageContext(host: HTMLElement): WidgetContext {
     page,
     ...(image ? { productImage: image.startsWith('//') ? `https:${image}` : image } : {}),
     showLauncher: data.launcher !== 'false',
+    smartCartPreview: data.smartCartPreview === 'true',
+    smartCartDebug: data.smartCartPreview === 'true' && data.smartCartDebug === 'true',
   };
 }

@@ -4,6 +4,7 @@ import { productById } from '../catalog/sync.js';
 import { log } from '../lib/logger.js';
 import { noteShoppingConstraints } from '../session/focus.js';
 import { sessions, type CaddieSession, type CartOperationRecord } from '../session/store.js';
+import { evaluateSmartCart } from '../smartCart/index.js';
 
 /**
  * A basket change on the storefront is made by the widget, in the theme's
@@ -60,11 +61,29 @@ export function lineFingerprint(line: { properties?: Record<string, string> | nu
   return createHash('sha1').update(`${line.sellingPlanId ?? ''}|${canonical}`).digest('hex').slice(0, 16);
 }
 
+/** The lines of a widget's read the session will keep - the same ones for the basket and for Smart Cart. */
+function keptLines(lines: BasketSync['lines']): BasketSync['lines'] {
+  return lines.filter((line) => typeof line?.key === 'string' && typeof line?.productId === 'string').slice(0, 100);
+}
+
+/**
+ * Everything a fresh cart read sets on the session: the basket, and Smart
+ * Cart progress worked out from the same lines. The session's basket keeps
+ * only a fingerprint of each line's properties, so the triggers are read here,
+ * from the read itself, and never from a basket that could be older.
+ */
+export function basketPatch(lines: BasketSync['lines'], currency?: string): Pick<CaddieSession, 'basket' | 'smartCart' | 'cartCurrency'> {
+  const kept = keptLines(lines);
+  return {
+    basket: basketFromSync(kept),
+    ...(typeof currency === 'string' && /^[A-Za-z]{3}$/.test(currency) ? { cartCurrency: currency.toUpperCase() } : {}),
+    smartCart: evaluateSmartCart(kept.map((line) => ({ key: String(line.key), ...(line.variantId ? { variantId: numeric(String(line.variantId)) } : {}), quantity: Number(line.quantity) || 0, properties: line.properties ?? null }))),
+  };
+}
+
 /** The line as the session keeps it, from the widget's read: names from our own catalogue, never from the request. */
 export function basketFromSync(lines: BasketSync['lines']): NonNullable<CaddieSession['basket']> {
-  return lines
-    .filter((line) => typeof line?.key === 'string' && typeof line?.productId === 'string')
-    .slice(0, 100)
+  return keptLines(lines)
     .map((line) => {
       const product = productById(String(line.productId));
       const variant = product?.variants.find((entry) => numeric(entry.id) === numeric(String(line.variantId)));
@@ -245,11 +264,11 @@ export function judge(record: CartOperationRecord, report: Pick<CartOutcomeRepor
   const after = report.after.lines;
   const adds = record.expect.add ?? [];
   const removes = record.expect.remove ?? [];
-  // An add lands on the plain line of the variant (no properties, no plan), or merges into it.
-  const plain = lineFingerprint({});
   const addRose = adds.map((line) => {
-    const was = before ? lineQuantity(before, line.variantId, plain) : (beforeTotals[numeric(line.variantId)] ?? 0);
-    const is = lineQuantity(after, line.variantId, plain);
+    // An add lands on the line of the variant carrying exactly what it was sent with - no properties, or a Smart Cart trigger - or merges into it.
+    const landing = lineFingerprint({ properties: line.properties ?? {} });
+    const was = before ? lineQuantity(before, line.variantId, landing) : (beforeTotals[numeric(line.variantId)] ?? 0);
+    const is = lineQuantity(after, line.variantId, landing);
     const total = quantitiesOf(after)[numeric(line.variantId)] ?? 0;
     const wasTotal = beforeTotals[numeric(line.variantId)] ?? 0;
     return { rose: is - was >= line.quantity && total - wasTotal >= line.quantity, unchanged: is === was && total === wasTotal };
@@ -312,14 +331,14 @@ export async function settleOutcome(sessionId: string, report: CartOutcomeReport
   const verdict = judge(record, report, Date.now());
   // A report about an older operation never overwrites what a newer one settled: the basket and "last added" follow the newest only.
   const newest = Object.values(session.cartOperations ?? {}).every((other) => other.createdAt <= record.createdAt);
-  const basket = report.after && newest ? basketFromSync(report.after.lines) : undefined;
+  const fresh = report.after && newest ? basketPatch(report.after.lines, report.after.currency) : undefined;
   const pendingIsThis = session.pendingAction?.dispatched === record.id;
   log.info('cart.outcome', { sessionId, operationId: record.id, kind: record.kind, reported: report.status, verdict, error: report.error ?? null });
 
   if (verdict === 'uncertain') {
     await sessions.patch(sessionId, {
       cartOperations: { ...session.cartOperations, [record.id]: { ...record, status: 'uncertain', text: UNCERTAIN, ...(report.error ? { error: report.error } : {}) } },
-      ...(basket ? { basket } : {}),
+      ...(fresh ?? {}),
     });
     return { status: 'uncertain', text: UNCERTAIN, recheck: true };
   }
@@ -328,7 +347,7 @@ export async function settleOutcome(sessionId: string, report: CartOutcomeReport
   const resolved: CartOperationRecord = { ...record, status: verdict, text, resolvedAt: Date.now(), ...(report.error ? { error: report.error } : {}) };
   const patch: Partial<CaddieSession> = {
     cartOperations: { ...session.cartOperations, [record.id]: resolved },
-    ...(basket ? { basket } : {}),
+    ...(fresh ?? {}),
   };
   /*
    * One line of a batch: settled quietly, unless it is the last. Then the

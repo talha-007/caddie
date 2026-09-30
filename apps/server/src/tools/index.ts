@@ -45,6 +45,7 @@ import { describeIdentity, designMembers, identityProducts, resolveCustomerProdu
 import { colourMatch, coloursOffered, matchesColourText, parseColours, type ColourRequest } from '../catalog/colour.js';
 import { allDeals, type DealRecipe, type DealStep } from '../catalog/bundles.js';
 import { log } from '../lib/logger.js';
+import { triggerPropertiesFor } from '../smartCart/index.js';
 import { checkoutTotal, storefrontCartEnabled } from '../shopify/storefrontCart.js';
 import { colourwayName, garmentName, otherColourways } from '../catalog/colourways.js';
 import { allProducts, productById } from '../catalog/sync.js';
@@ -4287,6 +4288,15 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
 
   // On the storefront the basket is the theme's cart: the widget makes the change.
   if (ctx.session.cartMode === 'theme') {
+    /*
+     * Smart Cart, where the theme turned the preview on: a product that
+     * qualifies for an offer goes in carrying that offer's trigger, as the
+     * theme's own Add button writes it - so SupaEasy prices it as part of the
+     * offer, whichever way it was added. The rule is the theme's (tag or
+     * collection), never the product's name; no trigger means today's add.
+     */
+    const trigger = ctx.session.smartCartPreview ? triggerPropertiesFor(product.id) : undefined;
+    if (trigger) log.info('smart_cart.stamped', { sessionId: ctx.session.id, productId: product.id, variantId: numericId(variant.id), keys: Object.keys(trigger) });
     const outgoingLines = action.replaces
       ? (ctx.session.basket ?? []).filter(
           (line) => line.lineId === action.replaces || (sameProduct(line.productId, action.replaces ?? '') && !sameProduct(line.productId, product.id)),
@@ -4301,7 +4311,7 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
       actions: [
         {
           type: 'add',
-          lines: [{ variantId: numericId(variant.id), quantity }],
+          lines: [{ variantId: numericId(variant.id), quantity, ...(trigger ? { properties: trigger } : {}) }],
           ...(outgoingLines.length ? { removeKeys: outgoingLines.map((line) => line.lineId) } : {}),
         },
       ],
@@ -4315,7 +4325,7 @@ async function planAddProduct(ctx: ToolContext, action: CommerceAction, source: 
       operation: {
         kind: 'add-product',
         expect: {
-          add: [{ variantId: numericId(variant.id), quantity }],
+          add: [{ variantId: numericId(variant.id), quantity, ...(trigger ? { properties: trigger } : {}) }],
           ...(outgoingLines.length
             ? { remove: outgoingLines.map((line) => ({ key: line.lineId, variantId: numericId(outgoingVariantOf(line) ?? ''), quantity: line.quantity })) }
             : {}),

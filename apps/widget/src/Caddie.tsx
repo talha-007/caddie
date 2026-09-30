@@ -6,6 +6,7 @@ import { Home } from './components/Home.js';
 import { QuickStart, describeSizes } from './components/QuickStart.js';
 import { Launcher } from './components/Launcher.js';
 import { BasketPanel } from './components/panels/BasketPanel.js';
+import { SmartCartProgress } from './components/SmartCartProgress.js';
 import { ShopProvider, type Shop } from './components/ShopContext.js';
 import { SuggestionChips } from './components/SuggestionChips.js';
 import { Thread } from './components/Thread.js';
@@ -242,7 +243,20 @@ export function Caddie({ context }: { context: WidgetContext }) {
 
           <div className="caddie-body">
             {screen === 'basket' ? (
-              <BasketPanel cart={caddie.cart} />
+              <>
+                {/* Preview only: offer progress the server evaluated, above the basket it came from. */}
+                <SmartCartProgress
+                  view={caddie.smartCart}
+                  enabled={context.smartCartPreview}
+                  debug={context.smartCartDebug}
+                  onSuggest={(offerId) => {
+                    // The cards arrive in the thread: go there to see them.
+                    setScreen('chat');
+                    void caddie.suggestOffer(offerId);
+                  }}
+                />
+                <BasketPanel cart={caddie.cart} />
+              </>
             ) : empty ? (
               <Home
                 productTitle={context.page.productTitle}

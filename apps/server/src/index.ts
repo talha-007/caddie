@@ -3,6 +3,7 @@ import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { loadBestSellers } from './catalog/bestSellers.js';
 import { loadDeals } from './catalog/bundles.js';
+import { loadSmartCartCollections } from './smartCart/index.js';
 import { startCatalogueSync, stopCatalogueSync, syncCatalogue } from './catalog/sync.js';
 import { startSemanticIndex } from './catalog/semantic.js';
 import { verifyEnvironment } from './startupCheck.js';
@@ -150,6 +151,11 @@ if (isEntrypoint) {
     const refreshDeals = () => loadDeals().catch((err) => log.warn('deals.load_failed', { err: String(err) }));
     await refreshDeals();
     setInterval(refreshDeals, env.shopify.catalogueReconcileMs).unref?.();
+
+    // Which products the Smart Cart offers stamp by collection (trousers, shorts). Not worth failing boot over: until it lands, those are added unstamped - today's behaviour.
+    const refreshSmartCart = () => loadSmartCartCollections().catch((err) => log.warn('smart_cart.collections_failed', { err: String(err) }));
+    void refreshSmartCart();
+    setInterval(refreshSmartCart, env.shopify.catalogueReconcileMs).unref?.();
 
     // Best sellers, for "best picks". Sales rank moves slowly: every six hours, not per customer.
     const refreshBestSellers = () => loadBestSellers().catch((err) => log.warn('bestsellers.load_failed', { err: String(err) }));

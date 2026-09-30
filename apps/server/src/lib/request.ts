@@ -1,3 +1,4 @@
+import { SMART_CART_HEADER, SMART_CART_PREVIEW } from '@caddie/shared';
 import type { Request } from 'express';
 
 /**
@@ -21,18 +22,28 @@ export function clientKey(req: Request): string {
  * instead of keeping a basket of their own. Returns the session as it should
  * now be read, so a tool running in this same request sees the mode.
  */
-export async function noteCartMode<T extends { id: string; cartMode?: 'theme' | 'storefront'; widgetContract?: string }>(
+export async function noteCartMode<T extends { id: string; cartMode?: 'theme' | 'storefront'; widgetContract?: string; smartCartPreview?: boolean }>(
   req: Request,
   session: T,
-  patch: (id: string, change: { cartMode?: 'theme' | 'storefront'; widgetContract?: string }) => Promise<unknown>,
+  patch: (id: string, change: { cartMode?: 'theme' | 'storefront'; widgetContract?: string; smartCartPreview?: boolean }) => Promise<unknown>,
 ): Promise<T> {
   const header = req.get('x-caddie-cart');
   const mode = header === 'theme' ? 'theme' : header === 'storefront' ? 'storefront' : undefined;
   // And which basket-change contract the widget speaks (x-caddie-widget): an older widget sends none, and gets no change it cannot report on.
   const contract = (req.get('x-caddie-widget') ?? '').slice(0, 40) || undefined;
-  const change: { cartMode?: 'theme' | 'storefront'; widgetContract?: string } = {};
+  const change: { cartMode?: 'theme' | 'storefront'; widgetContract?: string; smartCartPreview?: boolean } = {};
   if (mode && session.cartMode !== mode) change.cartMode = mode;
   if (contract && session.widgetContract !== contract) change.widgetContract = contract;
+  /*
+   * Whether this widget's theme turned the Smart Cart preview on. Read on
+   * every request from a current widget, present or not: the same session
+   * moving from the copied theme to the live one must stop stamping offer
+   * triggers on the very next add.
+   */
+  if (contract) {
+    const preview = req.get(SMART_CART_HEADER) === SMART_CART_PREVIEW;
+    if (Boolean(session.smartCartPreview) !== preview) change.smartCartPreview = preview;
+  }
   if (!Object.keys(change).length) return session;
   await patch(session.id, change);
   return { ...session, ...change };

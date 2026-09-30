@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { Caddie } from './Caddie.js';
+import { setSmartCartPreview } from './lib/api.js';
 import { readPageContext } from './lib/context.js';
 import { parseOpenTarget, requestOpen, type OpenTarget } from './lib/events.js';
 import './styles.css';
@@ -47,7 +48,10 @@ function mount() {
 
   window.DruidsCaddie = { open: (target = 'home') => requestOpen(target) };
   wireThemeButtons();
-  createRoot(host).render(<Caddie context={readPageContext(host)} />);
+  const context = readPageContext(host);
+  // Before the first request: the server stamps offer triggers only for a widget that says the preview is on.
+  setSmartCartPreview(context.smartCartPreview);
+  createRoot(host).render(<Caddie context={context} />);
 }
 
 if (document.readyState === 'loading') {

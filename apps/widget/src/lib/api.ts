@@ -1,5 +1,7 @@
 import type {
   BasketSync,
+  BasketSyncResponse,
+  SmartCartSuggestResponse,
   CaddieAttachment,
   CaddieMessage,
   CardChoice,
@@ -17,7 +19,7 @@ import type {
   UiCartLineRequest,
   UiPackAddRequest,
 } from '@caddie/shared';
-import { CART_OPS_CONTRACT } from '@caddie/shared';
+import { CART_OPS_CONTRACT, SMART_CART_HEADER, SMART_CART_PREVIEW } from '@caddie/shared';
 import { onStorefront } from './themeCart.js';
 
 const BASE = (import.meta.env.VITE_CADDIE_API_URL ?? 'http://localhost:8787').replace(/\/$/, '');
@@ -82,6 +84,19 @@ async function unwrap<T>(res: Response): Promise<T> {
  */
 function cartHeader(): Record<string, string> {
   return { 'x-caddie-cart': onStorefront() ? 'theme' : 'storefront' };
+}
+
+/**
+ * Whether the theme turned the Smart Cart preview on (data-smart-cart-preview,
+ * lib/context.ts). Said on every request, so the server stamps offer triggers
+ * on the Caddie's adds only here - and stops the moment it is not said.
+ */
+let smartCartPreview = false;
+export function setSmartCartPreview(on: boolean): void {
+  smartCartPreview = on;
+}
+function smartCartHeader(): Record<string, string> {
+  return smartCartPreview ? { [SMART_CART_HEADER]: SMART_CART_PREVIEW } : {};
 }
 
 /* ---------------- the session's own capability ---------------- */
@@ -220,7 +235,7 @@ async function authed(sessionId: string, path: string, init: RequestInit & { hea
   const send = async (id: string) => {
     const target = retarget(path, init, sessionId, id);
     const token = await sessionToken(id);
-    return fetchWithDeadline(`${BASE}${target.path}`, { ...target.init, headers: { ...((target.init.headers as Record<string, string>) ?? {}), [TOKEN_HEADER]: token, [WIDGET_HEADER]: CART_OPS_CONTRACT } }, deadline.ms, deadline.what);
+    return fetchWithDeadline(`${BASE}${target.path}`, { ...target.init, headers: { ...((target.init.headers as Record<string, string>) ?? {}), [TOKEN_HEADER]: token, [WIDGET_HEADER]: CART_OPS_CONTRACT, ...smartCartHeader() } }, deadline.ms, deadline.what);
   };
   let id = currentId(sessionId);
   try {
@@ -274,7 +289,13 @@ export async function reportCartOutcome(sessionId: string, report: CartOutcomeRe
 
 /** The store cart as the widget read it, so the Caddie can see what is really in it. */
 export function syncBasket(sessionId: string, basket: BasketSync) {
-  return post<{ ok: boolean }>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/basket`, basket);
+  // The reply carries Smart Cart progress evaluated from this basket (null from an older server).
+  return post<BasketSyncResponse>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/basket`, basket);
+}
+
+/** Qualifying products that would complete an offer the basket is part-way to - the Smart Cart preview's button. */
+export function suggestForOffer(sessionId: string, offerId: string) {
+  return post<SmartCartSuggestResponse>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/smart-cart/suggest`, { offerId });
 }
 
 /** Who they shop for and their sizes, from the quick start. */
@@ -292,8 +313,9 @@ export function restartSession(sessionId: string) {
   return post<SessionRestartResponse>(sessionId, `/api/session/${encodeURIComponent(sessionId)}/restart`, {});
 }
 
-export function sendMessage(sessionId: string, text: string, context?: PageContext, deadline: { ms: number; what: string } = { ms: TIMEOUTS.chat, what: 'The Caddie' }) {
-  const body: ChatRequest = { sessionId, text, ...(context ? { context } : {}) };
+export function sendMessage(sessionId: string, text: string, context?: PageContext, deadline: { ms: number; what: string } = { ms: TIMEOUTS.chat, what: 'The Caddie' }, basket?: BasketSync | null) {
+  // The cart as it was when they sent it (themeCart.ts basketForTurn): applied by the server before the turn. Left out when it could not be read.
+  const body: ChatRequest = { sessionId, text, ...(context ? { context } : {}), ...(basket ? { basket } : {}) };
   return post<{ sessionId: string; message: CaddieMessage }>(sessionId, '/api/chat', body, deadline);
 }
 

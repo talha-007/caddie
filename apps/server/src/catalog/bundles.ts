@@ -77,7 +77,7 @@ function rangeOfDeal(handle: string, title: string): Range {
   return 'men';
 }
 
-async function collectionProducts(handle: string): Promise<Set<string>> {
+export async function collectionProducts(handle: string): Promise<Set<string>> {
   const ids = new Set<string>();
   let after: string | null = null;
   for (let page = 0; page < 20; page++) {

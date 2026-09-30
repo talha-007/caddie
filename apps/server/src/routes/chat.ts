@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import type { CaddieMessage } from '@caddie/shared';
+import { CART_OPS_CONTRACT } from '@caddie/shared';
 import { env } from '../env.js';
 import { log } from '../lib/logger.js';
 import { publish } from '../session/bus.js';
@@ -12,7 +13,7 @@ import { runTool } from '../tools/index.js';
 import { route } from '../ai/devRouter.js';
 import { screen } from '../ai/guard.js';
 import { converse, openaiEnabled, type TurnMeta } from '../ai/openai.js';
-import { basketFromSync } from '../tools/cartOperations.js';
+import { basketPatch } from '../tools/cartOperations.js';
 import { consumeShared, LIMITS } from '../lib/rateLimit.js';
 import { clientKey, noteCartMode } from '../lib/request.js';
 import { clientHash } from '../usage/identity.js';
@@ -61,7 +62,7 @@ const basketLineSchema = z.object({
   properties: z.record(z.string().max(200)).optional(),
   sellingPlanId: z.string().max(100).optional(),
 });
-const basketSchema = z.object({ cartToken: z.string().max(120).optional(), lines: z.array(basketLineSchema).max(100) });
+const basketSchema = z.object({ cartToken: z.string().max(120).optional(), currency: z.string().max(8).optional(), lines: z.array(basketLineSchema).max(100) });
 
 const bodySchema = z.object({
   sessionId: z.string().min(1).max(100).optional(),
@@ -134,7 +135,11 @@ chatRouter.post('/', async (req, res, next) => {
   // The basket the message was typed over, on the storefront: the same reading the basket route takes, so the turn's words are never about a basket the server has not seen.
   if (parsed.data.basket && session.cartMode === 'theme') {
     const lines = parsed.data.basket.lines.map((line) => ({ ...line, title: line.title ?? '', variantTitle: line.variantTitle ?? '' }));
-    await sessions.patch(sessionId, { basket: basketFromSync(lines), ...(parsed.data.basket.cartToken ? { cartToken: parsed.data.basket.cartToken } : {}) });
+    await sessions.patch(sessionId, { ...basketPatch(lines, parsed.data.basket.currency), ...(parsed.data.basket.cartToken ? { cartToken: parsed.data.basket.cartToken } : {}) });
+    log.info('chat.basket_applied', { sessionId, lines: lines.length });
+  } else if (session.cartMode === 'theme' && session.widgetContract === CART_OPS_CONTRACT) {
+    // A current widget reads the cart before every message; none here means that read failed or timed out. The copy the server had is kept, never emptied.
+    log.warn('chat.basket_missing', { sessionId, kept: (session.basket ?? []).length });
   }
 
   const userMessage = message('user', parsed.data.text);
