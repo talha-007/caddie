@@ -107,7 +107,7 @@ Deploy the widget and server together. An older widget ignores `properties`, so 
 
 ## For the theme team
 
-`BRIEF.md` explains the whole of Smart Cart for the Druids team. `theme-snippets/` holds the 7 theme files applied to the copied theme, with a `README.md` on how to apply them.
+`BRIEF.md` explains the whole of Smart Cart for the Druids team. `ASIM.md` is the theme developer's brief: the keys, the theme files and what to keep when editing them. `theme-snippets/` holds the 7 theme files applied to the copied theme, with a `README.md` on how to apply them.
 
 ## Research
 

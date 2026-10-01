@@ -46,6 +46,8 @@ export function evaluateSmartCart(lines: readonly SmartCartLine[], offers: reado
       const appliedMinor = reported
         ? matched.reduce((sum, line) => sum + (line.discounts ?? []).filter((d) => d.title === offer.discountTitle).reduce((s, d) => s + (Number.isFinite(d.amount) && d.amount > 0 ? d.amount : 0), 0), 0)
         : null;
+      // What the deal's lines cost before it, for the saving as a percentage - only when every line said.
+      const beforeMinor = matched.length && matched.every((line) => Number.isFinite(line.originalLinePrice)) ? matched.reduce((sum, line) => sum + (line.originalLinePrice ?? 0), 0) : null;
       return {
         offerId: offer.id,
         triggerKey: offer.triggerKey,
@@ -56,6 +58,7 @@ export function evaluateSmartCart(lines: readonly SmartCartLine[], offers: reado
         matchedLineKeys: matched.map((line) => line.key),
         matchedVariantIds: [...new Set(matched.map((line) => line.variantId).filter((id): id is string => !!id))],
         appliedMinor,
+        beforeMinor,
       };
     }),
     evaluatedAt: now,

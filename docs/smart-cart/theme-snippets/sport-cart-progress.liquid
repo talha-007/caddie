@@ -22,6 +22,12 @@
     price, so the price is only named in a GBP bag; elsewhere the deal is named
     without it, and any saving is still read from the cart in its currency.
   endcomment
+  comment
+    The smallest saving, as a percentage of what the deal's items cost
+    before it, that is shown as a deal (Druids: "1p is not a discount").
+    Must match MIN_SAVING_PERCENT in apps/server/src/smartCart/config.ts.
+  endcomment
+  assign sc_min_percent = 5
   assign sc_uk = false
   if cart.currency.iso_code == 'GBP'
     assign sc_uk = true
@@ -35,11 +41,13 @@
       assign needed = sc_needed[i] | plus: 0
       assign units = 0
       assign saved = 0
+      assign before = 0
       for item in cart.items
         assign value = item.properties[sc_key] | strip
         if item.properties[sc_key] != blank
           if sc_match[i] == '*' or value == sc_match[i]
             assign units = units | plus: item.quantity
+            assign before = before | plus: item.original_line_price
             for allocation in item.line_level_discount_allocations
               if allocation.discount_application.title == sc_titles[i]
                 assign saved = saved | plus: allocation.amount
@@ -54,8 +62,21 @@
         assign shown = needed
       endif
       assign percent = shown | times: 100 | divided_by: needed
+      assign saved_percent = 0
+      if before > 0
+        assign saved_percent = saved | times: 100 | divided_by: before
+      endif
+      comment
+        A finished set SupaEasy took little or nothing off is not a deal to
+        announce: hidden. While a set is still being built its saving cannot
+        be known here, so the progress shows.
+      endcomment
+      assign sc_show = true
+      if left <= 0 and saved_percent < sc_min_percent
+        assign sc_show = false
+      endif
     -%}
-    {%- if units > 0 -%}
+    {%- if units > 0 and sc_show -%}
       {%- assign sc_any = true -%}
       <div class="sc-deal{% if left <= 0 %} sc-deal--done{% endif %}">
         <div class="sc-deal__row">
@@ -68,10 +89,8 @@
             Choose any 1 more {{ sc_one[i] }} to complete the deal
           {%- elsif left > 1 -%}
             Choose any {{ left }} more {{ sc_many[i] }} to complete the deal
-          {%- elsif saved > 0 -%}
-            &#10003; Deal applied &middot; you save {{ saved | money }}
           {%- else -%}
-            &#10003; Your {{ sc_many[i] }} qualify &middot; priced at checkout
+            &#10003; Deal applied &middot; you save {{ saved | money }} ({{ saved_percent }}%)
           {%- endif -%}
         </p>
         {%- if left > 0 -%}

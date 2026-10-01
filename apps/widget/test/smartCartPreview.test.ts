@@ -257,10 +257,17 @@ describe('the saving, once SupaEasy has applied it', () => {
     const html = render(view({ 'any-3-polos': 3 }));
     expect(text(html)).not.toMatch(/save|£\d+\.\d\d off/i);
   });
-  it('a saving the cart shows is shown even if the price check thought it would save nothing', () => {
+  it('a saving under the minimum - the server says not worthwhile - is not shown at all: 1p is not a deal', () => {
     const state = view({ 'any-3-polos': 3 }, { 'any-3-polos': { worthwhile: false } });
     state.offers[0]!.saving = { amount: 0.01, currency: 'GBP' };
-    expect(text(render(state))).toContain('Deal applied · you save £0.01');
+    state.offers[0]!.savingPercent = 0;
+    expect(text(render(state))).not.toContain('Deal applied');
+  });
+  it('with the percentage beside the amount', () => {
+    const state = view({ 'any-3-polos': 3 });
+    state.offers[0]!.saving = { amount: 12.01, currency: 'GBP' };
+    state.offers[0]!.savingPercent = 16;
+    expect(text(render(state))).toContain('Deal applied · you save £12.01 (16%)');
   });
   it("in the cart's own currency", () => {
     const state = view({ 'any-3-polos': 3 });

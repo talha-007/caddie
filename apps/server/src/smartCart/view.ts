@@ -1,6 +1,6 @@
 import type { SmartCartView } from '@caddie/shared';
 import { fromMinorUnits } from '../shopify/money.js';
-import { SMART_CART_OFFERS } from './config.js';
+import { MIN_SAVING_PERCENT, SMART_CART_OFFERS } from './config.js';
 import { qualifyingProducts } from './eligibility.js';
 import type { SmartCartOfferConfig, SmartCartState } from './types.js';
 import { offerValue, type PricedLine } from './value.js';
@@ -35,6 +35,10 @@ export function smartCartView(
       const value = config
         ? offerValue(offer, config, basket.lines ?? [], basket.currency, offer.qualifyingUnits > 0 && offer.status !== 'QUALIFIED' ? qualifyingProducts(config) : [])
         : { worthwhile: null, canSuggest: false };
+      // The saving the cart shows, as a percentage of what the lines cost before it - read, never estimated.
+      const percent = offer.appliedMinor && offer.beforeMinor ? Math.floor((offer.appliedMinor * 100) / offer.beforeMinor) : null;
+      // Once SupaEasy has priced the set, its own figure decides whether it is a deal worth naming, not our estimate.
+      const worthwhile = percent !== null ? (offer.appliedMinor! * 100 >= offer.beforeMinor! * MIN_SAVING_PERCENT) : value.worthwhile;
       return {
         offerId: offer.offerId,
         name: config?.name ?? offer.offerId,
@@ -42,10 +46,11 @@ export function smartCartView(
         qualifyingUnits: offer.qualifyingUnits,
         requiredUnits: offer.requiredUnits,
         remainingUnits: offer.remainingUnits,
-        worthwhile: value.worthwhile,
+        worthwhile,
         canSuggest: value.canSuggest,
         // What SupaEasy took off, as the cart reports it - only when it took something.
         ...(offer.appliedMinor && basket.currency ? { saving: fromMinorUnits(offer.appliedMinor, basket.currency) } : {}),
+        ...(percent !== null ? { savingPercent: percent } : {}),
         ...(config?.display ? { display: displayFor(config, basket.currency) } : {}),
       };
     }),

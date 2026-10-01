@@ -3,10 +3,10 @@ import { formatMoney } from './format.js';
 
 /**
  * Smart Cart preview wording, from the progress the server worked out. The
- * widget never counts triggers or reads product names itself, and never says
- * a discount has been applied or unlocked, or what anything saves: QUALIFIED
- * means only that enough triggered units are in the cart, and the price is
- * SupaEasy's, at checkout (Smart Cart phase 4).
+ * widget never counts triggers or reads product names itself, and names a
+ * saving - in pounds and as a percentage - only once the cart shows SupaEasy
+ * took it off. QUALIFIED alone means only that enough triggered units are in
+ * the cart; the price is SupaEasy's, at checkout (Smart Cart phase 4).
  *
  * Written for a customer: a deal to finish, how far along they are, and one
  * sentence saying what is left - never a status code.
@@ -55,8 +55,8 @@ function wording(offer: SmartCartOfferView) {
 export function smartCartLines(view: SmartCartView | null | undefined): SmartCartLine[] {
   if (!view) return [];
   return view.offers
-    // A saving the cart shows is always worth showing, whatever the price check thought.
-    .filter((offer) => offer.status !== 'INACTIVE' && offer.qualifyingUnits > 0 && (offer.worthwhile !== false || !!offer.saving))
+    // Once SupaEasy has priced the set, the server judges by the cart's own saving: under the minimum (a 1p "deal") it is false, and not shown.
+    .filter((offer) => offer.status !== 'INACTIVE' && offer.qualifyingUnits > 0 && offer.worthwhile !== false)
     .map((offer) => {
       const words = wording(offer);
       const left = offer.remainingUnits;
@@ -65,7 +65,7 @@ export function smartCartLines(view: SmartCartView | null | undefined): SmartCar
       // Applied: the saving the cart shows SupaEasy took off, never one worked out here.
       const applied = qualified && offer.saving && offer.saving.amount > 0 ? offer.saving : null;
       const message = applied
-        ? `Deal applied · you save ${formatMoney(applied)}`
+        ? `Deal applied · you save ${formatMoney(applied)}${offer.savingPercent ? ` (${offer.savingPercent}%)` : ''}`
         : qualified
           ? `Your ${words.many} qualify for ${words.deal || 'this deal'}`
           : `Choose any ${left} more ${left === 1 ? words.one : words.many} to complete the deal`;

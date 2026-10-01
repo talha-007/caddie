@@ -78,6 +78,8 @@ export interface SmartCartOfferState {
    * data at all (an older widget) - not the same as nothing applied (0).
    */
   appliedMinor: number | null;
+  /** What those lines cost before any discount, minor units - null unless every one reported it. */
+  beforeMinor: number | null;
 }
 
 export interface SmartCartState {
@@ -94,4 +96,6 @@ export interface SmartCartLine {
   properties?: Record<string, unknown> | null;
   /** Discounts Shopify applied to the line: title and amount in minor units (BasketSync). */
   discounts?: ReadonlyArray<{ title: string; amount: number }>;
+  /** The line's price before discounts, minor units (BasketSync). */
+  originalLinePrice?: number;
 }

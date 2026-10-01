@@ -35,6 +35,8 @@ const PER_MINUTE: Record<string, number> = {
   'gpt-4o-mini-transcribe': 0.003,
   'gpt-4o-transcribe': 0.006,
   'whisper-1': 0.006,
+  // Spoken replies (ai/speak.ts): OpenAI's estimate for gpt-4o-mini-tts, by minute of audio out.
+  'gpt-4o-mini-tts': 0.015,
 };
 
 /**

@@ -215,6 +215,7 @@
                       assign sc_names = 'Any 3 Polos|Any 2 Trousers|Any 2 Shorts|Any 3 Kids Polos|Any 3 Ladies Polos|Any 2 Ladies Trousers|Any 2 Kids Trousers|Any 2 Ladies Shorts|Any 2 Kids Shorts' | split: '|'
                       assign deal_badge = ''
                       assign deal_applied = false
+                      assign deal_saved = 0
                       for sc_key in sc_keys
                         assign i = forloop.index0
                         assign value = item.properties[sc_key] | strip
@@ -224,12 +225,22 @@
                             for allocation in item.line_level_discount_allocations
                               if allocation.discount_application.title == sc_titles[i]
                                 assign deal_applied = true
+                                assign deal_saved = deal_saved | plus: allocation.amount
                               endif
                             endfor
                             break
                           endif
                         endif
                       endfor
+                    -%}
+                    {%- comment -%} A saving under the deal box's minimum (sc_min_percent, 5%) is not announced on the line either. {%- endcomment -%}
+                    {%- liquid
+                      if deal_applied and item.original_line_price > 0
+                        assign deal_percent = deal_saved | times: 100 | divided_by: item.original_line_price
+                        if deal_percent < 5
+                          assign deal_badge = ''
+                        endif
+                      endif
                     -%}
                     {%- if deal_badge != '' -%}
                       <p class="sc-line-deal">{% if deal_applied %}&#10003; {{ deal_badge }} applied{% else %}Part of {{ deal_badge }}{% endif %}</p>

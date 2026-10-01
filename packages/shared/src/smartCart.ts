@@ -32,6 +32,8 @@ export interface SmartCartOfferView {
    * applied, or the widget did not report discounts. Never calculated.
    */
   saving?: Money;
+  /** That saving as a whole percentage of what the deal's lines cost before it (rounded down). Read from the cart, like the saving. */
+  savingPercent?: number;
   /** Display-only wording. Never parsed, never used in arithmetic. */
   display?: {
     /** "3 for £59.99" - empty outside a GBP bag: other markets pay their own deal price. */
@@ -59,6 +61,21 @@ export interface BasketSyncResponse {
   ok: boolean;
   lines: number;
   smartCart: SmartCartView | null;
+  /**
+   * Plain lines that qualify for an "any N" deal but carry no key, for the
+   * widget to re-write with it (cart/change.js). Preview only - absent on the
+   * live theme - and never a line with properties of its own.
+   */
+  repairs?: SmartCartRepair[];
+}
+
+/** One basket line to give its deal key: same variant and quantity, these properties. */
+export interface SmartCartRepair {
+  lineKey: string;
+  /** gid://shopify/ProductVariant/... as BasketSync sent it. */
+  variantId: string;
+  quantity: number;
+  properties: Record<string, string>;
 }
 
 /**

@@ -146,6 +146,11 @@ export class FakeShopifyCart {
       if (!item) return this.json(404, { status: 404, description: 'Cart line not found', message: 'Cart Error' });
       item.quantity = Number(body.quantity);
       item.final_line_price = item.final_price * item.quantity;
+      // Properties sent replace the line's own, and the line takes a new key - as Shopify keys a line by its properties.
+      if (body.properties) {
+        item.properties = body.properties as Record<string, unknown>;
+        item.key = `${item.variant_id}:${this.keySeq++}`;
+      }
       this.items = this.items.filter((entry) => entry.quantity > 0);
       return this.json(200, this.snapshot());
     }

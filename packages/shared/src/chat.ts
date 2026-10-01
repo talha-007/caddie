@@ -142,6 +142,8 @@ export interface BasketSync {
      * never worked out. Absent from an older widget; [] when none applied.
      */
     discounts?: Array<{ title: string; amount: number }>;
+    /** The line's price before any discount, in minor units (/cart.js original_line_price) - what a saving is a percentage of. */
+    originalLinePrice?: number;
   }>;
 }
 

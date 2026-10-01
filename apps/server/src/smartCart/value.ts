@@ -1,9 +1,11 @@
 import type { Product } from '@caddie/shared';
 import { productById } from '../catalog/sync.js';
+import { MIN_SAVING_PERCENT } from './config.js';
 import type { SmartCartOfferConfig, SmartCartOfferState } from './types.js';
 
 /**
- * Whether an offer would lower this basket's price at all.
+ * Whether an offer would lower this basket's price by enough to call it a
+ * deal: at least MIN_SAVING_PERCENT of what the set costs before it.
  *
  * SupaEasy prices from each line's own (sale) price: it takes the triggered
  * units dearest first, in sets, and discounts a set only by what it costs
@@ -50,12 +52,18 @@ export function cheapestAvailablePence(product: Product): number | null {
   return prices.length ? Math.min(...prices) : null;
 }
 
+/** Whether a set costing `set` pence, sold at `gate`, saves at least `minPercent` of its price. */
+export function savesEnough(set: number, gate: number, minPercent = MIN_SAVING_PERCENT): boolean {
+  return set > gate && (set - gate) * 100 >= set * minPercent;
+}
+
 export function offerValue(
   state: SmartCartOfferState,
   offer: SmartCartOfferConfig,
   basket: readonly PricedLine[],
   currency: string | undefined,
   candidates: readonly Product[],
+  minPercent = MIN_SAVING_PERCENT,
 ): OfferValue {
   const unknown: OfferValue = { worthwhile: null, canSuggest: false, floorPence: null };
   if (state.qualifyingUnits <= 0) return { worthwhile: null, canSuggest: false, floorPence: null };
@@ -77,17 +85,18 @@ export function offerValue(
     let worthwhile = false;
     for (let start = 0; start + offer.threshold <= units.length; start += offer.threshold) {
       const set = units.slice(start, start + offer.threshold).reduce((sum, price) => sum + price, 0);
-      if (set > gate) worthwhile = true;
+      if (savesEnough(set, gate, minPercent)) worthwhile = true;
     }
     return { worthwhile, canSuggest: false, floorPence: null };
   }
 
   const missing = offer.threshold - units.length;
   const held = units.reduce((sum, price) => sum + price, 0);
-  // Each missing unit must be priced above this for the finished set to cost more than the deal.
-  const floorPence = Math.max(0, Math.floor((gate - held) / missing));
+  // Each missing unit must be priced above this for the finished set to save enough: set - gate >= set * m, so set >= gate / (1 - m).
+  const needed = minPercent > 0 ? Math.ceil((gate * 100) / (100 - Math.min(minPercent, 99))) : gate + 1;
+  const floorPence = Math.max(0, Math.ceil((needed - held) / missing) - 1);
   const best = Math.max(0, ...candidates.map((product) => highestAvailablePence(product) ?? 0));
-  const worthwhile = held + best * missing > gate;
+  const worthwhile = savesEnough(held + best * missing, gate, minPercent);
   const canSuggest = candidates.some((product) => (cheapestAvailablePence(product) ?? 0) > floorPence);
   return { worthwhile, canSuggest: worthwhile && canSuggest, floorPence };
 }

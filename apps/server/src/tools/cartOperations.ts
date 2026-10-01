@@ -83,6 +83,7 @@ export function basketPatch(lines: BasketSync['lines'], currency?: string): Pick
         ...(line.variantId ? { variantId: numeric(String(line.variantId)) } : {}),
         quantity: Number(line.quantity) || 0,
         properties: line.properties ?? null,
+        ...(Number.isFinite(line.originalLinePrice) && Number(line.originalLinePrice) >= 0 ? { originalLinePrice: Math.round(Number(line.originalLinePrice)) } : {}),
         ...(Array.isArray(line.discounts) ? { discounts: line.discounts.slice(0, 20).map((d) => ({ title: String(d?.title ?? '').slice(0, 200), amount: Math.max(0, Math.round(Number(d?.amount) || 0)) })) } : {}),
       })),
     ),

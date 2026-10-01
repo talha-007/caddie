@@ -7,6 +7,7 @@ import {
   type Cart,
   type CartAction,
   type CartOutcomeReport,
+  type SmartCartRepair,
 } from '@caddie/shared';
 
 /**
@@ -63,6 +64,8 @@ interface AjaxCart {
     quantity: number;
     final_price: number;
     final_line_price: number;
+    /** Before any discount - what a deal's saving is a percentage of. */
+    original_line_price?: number;
     properties: Record<string, unknown> | null;
     /** The discounts applied to the line - SupaEasy's deals among them - in minor units. */
     line_level_discount_allocations?: Array<{ amount?: number; discount_application?: { title?: string } }>;
@@ -172,6 +175,7 @@ export function basketSync(raw: AjaxCart | null = lastRaw): BasketSync {
       ...(bundleOf(item) ? { bundle: bundleOf(item) } : {}),
       ...(typeof item.properties?.['__Bundle_Name'] === 'string' ? { bundleName: String(item.properties['__Bundle_Name']) } : {}),
       // What Shopify took off this line, by discount title - always sent, [] when nothing, so "no discount" is told apart from "not reported".
+      ...(Number.isFinite(item.original_line_price) ? { originalLinePrice: Math.max(0, Math.round(Number(item.original_line_price))) } : {}),
       discounts: (item.line_level_discount_allocations ?? []).map((allocation) => ({ title: String(allocation.discount_application?.title ?? ''), amount: Math.max(0, Math.round(Number(allocation.amount) || 0)) })),
     })),
   };
@@ -451,6 +455,46 @@ async function changeLine(key: string, quantity: number): Promise<void> {
   });
 }
 
+/** Lines already tried this page, so a refusal is not sent again on every basket read. */
+const triedRepairs = new Set<string>();
+
+/**
+ * Gives basket lines their Smart Cart deal key, as the server listed them
+ * (server: smartCart/repair.ts): a qualifying line added without one - by
+ * a path the copied theme does not stamp yet, or before it stamped any -
+ * is not counted by SupaEasy. Each is checked against a fresh read first
+ * and changed only if it is still there, plain, at the same quantity: the
+ * customer may have changed it since. cart/change.js replaces the line's
+ * properties, and a plain line has none to lose. Returns whether the cart
+ * changed.
+ */
+export async function repairLines(repairs: readonly SmartCartRepair[]): Promise<boolean> {
+  const pending = repairs.filter((repair) => !triedRepairs.has(repair.lineKey));
+  if (!pending.length) return false;
+  const now = await readRaw();
+  if (!now) return false;
+  let changed = false;
+  for (const repair of pending) {
+    triedRepairs.add(repair.lineKey);
+    const line = now.items.find((item) => item.key === repair.lineKey);
+    const plain = line && !(line.properties && Object.keys(line.properties).length) && !line.selling_plan_allocation;
+    if (!line || !plain || gid('ProductVariant', line.variant_id) !== repair.variantId || line.quantity !== repair.quantity) continue;
+    try {
+      await ajax('/cart/change.js', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: repair.lineKey, quantity: repair.quantity, properties: repair.properties }),
+      });
+      changed = true;
+    } catch (err) {
+      // Left as it was - full price, as before - and not tried again this page.
+      console.warn('[caddie] could not add the deal key to a basket line', err);
+    }
+  }
+  if (changed) announceToTheme(await readRaw());
+  return changed;
+}
+
 /** A bundle deal, added exactly as the theme's bundle builder adds it. */
 async function addBundle(
   bundle: BundleDeal,
@@ -507,4 +551,4 @@ export async function runActions(actions: CartAction[]): Promise<Cart> {
   return cart;
 }
 
-// Nothing else is exported that changes the cart: every change is one the server's Action Gateway handed back (runActions).
+// Nothing else is exported that changes the cart: every change is one the server handed back (runActions, runOperation, repairLines).

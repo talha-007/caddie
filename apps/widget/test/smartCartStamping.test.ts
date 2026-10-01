@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SMART_CART_HEADER, SMART_CART_PREVIEW } from '@caddie/shared';
 import { setSmartCartPreview, syncBasket } from '../src/lib/api.js';
-import { basketSync, readCart, runOperation } from '../src/lib/themeCart.js';
+import { basketSync, readCart, repairLines, runOperation } from '../src/lib/themeCart.js';
 import { FakeShopifyCart, installStorefront } from './support/fakeShopifyCart.js';
 
 /**
@@ -84,5 +84,36 @@ describe('the discounts the cart applied', () => {
     await runOperation({ type: 'add', operationId: 'op-3', lines: [{ variantId: '710', quantity: 1 }], expect: { add: [{ variantId: '710', quantity: 1 }] } });
     await readCart();
     expect(basketSync().lines[0]?.discounts).toEqual([]);
+  });
+});
+
+describe('a qualifying line added without its deal key', () => {
+  const repairFor = (key: string, quantity = 1) => ({ lineKey: key, variantId: 'gid://shopify/ProductVariant/710', quantity, properties: { __3_Polo_Bundle: '3_Polo_Bundle' } });
+
+  it('is given the key, at the same quantity', async () => {
+    cart.seed([{ variantId: 710, quantity: 2 }]);
+    expect(await repairLines([repairFor(cart.keyOf(710)!, 2)])).toBe(true);
+    expect(basketSync().lines).toEqual([expect.objectContaining({ quantity: 2, properties: { __3_Polo_Bundle: '3_Polo_Bundle' } })]);
+  });
+  it('is left alone if the customer changed it since the server looked', async () => {
+    cart.seed([{ variantId: 710, quantity: 3 }]);
+    expect(await repairLines([repairFor(cart.keyOf(710)!, 2)])).toBe(false);
+    await readCart();
+    expect(basketSync().lines[0]).not.toHaveProperty('properties');
+  });
+  it('never replaces properties a line already has', async () => {
+    cart.seed([{ variantId: 710, quantity: 1, properties: { __bundle_id: 'b1' } }]);
+    expect(await repairLines([repairFor(cart.keyOf(710)!)])).toBe(false);
+    await readCart();
+    expect(basketSync().lines[0]?.properties).toEqual({ __bundle_id: 'b1' });
+  });
+  it('a refusal is not sent again on the next read', async () => {
+    cart.seed([{ variantId: 710, quantity: 1 }]);
+    const key = cart.keyOf(710)!;
+    cart.failNext('change', 422, 'Cannot change');
+    expect(await repairLines([repairFor(key)])).toBe(false);
+    expect(await repairLines([repairFor(key)])).toBe(false);
+    await readCart();
+    expect(basketSync().lines[0]).not.toHaveProperty('properties');
   });
 });

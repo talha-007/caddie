@@ -69,9 +69,10 @@ Yes. The same trousers can be "any 2 trousers" **and** the trousers step of an A
 - **Fresh basket.** Before every chat or voice turn, and whenever the theme's cart changes, the Caddie reads the real Shopify cart (`/cart.js`). Its basket is never a copy that can drift.
 - **Progress, counted exactly as SupaEasy counts.** The server counts units carrying each deal's key (`apps/server/src/smartCart/`). No product names, no guessing, no AI.
 - **Keys on the Caddie's own adds.** When the Caddie adds a qualifying product, it writes the same key the theme writes. SupaEasy then prices it normally.
-- **Honest nudges.** The card appears only if the deal would actually lower the price at today's sale prices. Two £20 joggers against "2 for £49" save nothing, so no nudge is shown.
-- **The real saving, in the Caddie too.** The widget passes on each basket line's discount allocations from `/cart.js`, and the server adds up what SupaEasy took off under the deal's own title (e.g. "ANY 3 POLO BUNDLE"). The Caddie card then says "Deal applied · you save £12.01". It is read from Shopify, never calculated.
+- **Honest nudges, with a 5% minimum.** The card appears only if the deal would save at least **5%** of what the items cost at today's sale prices (Druids, 1 Oct: "1p is not a discount, so don't show it"). Two £20 joggers against "2 for £49" save nothing, and three polos at £60.00 against £59.99 save 1p, so neither is shown. The 5% is ours until Druids name a figure: `MIN_SAVING_PERCENT` in `smartCart/config.ts`, and `sc_min_percent` in the theme's deal box, which must match.
+- **The real saving, in the Caddie too.** The widget passes on each basket line's discount allocations from `/cart.js`, and the server adds up what SupaEasy took off under the deal's own title (e.g. "ANY 3 POLO BUNDLE"). The Caddie card then says "Deal applied · you save £12.01 (16%)". The percentage is that saving over the lines' price before discounts (`original_line_price`), rounded down. Both are read from Shopify, never estimated. A deal SupaEasy applied for under 5% isn't announced at all.
 - **Missed deals are reported.** A basket that qualifies, where the deal should lower the price, but where the cart shows nothing taken off, is logged (`smart_cart.missed_deal`) and counted under `smartCart.missedDeals` in `/health`. The team hears about a switched-off discount, a renamed title or a missing market price without waiting for a complaint.
+- **Lines already in the bag are given their key.** A qualifying item added without one (before the theme stamped keys, or by a path the copied theme still doesn't stamp, such as an add-on app or a section not yet updated) is re-written with its key when the Caddie next reads the bag (`smartCart/repair.ts`, the widget's `repairLines`). Only plain lines: anything with properties of its own (a pack piece, an app's line) is left exactly as it is. Preview theme only.
 - **"Show me polos / trousers / shorts".** This suggests in-stock qualifying products, not already in the basket, that would make the deal worth it.
 - **Wording.** "Any 3 Polos · 3 for £59.99 · Choose any 2 more polos to complete the deal". It never says "save £x", "unlocked" or "your price" before SupaEasy has actually applied a discount.
 - **Switched on only where the theme asks.** The copied theme's Caddie tag carries `data-smart-cart-preview="true"`; the live theme doesn't, so it's unchanged.
@@ -95,7 +96,7 @@ All in `docs/smart-cart/theme-snippets/`, applied and checked on 30 Sep:
 
 1. They add a polo **any way they like**: product page, collection card, quick add, the drawer "+" or the Caddie. The line gets `__3_Polo_Bundle`.
 2. The bag shows **Any 3 Polos · 1/3 · Choose any 2 more polos to complete the deal**. The Caddie's basket shows the same, with a **Show me polos** button.
-3. At three polos, SupaEasy applies the deal. The bag shows **✓ Deal applied · you save £12.01**, and each line shows "✓ Any 3 Polos applied" with the pre-deal price crossed out.
+3. At three polos, SupaEasy applies the deal. The bag shows **✓ Deal applied · you save £12.01 (16%)**, and each line shows "✓ Any 3 Polos applied" with the pre-deal price crossed out.
 
 ## 6. Proven on the copied theme
 
@@ -117,11 +118,30 @@ Also checked: product pages and collection cards on the preview now carry the ri
 5. **Ladies polos:** decided, the £59.99 deal. The £55 discount (`LADIES ANY 3 POLO`) is still live in SupaEasy, and only one copied-theme card writes its key. Worth switching that discount off, or pointing that card at the £59.99 key.
 6. **Some deals are no longer worth much.** Many polos, trousers and shorts are already on sale close to or below the deal price, so a deal can save pennies or nothing. That's a pricing decision, not a technical one.
 
+### Druids' answers (1 Oct)
+
+| Question | Answer |
+| --- | --- |
+| Basket value | No rule: show from the first qualifying item, and when the deal applies. |
+| Minimum saving | Show the saving as a percentage, and don't show a deal that saves next to nothing. Built with a 5% floor; Druids to confirm the figure. |
+| Dates | None: the key decides. |
+| Countries | SupaEasy decides. The message shows everywhere, with the £ price only in GBP bags. |
+| Customer groups | Nobody is excluded. |
+| Who updates deals | Must be dynamic: no developer for a deal change. Next piece of work. |
+| Wording | Approved. |
+| A (Mixed / Cool & Wet packs) | Leave as they are. |
+| B (ladies polos) | £59.99. |
+| C (packs with no page) | Needed; don't touch. |
+| D (ladies shorts in Ladies Trousers) | Count as shorts; they stay in both collections. |
+| E (trouser cards) | Point them at the right deals: the Women and Juniors padel and fishing cards on `choose-two-trousers-temp`, a theme editor setting. |
+| Tracking, go-live | Not answered yet. |
+
 ## 8. What's next
 
 - **Deploy the Caddie server** (`caddie.druids.online`) with this code, and upload the matching widget build, when approved.
 - **Before the copied theme is published:** fix problem 1, and remove the test flag `data-smart-cart-debug`.
 - **Tell Asim** that the 7 theme files changed, so his later edits don't overwrite them.
+- **Dynamic deals** (Druids' answer 6): read prices, keys, titles and markets from SupaEasy itself, and the qualifying rules from one setting in Shopify admin, so a new or changed deal needs no developer.
 - **Optional later:** fixed packs recognised from single adds (only safely, by matching the full recipe), the Caddie mentioning deal progress in chat, and ladies polos once decided.
 
 ## 9. Spoken replies (separate feature)

@@ -14,7 +14,7 @@ import { LIMITS } from '../lib/rateLimit.js';
 import { limitRoute } from '../lib/routeLimit.js';
 import { productById } from '../catalog/sync.js';
 import { sessions, type CaddieSession } from '../session/store.js';
-import { SMART_CART_OFFERS, cheapestAvailablePence, noteMissedDeals, offerValue, qualifyingProducts, smartCartView } from '../smartCart/index.js';
+import { SMART_CART_OFFERS, cheapestAvailablePence, missingDealKeys, noteMissedDeals, offerValue, qualifyingProducts, smartCartView } from '../smartCart/index.js';
 import { customerTurn, describeFocus, focusFromCard } from '../session/focus.js';
 import { claimSession, requireSessionOwner } from '../session/ownership.js';
 import { runTool } from '../tools/index.js';
@@ -222,7 +222,8 @@ sessionRouter.post('/:id/basket', owner, writeLimit, async (req, res, next) => {
   try {
     const body = req.body as Partial<BasketSync> | undefined;
     const lines = Array.isArray(body?.lines) ? body.lines.slice(0, 100) : [];
-    await sessions.getOrCreate(req.params.id);
+    // Through noteCartMode: whether this theme previews Smart Cart decides whether lines are re-keyed below.
+    const session = await noteCartMode(req, await sessions.getOrCreate(req.params.id), (id, change) => sessions.patch(id, change));
     // Names from our own catalogue, never from the request (tools/cartOperations.ts basketFromSync): these lines go into the model's instructions.
     const token = typeof body?.cartToken === 'string' ? body.cartToken.slice(0, 120) : undefined;
     const fresh = basketPatch(lines, typeof body?.currency === 'string' ? body.currency : undefined);
@@ -231,7 +232,9 @@ sessionRouter.post('/:id/basket', owner, writeLimit, async (req, res, next) => {
     const view = smartCartView(fresh.smartCart, { lines: fresh.basket ?? [], ...(fresh.cartCurrency ? { currency: fresh.cartCurrency } : {}) });
     // A basket that qualifies and should save, where the cart shows no discount: a deal missed (smartCart/missed.ts).
     noteMissedDeals(req.params.id, view, lines.some((line) => Array.isArray((line as { discounts?: unknown }).discounts)));
-    const reply: BasketSyncResponse = { ok: true, lines: lines.length, smartCart: view };
+    // Qualifying lines added without their key (smartCart/repair.ts), for the widget to re-key - only where the theme previews Smart Cart.
+    const repairs = session.smartCartPreview ? missingDealKeys(lines) : [];
+    const reply: BasketSyncResponse = { ok: true, lines: lines.length, smartCart: view, ...(repairs.length ? { repairs } : {}) };
     res.json(reply);
   } catch (err) {
     next(err);
@@ -364,6 +367,7 @@ const syncLineSchema = z.object({
   properties: z.record(z.string().max(200)).optional(),
   sellingPlanId: z.string().max(100).optional(),
   discounts: z.array(z.object({ title: z.string().max(200), amount: z.number().int().min(0) })).max(20).optional(),
+  originalLinePrice: z.number().int().min(0).optional(),
 });
 const syncSchema = z.object({ cartToken: z.string().max(120).optional(), currency: z.string().max(8).optional(), lines: z.array(syncLineSchema).max(100) });
 const outcomeSchema = z.object({

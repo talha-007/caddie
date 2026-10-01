@@ -17,7 +17,7 @@ import type {
   SmartCartView,
 } from '@caddie/shared';
 import { TimeoutError, addFromCard, addPackFromCard, changeCartLine, onSessionReplaced, openEventStream, reportCartOutcome, restartSession, runTool, saveProfile, sendCardChoice, sendMessage, sendVoice, speakMessage, suggestForOffer, syncBasket } from './api.js';
-import { announceToTheme, basketForTurn, basketSync, observe, onStorefront, readCart, runActions, runOperation, watchThemeCart } from './themeCart.js';
+import { announceToTheme, basketForTurn, basketSync, observe, onStorefront, readCart, repairLines, runActions, runOperation, watchThemeCart } from './themeCart.js';
 import { UNSUPPORTED_SERVER, alreadyRun, inFlight, noteDone, noteReported, noteStarted, sortActions } from './operations.js';
 import { announceCart } from './events.js';
 import { newerSmartCart } from './smartCart.js';
@@ -276,7 +276,11 @@ export function useCaddie(page: PageContext): CaddieState {
    */
   const pushBasket = useCallback(
     async (basket: BasketSync) => {
-      const reply = await syncBasket(sessionId, basket);
+      let reply = await syncBasket(sessionId, basket);
+      // Lines that qualify but were added without their deal key: given it, then reported once more - the repaired lines carry it, so this does not repeat.
+      if (reply?.repairs?.length && onStorefront() && (await repairLines(reply.repairs).catch(() => false))) {
+        reply = (await syncBasket(sessionId, basketSync()).catch(() => null)) ?? reply;
+      }
       setSmartCart((current) => newerSmartCart(current, reply?.smartCart));
       return reply;
     },

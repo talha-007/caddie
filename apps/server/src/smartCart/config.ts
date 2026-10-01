@@ -21,6 +21,16 @@ import type { SmartCartOfferConfig } from './types.js';
  * its recipe, so a pack key on single adds would give six polos the
  * Ambassador price. Packs are sold through the pack builder only.
  */
+/**
+ * The smallest saving, as a percentage of what the deal's items cost
+ * before it, that is shown as a deal at all. Druids, 1 Oct: "1p is not a
+ * discount, so don't show it" - three polos at £60.00 against 3 for £59.99.
+ * Below this a deal in progress is not nudged, and one SupaEasy applied is
+ * not announced. The figure is ours until Druids name one; the theme's
+ * deal box (sport-cart-progress.liquid, sc_min_percent) must match it.
+ */
+export const MIN_SAVING_PERCENT = 5;
+
 export const SMART_CART_OFFERS: readonly SmartCartOfferConfig[] = [
   {
     id: 'any-3-polos',

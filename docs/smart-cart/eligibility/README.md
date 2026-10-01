@@ -23,7 +23,7 @@ Collection membership comes from the Admin API, active products only. `products.
 | ANY 2 TROUSERS MENS | any N | 49 | 92 | Caddie + theme Add buttons (any N) (men); copied /pages/choose-two-trousers-temp (juniors); copied /pages/choose-two-trousers-temp (men); copied /pages/choose-two-trousers-temp (women); live /pages/any-2-trousers-app; live /pages/any-2-trousers-eur |
 | ANY 3 POLO COLLECTION | any N | 59.99 | 592 | Caddie + theme Add buttons (any N) (men); copied /pages/choose-three-polo-temp (men) |
 | ANY 3 POLO KIDS COLLECTION | any N | 49 | 100 | Caddie + theme Add buttons (any N) (juniors); copied /pages/choose-three-polo-temp (juniors) |
-| ANY 3 POLO LADIES COLLECTION | any N | 59.99 | 180 | copied /pages/choose-three-polo-temp (women) |
+| ANY 3 POLO LADIES COLLECTION | any N | 59.99 | 180 | Caddie + theme Add buttons (any N) (women); copied /pages/choose-three-polo-temp (women) |
 | CADDY CLUB AMBASSADOR PACK | fixed pack | 99.99 | 0 | **nowhere** |
 | CADDY CLUB RAINSUIT SPECIAL | fixed pack | 99 | 0 | **nowhere** |
 | CADDY CLUB SUMMER BUNDLE | fixed pack | 49 | 60 | live /pages/caddy-club-summer-bundle |
@@ -245,7 +245,7 @@ live page /pages/any-rainsuit-eur · UK £99 on the page
 | FREE HAT | `bundle-beanies` | 45 |
 
 ### LADIES ANY 3 POLO: `__any-three-ladies-polos` = `any-three-ladies-polos`
-copied theme /pages/choose-three-polo-temp · for women · UK £55 on the page
+copied theme /pages/choose-three-polo-temp · for women · UK £55 on the page · and, since 1 Oct, the Caddie and the theme's Add buttons on every product tagged `bundle_threepolo_ladies` (the £59.99 deal)
 
 | Step | Collection / rule | Active products |
 | --- | --- | --- |

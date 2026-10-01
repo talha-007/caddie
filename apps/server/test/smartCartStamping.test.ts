@@ -18,7 +18,7 @@ const { sessionRouter } = await import('../src/routes/session.js');
 const { sessions } = await import('../src/session/store.js');
 const { setCatalogueForTests } = await import('../src/catalog/sync.js');
 const { setDealsForTests } = await import('../src/catalog/bundles.js');
-const { SMART_CART_OFFERS, evaluateSmartCart, offerForProduct, offerValue, setSmartCartCollectionsForTests, triggerPropertiesFor } = await import('../src/smartCart/index.js');
+const { SMART_CART_OFFERS, evaluateSmartCart, offerForProduct, offerValue, savesEnough, setSmartCartCollectionsForTests, smartCartView, triggerPropertiesFor } = await import('../src/smartCart/index.js');
 const { judge } = await import('../src/tools/cartOperations.js');
 const { CART_OPS_CONTRACT, SMART_CART_HEADER, SMART_CART_PREVIEW } = await import('@caddie/shared');
 
@@ -173,10 +173,10 @@ describe('the read-back of a stamped add', () => {
 });
 
 describe('whether the offer would lower the price - sale prices, SupaEasy\'s sets', () => {
-  const value = (lines: Line[], candidates: Product[] = [], currency?: string, offer = POLO_OFFER) => {
+  const value = (lines: Line[], candidates: Product[] = [], currency?: string, offer = POLO_OFFER, minPercent?: number) => {
     const state = evaluateSmartCart(lines.map((entry) => ({ key: entry.key, quantity: entry.quantity, properties: entry.properties ?? null }))).offers.find((o) => o.offerId === offer.id)!;
     const basket = lines.map((entry) => ({ lineId: entry.key, productId: entry.productId, variantId: String(entry.variantId).split('/').pop()!, quantity: entry.quantity }));
-    return offerValue(state, offer, basket, currency, candidates);
+    return offerValue(state, offer, basket, currency, candidates, minPercent);
   };
   it('three £24 polos (£72) against £59.99: yes', () => {
     expect(value([line('a', FLORAL, '710', 3, POLO_TRIGGER)]).worthwhile).toBe(true);
@@ -191,17 +191,27 @@ describe('whether the offer would lower the price - sale prices, SupaEasy\'s set
     expect(value([line('a', CLIMA, '750', 2, TROUSER_TRIGGER)], [], undefined, TROUSER_OFFER).worthwhile).toBe(true);
   });
   it('one away with £48 held: a £24 polo would take the set over £59.99 - worth nudging, and suggestible', () => {
-    const v = value([line('a', FLORAL, '710', 2, POLO_TRIGGER)], [EMOTIVE]);
+    const v = value([line('a', FLORAL, '710', 2, POLO_TRIGGER)], [EMOTIVE], undefined, POLO_OFFER, 0);
     expect(v).toMatchObject({ worthwhile: true, canSuggest: true, floorPence: 1199 });
   });
   it('one away with £20 held (two £10 polos): the third would have to cost over £39.99 - with nothing that dear, no nudge', () => {
-    const v = value([line('a', FLORAL_SAGE, '720', 2, POLO_TRIGGER)], [FLORAL, EMOTIVE]);
+    const v = value([line('a', FLORAL_SAGE, '720', 2, POLO_TRIGGER)], [FLORAL, EMOTIVE], undefined, POLO_OFFER, 0);
     expect(v).toMatchObject({ worthwhile: false, canSuggest: false, floorPence: 3999 });
   });
   it('two missing: each must beat half of what is left', () => {
-    const v = value([line('a', FLORAL, '710', 1, POLO_TRIGGER)], [EMOTIVE]);
+    const v = value([line('a', FLORAL, '710', 1, POLO_TRIGGER)], [EMOTIVE], undefined, POLO_OFFER, 0);
     // £59.99 - £24 = £35.99 over two: each above £17.99.
     expect(v).toMatchObject({ worthwhile: true, canSuggest: true, floorPence: 1799 });
+  });
+  it('with the 5% minimum, the missing unit must take the set to £63.15 - 5% over £59.99 - not just past it', () => {
+    // £48 held: the third polo must cost £15.15 or more, so over £15.14.
+    expect(value([line('a', FLORAL, '710', 2, POLO_TRIGGER)], [EMOTIVE])).toMatchObject({ worthwhile: true, canSuggest: true, floorPence: 1514 });
+  });
+  it('three polos at £60.00 against £59.99 - a 1p saving - is not a deal', () => {
+    expect(savesEnough(6000, 5999)).toBe(false);
+    expect(savesEnough(6315, 5999)).toBe(true);
+    expect(savesEnough(6314, 5999)).toBe(false);
+    expect(savesEnough(6000, 5999, 0)).toBe(true);
   });
   it('another currency: cannot tell, so no gate and no suggestion', () => {
     expect(value([line('a', FLORAL, '710', 2, POLO_TRIGGER)], [EMOTIVE], 'EUR')).toMatchObject({ worthwhile: null, canSuggest: false });
@@ -346,5 +356,51 @@ describe('the saving SupaEasy actually applied, read from the cart', () => {
     await sync([withDiscounts(line('b', FLORAL_SAGE, '720', 3, POLO_TRIGGER), [])]); // £30 against £59.99: nothing to save
     await sync([line('c', EMOTIVE, '730', 3, POLO_TRIGGER)]); // an older widget: no discounts field at all
     expect(missedDealsState().count).toBe(0);
+  });
+});
+
+describe('lines already in the basket without their deal key', () => {
+  const sync = async (lines: Line[], preview = true) =>
+    (await (await fetch(`${base}/api/session/${id}/basket`, { method: 'POST', headers: await headers(preview), body: JSON.stringify({ cartToken: 'c', currency: 'GBP', lines }) })).json()) as { repairs?: Array<{ lineKey: string; variantId: string; quantity: number; properties: Record<string, string> }> };
+
+  it("are handed back to be given the key every other add path writes", async () => {
+    const body = await sync([line('k1', FLORAL, '710', 2), line('k2', CLIMA, '750', 1)]);
+    expect(body.repairs).toEqual([
+      { lineKey: 'k1', variantId: 'gid://shopify/ProductVariant/710', quantity: 2, properties: POLO_TRIGGER },
+      { lineKey: 'k2', variantId: 'gid://shopify/ProductVariant/750', quantity: 1, properties: TROUSER_TRIGGER },
+    ]);
+  });
+  it('not a line that already carries properties - a key, a pack piece, an app\'s line', async () => {
+    const body = await sync([line('k1', FLORAL, '710', 1, POLO_TRIGGER), line('k2', FLORAL, '711', 1, { __bundle_id: 'b1' }), line('k3', CLIMA, '750', 1, { _data_bundle_id: 'p1' })]);
+    expect(body.repairs).toBeUndefined();
+  });
+  it('not a line in a pack or on a selling plan, even without properties', async () => {
+    const body = await sync([{ ...line('k1', FLORAL, '710', 1), bundle: 'b1' }, { ...line('k2', CLIMA, '750', 1), sellingPlanId: '9' }]);
+    expect(body.repairs).toBeUndefined();
+  });
+  it('not a product no deal takes, nor one two deals would claim', async () => {
+    setSmartCartCollectionsForTests({ 'men-golf-trousers': [FLORAL.id] });
+    const body = await sync([line('k1', JACKET, '780', 1), line('k2', FLORAL, '710', 1)]);
+    expect(body.repairs).toBeUndefined();
+  });
+  it('never on the live theme - no preview header, no repairs', async () => {
+    const body = await sync([line('k1', FLORAL, '710', 1)], false);
+    expect(body.repairs).toBeUndefined();
+  });
+});
+
+describe('the saving SupaEasy applied, as a percentage', () => {
+  const lines = (saved: number, before: number) => [{ key: 'k', variantId: '710', quantity: 3, properties: POLO_TRIGGER, originalLinePrice: before, discounts: [{ title: 'ANY 3 POLO BUNDLE', amount: saved }] }];
+  const polo = (saved: number, before: number) => smartCartView(evaluateSmartCart(lines(saved, before)), { currency: 'GBP' })!.offers.find((o) => o.offerId === 'any-3-polos')!;
+
+  it('is read from the cart: £12.01 off £72.00 is 16%, rounded down', () => {
+    expect(polo(1201, 7200)).toMatchObject({ saving: { amount: 12.01, currency: 'GBP' }, savingPercent: 16, worthwhile: true });
+  });
+  it('a 1p saving is not a deal: worthwhile is false, so nothing is shown', () => {
+    expect(polo(1, 6000)).toMatchObject({ savingPercent: 0, worthwhile: false });
+  });
+  it('without the price before discounts, no percentage - and the estimate stands', () => {
+    const view = smartCartView(evaluateSmartCart([{ key: 'k', variantId: '710', quantity: 3, properties: POLO_TRIGGER, discounts: [{ title: 'ANY 3 POLO BUNDLE', amount: 1201 }] }]), { currency: 'GBP' })!;
+    expect(view.offers.find((o) => o.offerId === 'any-3-polos')).not.toHaveProperty('savingPercent');
   });
 });
