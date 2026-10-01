@@ -41,6 +41,11 @@ export function evaluateSmartCart(lines: readonly SmartCartLine[], offers: reado
     offers: offers.map((offer): SmartCartOfferState => {
       const matched = lines.filter((line) => hasTrigger(line, offer.triggerKey, offer.matchValue) && unitsOf(line) > 0);
       const qualifyingUnits = matched.reduce((sum, line) => sum + unitsOf(line), 0);
+      // The saving SupaEasy applied, as the cart reports it under this deal's title - read, never worked out.
+      const reported = lines.some((line) => Array.isArray(line.discounts));
+      const appliedMinor = reported
+        ? matched.reduce((sum, line) => sum + (line.discounts ?? []).filter((d) => d.title === offer.discountTitle).reduce((s, d) => s + (Number.isFinite(d.amount) && d.amount > 0 ? d.amount : 0), 0), 0)
+        : null;
       return {
         offerId: offer.id,
         triggerKey: offer.triggerKey,
@@ -50,6 +55,7 @@ export function evaluateSmartCart(lines: readonly SmartCartLine[], offers: reado
         remainingUnits: Math.max(offer.threshold - qualifyingUnits, 0),
         matchedLineKeys: matched.map((line) => line.key),
         matchedVariantIds: [...new Set(matched.map((line) => line.variantId).filter((id): id is string => !!id))],
+        appliedMinor,
       };
     }),
     evaluatedAt: now,

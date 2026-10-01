@@ -1,4 +1,4 @@
-import type { Product } from './product.js';
+import type { Money, Product } from './product.js';
 
 /**
  * Smart Cart progress as the widget receives it: worked out by the server
@@ -26,6 +26,12 @@ export interface SmartCartOfferView {
   worthwhile: boolean | null;
   /** A qualifying product that would make the offer worthwhile can be suggested (POST .../smart-cart/suggest). */
   canSuggest: boolean;
+  /**
+   * What SupaEasy actually took off this deal's lines, read from the cart's
+   * own discount allocations under the deal's title. Absent when nothing was
+   * applied, or the widget did not report discounts. Never calculated.
+   */
+  saving?: Money;
   /** Display-only wording. Never parsed, never used in arithmetic. */
   display?: {
     /** "3 for £59.99" - empty outside a GBP bag: other markets pay their own deal price. */

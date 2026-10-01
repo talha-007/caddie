@@ -1,4 +1,5 @@
 import type { SmartCartView } from '@caddie/shared';
+import { fromMinorUnits } from '../shopify/money.js';
 import { SMART_CART_OFFERS } from './config.js';
 import { qualifyingProducts } from './eligibility.js';
 import type { SmartCartOfferConfig, SmartCartState } from './types.js';
@@ -43,6 +44,8 @@ export function smartCartView(
         remainingUnits: offer.remainingUnits,
         worthwhile: value.worthwhile,
         canSuggest: value.canSuggest,
+        // What SupaEasy took off, as the cart reports it - only when it took something.
+        ...(offer.appliedMinor && basket.currency ? { saving: fromMinorUnits(offer.appliedMinor, basket.currency) } : {}),
         ...(config?.display ? { display: displayFor(config, basket.currency) } : {}),
       };
     }),

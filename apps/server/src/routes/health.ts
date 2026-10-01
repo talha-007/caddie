@@ -4,7 +4,7 @@ import { bestSellersState } from '../catalog/bestSellers.js';
 import { semanticState } from '../catalog/semantic.js';
 import { redisState } from '../lib/redis.js';
 import { dealsState } from '../catalog/bundles.js';
-import { smartCartCollectionsState } from '../smartCart/index.js';
+import { missedDealsState, smartCartCollectionsState } from '../smartCart/index.js';
 import { speechEnabled } from '../ai/speak.js';
 import { modelLoad } from '../ai/openai.js';
 import { storefrontCartEnabled } from '../shopify/storefrontCart.js';
@@ -42,7 +42,7 @@ healthRouter.get('/', (_req, res) => {
     // The store's bundle deals, read from the live theme.
     deals: dealsState(),
     // Which collections the Smart Cart trousers and shorts offers stamp by; empty until loaded.
-    smartCart: smartCartCollectionsState(),
+    smartCart: { ...smartCartCollectionsState(), missedDeals: missedDealsState() },
     bestSellers: bestSellersState(),
     semantic: semanticState(),
     /*

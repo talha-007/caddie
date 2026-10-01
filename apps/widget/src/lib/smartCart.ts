@@ -1,4 +1,5 @@
 import type { SmartCartOfferView, SmartCartView } from '@caddie/shared';
+import { formatMoney } from './format.js';
 
 /**
  * Smart Cart preview wording, from the progress the server worked out. The
@@ -54,22 +55,27 @@ function wording(offer: SmartCartOfferView) {
 export function smartCartLines(view: SmartCartView | null | undefined): SmartCartLine[] {
   if (!view) return [];
   return view.offers
-    .filter((offer) => offer.status !== 'INACTIVE' && offer.qualifyingUnits > 0 && offer.worthwhile !== false)
+    // A saving the cart shows is always worth showing, whatever the price check thought.
+    .filter((offer) => offer.status !== 'INACTIVE' && offer.qualifyingUnits > 0 && (offer.worthwhile !== false || !!offer.saving))
     .map((offer) => {
       const words = wording(offer);
       const left = offer.remainingUnits;
       const qualified = offer.status === 'QUALIFIED';
       const close = offer.status === 'ONE_AWAY';
-      const message = qualified
-        ? `Your ${words.many} qualify for ${words.deal || 'this deal'}`
-        : `Choose any ${left} more ${left === 1 ? words.one : words.many} to complete the deal`;
+      // Applied: the saving the cart shows SupaEasy took off, never one worked out here.
+      const applied = qualified && offer.saving && offer.saving.amount > 0 ? offer.saving : null;
+      const message = applied
+        ? `Deal applied · you save ${formatMoney(applied)}`
+        : qualified
+          ? `Your ${words.many} qualify for ${words.deal || 'this deal'}`
+          : `Choose any ${left} more ${left === 1 ? words.one : words.many} to complete the deal`;
       return {
         offerId: offer.offerId,
         status: offer.status,
         title: words.title,
         deal: words.deal,
         message,
-        ...(qualified ? { note: QUALIFIED_NOTE } : {}),
+        ...(qualified && !applied ? { note: QUALIFIED_NOTE } : {}),
         filled: Math.min(offer.qualifyingUnits, offer.requiredUnits),
         total: offer.requiredUnits,
         close,

@@ -135,6 +135,13 @@ export interface BasketSync {
     bundle?: string;
     /** Which deal, by page handle, e.g. "golf-ambassador-pack". */
     bundleName?: string;
+    /**
+     * The discounts Shopify applied to this line, as /cart.js reports them
+     * (line_level_discount_allocations): the discount's title - SupaEasy's
+     * "ANY 3 POLO BUNDLE" - and the amount in the cart's minor units. Read,
+     * never worked out. Absent from an older widget; [] when none applied.
+     */
+    discounts?: Array<{ title: string; amount: number }>;
   }>;
 }
 

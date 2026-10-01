@@ -4,3 +4,4 @@ export { evaluateSmartCart, hasTrigger, progressStatus } from './evaluate.js';
 export type { SmartCartLine, SmartCartOfferConfig, SmartCartOfferId, SmartCartOfferState, SmartCartProgressStatus, SmartCartState } from './types.js';
 export { cheapestAvailablePence, offerValue, unitPence, type OfferValue, type PricedLine } from './value.js';
 export { smartCartView } from './view.js';
+export { missedDealsState, noteMissedDeals, resetMissedDealsForTests } from './missed.js';

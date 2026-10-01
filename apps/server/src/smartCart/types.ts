@@ -36,6 +36,12 @@ export interface SmartCartOfferConfig {
    */
   matchValue?: string;
   /**
+   * The title SupaEasy gives this deal's discount in the cart ("ANY 3 POLO
+   * BUNDLE") - how the saving actually applied is read back from the cart's
+   * own discount allocations, never worked out.
+   */
+  discountTitle: string;
+  /**
    * Which products the Caddie stamps: the same rule the theme's add path
    * uses - a product tag (polos), or membership of the collections the
    * copied theme's deal pages pick from (trousers, shorts). `exceptCollections`
@@ -66,6 +72,12 @@ export interface SmartCartOfferState {
   matchedLineKeys: string[];
   /** Their numeric variant ids, deduplicated, when the line reported one. */
   matchedVariantIds: string[];
+  /**
+   * What the cart shows SupaEasy took off these lines under this deal's
+   * title, in the cart's minor units. Null when the read carried no discount
+   * data at all (an older widget) - not the same as nothing applied (0).
+   */
+  appliedMinor: number | null;
 }
 
 export interface SmartCartState {
@@ -80,4 +92,6 @@ export interface SmartCartLine {
   variantId?: string;
   quantity: number;
   properties?: Record<string, unknown> | null;
+  /** Discounts Shopify applied to the line: title and amount in minor units (BasketSync). */
+  discounts?: ReadonlyArray<{ title: string; amount: number }>;
 }

@@ -307,3 +307,44 @@ describe('ladies and kids "any N" deals: the keys the copied theme\'s deal pages
     expect(triggerPropertiesFor(LADIES_TROUSER.id)).toEqual({ '__ladies-any-2-trousers': 'ladies-any-2-trousers' });
   });
 });
+
+const { resetMissedDealsForTests, missedDealsState } = await import('../src/smartCart/index.js');
+
+describe('the saving SupaEasy actually applied, read from the cart', () => {
+  beforeEach(() => resetMissedDealsForTests());
+  type Discounted = Line & { discounts?: Array<{ title: string; amount: number }> };
+  const withDiscounts = (entry: Line, discounts: Array<{ title: string; amount: number }>): Discounted => ({ ...entry, discounts });
+  const sync = async (lines: Discounted[], currency = 'GBP') =>
+    (await (await fetch(`${base}/api/session/${id}/basket`, { method: 'POST', headers: await headers(true), body: JSON.stringify({ cartToken: 'c', currency, lines }) })).json()) as { smartCart: { offers: Array<{ offerId: string; status: string; saving?: { amount: number; currency: string } }> } };
+
+  it('three £24 polos, £12.01 off under "ANY 3 POLO BUNDLE": the saving is read back, not worked out', async () => {
+    const body = await sync([withDiscounts(line('a', FLORAL, '710', 3, POLO_TRIGGER), [{ title: 'ANY 3 POLO BUNDLE', amount: 1201 }])]);
+    expect(body.smartCart.offers[0]).toMatchObject({ offerId: 'any-3-polos', status: 'QUALIFIED', saving: { amount: 12.01, currency: 'GBP' } });
+  });
+  it('spread over several lines, it is added up across the deal\'s own lines', async () => {
+    const body = await sync([
+      withDiscounts(line('a', FLORAL, '710', 2, POLO_TRIGGER), [{ title: 'ANY 3 POLO BUNDLE', amount: 800 }]),
+      withDiscounts(line('b', EMOTIVE, '730', 1, POLO_TRIGGER), [{ title: 'ANY 3 POLO BUNDLE', amount: 401 }]),
+    ]);
+    expect(body.smartCart.offers[0]?.saving).toEqual({ amount: 12.01, currency: 'GBP' });
+  });
+  it('a discount under another title, or on a line without the deal\'s key, is not this deal\'s saving', async () => {
+    const body = await sync([
+      withDiscounts(line('a', FLORAL, '710', 3, POLO_TRIGGER), [{ title: 'WELCOME10', amount: 500 }]),
+      withDiscounts(line('b', JACKET, '780', 1), [{ title: 'ANY 3 POLO BUNDLE', amount: 999 }]),
+    ]);
+    expect(body.smartCart.offers[0]?.saving).toBeUndefined();
+  });
+  it('a qualifying basket that should save, where the cart shows nothing taken off, is a missed deal - counted once', async () => {
+    const qualified = [withDiscounts(line('a', FLORAL, '710', 3, POLO_TRIGGER), [])];
+    await sync(qualified);
+    await sync(qualified);
+    expect(missedDealsState()).toMatchObject({ count: 1, recent: [expect.objectContaining({ offerId: 'any-3-polos', units: 3 })] });
+  });
+  it('not a missed deal: when the discount applied, when it would save nothing, or when the widget did not report discounts', async () => {
+    await sync([withDiscounts(line('a', FLORAL, '710', 3, POLO_TRIGGER), [{ title: 'ANY 3 POLO BUNDLE', amount: 1201 }])]);
+    await sync([withDiscounts(line('b', FLORAL_SAGE, '720', 3, POLO_TRIGGER), [])]); // £30 against £59.99: nothing to save
+    await sync([line('c', EMOTIVE, '730', 3, POLO_TRIGGER)]); // an older widget: no discounts field at all
+    expect(missedDealsState().count).toBe(0);
+  });
+});

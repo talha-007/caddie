@@ -77,7 +77,15 @@ export function basketPatch(lines: BasketSync['lines'], currency?: string): Pick
   return {
     basket: basketFromSync(kept),
     ...(typeof currency === 'string' && /^[A-Za-z]{3}$/.test(currency) ? { cartCurrency: currency.toUpperCase() } : {}),
-    smartCart: evaluateSmartCart(kept.map((line) => ({ key: String(line.key), ...(line.variantId ? { variantId: numeric(String(line.variantId)) } : {}), quantity: Number(line.quantity) || 0, properties: line.properties ?? null }))),
+    smartCart: evaluateSmartCart(
+      kept.map((line) => ({
+        key: String(line.key),
+        ...(line.variantId ? { variantId: numeric(String(line.variantId)) } : {}),
+        quantity: Number(line.quantity) || 0,
+        properties: line.properties ?? null,
+        ...(Array.isArray(line.discounts) ? { discounts: line.discounts.slice(0, 20).map((d) => ({ title: String(d?.title ?? '').slice(0, 200), amount: Math.max(0, Math.round(Number(d?.amount) || 0)) })) } : {}),
+      })),
+    ),
   };
 }
 

@@ -71,3 +71,18 @@ describe('the preview header', () => {
     expect(basket.headers[SMART_CART_HEADER]).toBe(SMART_CART_PREVIEW);
   });
 });
+
+describe('the discounts the cart applied', () => {
+  it('are passed on per line, by title and amount in minor units', () => {
+    const raw = {
+      token: 't', item_count: 3, total_price: 5999, currency: 'GBP',
+      items: [{ key: 'k1', product_id: 71, variant_id: 710, product_title: 'POLO', variant_title: 'M', image: null, quantity: 3, final_price: 2000, final_line_price: 5999, properties: { __3_Polo_Bundle: '3_Polo_Bundle' }, line_level_discount_allocations: [{ amount: 1201, discount_application: { title: 'ANY 3 POLO BUNDLE' } }] }],
+    };
+    expect(basketSync(raw as never).lines[0]?.discounts).toEqual([{ title: 'ANY 3 POLO BUNDLE', amount: 1201 }]);
+  });
+  it('are an empty list when nothing applied - so "no discount" is told apart from "not reported"', async () => {
+    await runOperation({ type: 'add', operationId: 'op-3', lines: [{ variantId: '710', quantity: 1 }], expect: { add: [{ variantId: '710', quantity: 1 }] } });
+    await readCart();
+    expect(basketSync().lines[0]?.discounts).toEqual([]);
+  });
+});

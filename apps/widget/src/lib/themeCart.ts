@@ -64,6 +64,8 @@ interface AjaxCart {
     final_price: number;
     final_line_price: number;
     properties: Record<string, unknown> | null;
+    /** The discounts applied to the line - SupaEasy's deals among them - in minor units. */
+    line_level_discount_allocations?: Array<{ amount?: number; discount_application?: { title?: string } }>;
     selling_plan_allocation?: { selling_plan?: { id?: number | string } } | null;
   }>;
 }
@@ -169,6 +171,8 @@ export function basketSync(raw: AjaxCart | null = lastRaw): BasketSync {
       ...(item.selling_plan_allocation?.selling_plan?.id !== undefined ? { sellingPlanId: String(item.selling_plan_allocation.selling_plan.id) } : {}),
       ...(bundleOf(item) ? { bundle: bundleOf(item) } : {}),
       ...(typeof item.properties?.['__Bundle_Name'] === 'string' ? { bundleName: String(item.properties['__Bundle_Name']) } : {}),
+      // What Shopify took off this line, by discount title - always sent, [] when nothing, so "no discount" is told apart from "not reported".
+      discounts: (item.line_level_discount_allocations ?? []).map((allocation) => ({ title: String(allocation.discount_application?.title ?? ''), amount: Math.max(0, Math.round(Number(allocation.amount) || 0)) })),
     })),
   };
 }

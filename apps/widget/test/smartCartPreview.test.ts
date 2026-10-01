@@ -245,6 +245,31 @@ describe('the basket screen still works', () => {
   });
 });
 
+describe('the saving, once SupaEasy has applied it', () => {
+  it('shows what the cart says was taken off - "Deal applied · you save £12.01" - and no "worked out at checkout" note', () => {
+    const state = view({ 'any-3-polos': 3 });
+    state.offers[0]!.saving = { amount: 12.01, currency: 'GBP' };
+    const html = render(state);
+    expect(text(html)).toContain('Deal applied · you save £12.01');
+    expect(text(html)).not.toContain(QUALIFIED_NOTE);
+  });
+  it('without a saving in the cart, a qualified bag never names a figure', () => {
+    const html = render(view({ 'any-3-polos': 3 }));
+    expect(text(html)).not.toMatch(/save|£\d+\.\d\d off/i);
+  });
+  it('a saving the cart shows is shown even if the price check thought it would save nothing', () => {
+    const state = view({ 'any-3-polos': 3 }, { 'any-3-polos': { worthwhile: false } });
+    state.offers[0]!.saving = { amount: 0.01, currency: 'GBP' };
+    expect(text(render(state))).toContain('Deal applied · you save £0.01');
+  });
+  it("in the cart's own currency", () => {
+    const state = view({ 'any-3-polos': 3 });
+    state.offers[0]!.display!.deal = '';
+    state.offers[0]!.saving = { amount: 9.5, currency: 'EUR' };
+    expect(text(render(state))).toContain('you save €9.50');
+  });
+});
+
 describe('outside the UK', () => {
   it('no UK price in the heading or the message - the deal is named without it', () => {
     const state = view({ 'any-3-polos': 2 });

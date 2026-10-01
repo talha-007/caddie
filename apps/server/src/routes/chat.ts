@@ -61,6 +61,7 @@ const basketLineSchema = z.object({
   bundleName: z.string().max(100).optional(),
   properties: z.record(z.string().max(200)).optional(),
   sellingPlanId: z.string().max(100).optional(),
+  discounts: z.array(z.object({ title: z.string().max(200), amount: z.number().int().min(0) })).max(20).optional(),
 });
 const basketSchema = z.object({ cartToken: z.string().max(120).optional(), currency: z.string().max(8).optional(), lines: z.array(basketLineSchema).max(100) });
 

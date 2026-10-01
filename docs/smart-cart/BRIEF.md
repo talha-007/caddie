@@ -70,6 +70,8 @@ Yes. The same trousers can be "any 2 trousers" **and** the trousers step of an A
 - **Progress, counted exactly as SupaEasy counts.** The server counts units carrying each deal's key (`apps/server/src/smartCart/`). No product names, no guessing, no AI.
 - **Keys on the Caddie's own adds.** When the Caddie adds a qualifying product, it writes the same key the theme writes. SupaEasy then prices it normally.
 - **Honest nudges.** The card appears only if the deal would actually lower the price at today's sale prices. Two £20 joggers against "2 for £49" save nothing, so no nudge is shown.
+- **The real saving, in the Caddie too.** The widget passes on each basket line's discount allocations from `/cart.js`, and the server adds up what SupaEasy took off under the deal's own title (e.g. "ANY 3 POLO BUNDLE"). The Caddie card then says "Deal applied · you save £12.01". It is read from Shopify, never calculated.
+- **Missed deals are reported.** A basket that qualifies, where the deal should lower the price, but where the cart shows nothing taken off, is logged (`smart_cart.missed_deal`) and counted under `smartCart.missedDeals` in `/health`. The team hears about a switched-off discount, a renamed title or a missing market price without waiting for a complaint.
 - **"Show me polos / trousers / shorts".** This suggests in-stock qualifying products, not already in the basket, that would make the deal worth it.
 - **Wording.** "Any 3 Polos · 3 for £59.99 · Choose any 2 more polos to complete the deal". It never says "save £x", "unlocked" or "your price" before SupaEasy has actually applied a discount.
 - **Switched on only where the theme asks.** The copied theme's Caddie tag carries `data-smart-cart-preview="true"`; the live theme doesn't, so it's unchanged.

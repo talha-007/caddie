@@ -14,7 +14,7 @@ import { LIMITS } from '../lib/rateLimit.js';
 import { limitRoute } from '../lib/routeLimit.js';
 import { productById } from '../catalog/sync.js';
 import { sessions, type CaddieSession } from '../session/store.js';
-import { SMART_CART_OFFERS, cheapestAvailablePence, offerValue, qualifyingProducts, smartCartView } from '../smartCart/index.js';
+import { SMART_CART_OFFERS, cheapestAvailablePence, noteMissedDeals, offerValue, qualifyingProducts, smartCartView } from '../smartCart/index.js';
 import { customerTurn, describeFocus, focusFromCard } from '../session/focus.js';
 import { claimSession, requireSessionOwner } from '../session/ownership.js';
 import { runTool } from '../tools/index.js';
@@ -228,7 +228,10 @@ sessionRouter.post('/:id/basket', owner, writeLimit, async (req, res, next) => {
     const fresh = basketPatch(lines, typeof body?.currency === 'string' ? body.currency : undefined);
     await sessions.patch(req.params.id, { cartMode: 'theme', ...fresh, ...(token ? { cartToken: token } : {}) });
     // Smart Cart progress from this very read, for the widget's preview: the server stays its only author.
-    const reply: BasketSyncResponse = { ok: true, lines: lines.length, smartCart: smartCartView(fresh.smartCart, { lines: fresh.basket ?? [], ...(fresh.cartCurrency ? { currency: fresh.cartCurrency } : {}) }) };
+    const view = smartCartView(fresh.smartCart, { lines: fresh.basket ?? [], ...(fresh.cartCurrency ? { currency: fresh.cartCurrency } : {}) });
+    // A basket that qualifies and should save, where the cart shows no discount: a deal missed (smartCart/missed.ts).
+    noteMissedDeals(req.params.id, view, lines.some((line) => Array.isArray((line as { discounts?: unknown }).discounts)));
+    const reply: BasketSyncResponse = { ok: true, lines: lines.length, smartCart: view };
     res.json(reply);
   } catch (err) {
     next(err);
@@ -360,6 +363,7 @@ const syncLineSchema = z.object({
   bundleName: z.string().max(100).optional(),
   properties: z.record(z.string().max(200)).optional(),
   sellingPlanId: z.string().max(100).optional(),
+  discounts: z.array(z.object({ title: z.string().max(200), amount: z.number().int().min(0) })).max(20).optional(),
 });
 const syncSchema = z.object({ cartToken: z.string().max(120).optional(), currency: z.string().max(8).optional(), lines: z.array(syncLineSchema).max(100) });
 const outcomeSchema = z.object({

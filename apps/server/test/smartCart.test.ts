@@ -240,7 +240,7 @@ describe('several offers in one basket', () => {
 
 describe('replaceable config', () => {
   it('takes any offer list - a live SupaEasy reader can stand in for the static one', () => {
-    const state = evaluateSmartCart([line(4, { __x: 'y' })], [{ id: 'any-3-polos', name: 'Test', triggerKey: '__x', triggerValue: 'x', threshold: 5, qualifies: { tag: 'x' }, gatePrice: { amount: 1, currency: 'GBP' } }]);
+    const state = evaluateSmartCart([line(4, { __x: 'y' })], [{ id: 'any-3-polos', name: 'Test', triggerKey: '__x', triggerValue: 'x', discountTitle: 'X', threshold: 5, qualifies: { tag: 'x' }, gatePrice: { amount: 1, currency: 'GBP' } }]);
     expect(state.offers).toEqual([expect.objectContaining({ triggerKey: '__x', status: 'ONE_AWAY', qualifyingUnits: 4, requiredUnits: 5, remainingUnits: 1 })]);
   });
   it('display wording is metadata only: changing it changes no number', () => {
@@ -298,5 +298,24 @@ describe('ladies and kids "any N" deals', () => {
     expect(hasTrigger(line(1, { '__any-2-shorts': '' }), '__any-2-shorts', 'ladies')).toBe(false);
     expect(hasTrigger(line(1, { '__any-2-shorts': 'ladies' }), '__any-2-shorts', 'ladies')).toBe(true);
     expect(hasTrigger(line(1, { '__any-2-shorts': 'ladies' }), '__any-2-shorts', 'kids')).toBe(false);
+  });
+});
+
+describe('the applied saving, as the evaluator reads it', () => {
+  it('sums the deal title\'s allocations on its own lines, in minor units; null when the read had no discount data', () => {
+    const reported = evaluateSmartCart([{ key: 'a', quantity: 3, properties: { [POLO]: 'x' }, discounts: [{ title: 'ANY 3 POLO BUNDLE', amount: 1201 }, { title: 'OTHER', amount: 300 }] }]);
+    expect(reported.offers[0]?.appliedMinor).toBe(1201);
+    const none = evaluateSmartCart([{ key: 'a', quantity: 3, properties: { [POLO]: 'x' }, discounts: [] }]);
+    expect(none.offers[0]?.appliedMinor).toBe(0);
+    const older = evaluateSmartCart([{ key: 'a', quantity: 3, properties: { [POLO]: 'x' } }]);
+    expect(older.offers[0]?.appliedMinor).toBeNull();
+  });
+  it('ladies and kids shorts each read their own title', () => {
+    const state = evaluateSmartCart([
+      { key: 'l', quantity: 2, properties: { '__any-2-shorts': 'ladies' }, discounts: [{ title: 'LADIES ANY 2 SHORTS', amount: 700 }] },
+      { key: 'k', quantity: 2, properties: { '__any-2-shorts': 'kids' }, discounts: [{ title: 'KIDS ANY 2 SHORTS', amount: 300 }] },
+    ]);
+    expect(state.offers.find((o) => o.offerId === 'any-2-shorts-ladies')?.appliedMinor).toBe(700);
+    expect(state.offers.find((o) => o.offerId === 'any-2-shorts-kids')?.appliedMinor).toBe(300);
   });
 });
